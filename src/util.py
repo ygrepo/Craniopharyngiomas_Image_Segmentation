@@ -41,6 +41,8 @@ import torch
 # from livelossplot import PlotLosses
 # from livelossplot.outputs import MatplotlibPlot, ExtremaPrinter
 
+import splitfolders
+
 
 import logging
 
@@ -270,6 +272,7 @@ def zscore_in_mask(
 # ---------- main preprocess with optional N4 ----------
 def preprocess(
     data_path: Path = Path("data/BraTS2023-Glioma"),
+    output_path: Path = Path("BraTS2023_Preprocessed"),
     *,
     do_n4: bool = False,  # toggle this ON to enable N4
     n4_shrink: int = 2,
@@ -291,8 +294,8 @@ def preprocess(
     logger.info(f"flair list: {len(flair_list)}")
     logger.info(f"Mask list: {len(mask_list)}")
 
-    out_img_dir = Path("BraTS2023_Preprocessed/input_data_3channels/images")
-    out_msk_dir = Path("BraTS2023_Preprocessed/input_data_3channels/masks")
+    out_img_dir = output_path / Path("input_data_3channels/images")
+    out_msk_dir = output_path / Path("input_data_3channels/masks")
     out_img_dir.mkdir(parents=True, exist_ok=True)
     out_msk_dir.mkdir(parents=True, exist_ok=True)
 
@@ -358,8 +361,79 @@ def preprocess(
         np.save(out_msk_dir / f"mask_{idx}.npy", seg)  # (128,128,128)  uint8 {0..3}
 
 
+def split_preprocessed_data(
+    input_folder: Path = Path("data/BraTS2023_Preprocessed/input_data_3channels/"),
+    output_folder: Path = Path("data/BraTS2023_Preprocessed/input_data_128/"),
+    seed: int = 42,
+    split_ratio: tuple = (0.75, 0.25),
+    strict_check: bool = True,
+):
+    """
+    Split BraTS preprocessed data into train/val(/test) while ensuring that
+    'images/' and 'masks/' subfolders are aligned (image_x ↔ mask_x).
+
+    Parameters
+    ----------
+    input_folder : Path
+        Path to the preprocessed input data folder (must contain 'images/' and 'masks/').
+    output_folder : Path
+        Path where the split dataset will be saved.
+    seed : int
+        Random seed for reproducibility.
+    split_ratio : tuple
+        Ratio for splitting (train, val) or (train, val, test).
+        Examples:
+            (0.75, 0.25)   → train 75%, val 25%
+            (0.7, 0.2, 0.1) → train 70%, val 20%, test 10%
+    strict_check : bool
+        If True, raise an error when image/mask filenames don't match.
+        If False, just warn and continue.
+    """
+
+    img_dir = input_folder / "images"
+    msk_dir = input_folder / "masks"
+
+    if not img_dir.exists() or not msk_dir.exists():
+        raise FileNotFoundError(
+            f"Expected 'images/' and 'masks/' subfolders in {input_folder}"
+        )
+
+    # --- 1. Collect filenames (without extensions) ---
+    img_files = {f.stem.replace("image_", "") for f in img_dir.glob("*.npy")}
+    msk_files = {f.stem.replace("mask_", "") for f in msk_dir.glob("*.npy")}
+
+    # --- 2. Check alignment ---
+    only_imgs = img_files - msk_files
+    only_msks = msk_files - img_files
+
+    if only_imgs or only_msks:
+        msg = f"Mismatched pairs found!\nOnly images: {sorted(only_imgs)}\nOnly masks: {sorted(only_msks)}"
+        if strict_check:
+            raise ValueError(msg)
+        else:
+            logger.warning(msg)
+
+    else:
+        logger.info(f"All {len(img_files)} image/mask pairs are aligned.")
+
+    # --- 3. Run split ---
+    splitfolders.ratio(
+        input_folder,
+        output=output_folder,
+        seed=seed,
+        ratio=split_ratio,
+        group_prefix=None,  # keeps pairs together
+        move=False,  # copy instead of move
+    )
+    logger.info(f"✅ Dataset split saved in: {output_folder}")
+
+
+# Example usage:
+# split_preprocessed_data()
+
+
 if __name__ == "__main__":
     seed_everything(42)
     # show_one_case()
-    preprocess()
-    # investigate_data()
+    # preprocess()
+    split_preprocessed_data()
