@@ -1,0 +1,7 @@
+matplotlib==3.10.6
+nibabel==5.3.2
+numpy==2.3.3
+scikit_learn==1.7.2
+simpleitk==2.5.2
+torch==2.2.2
+tqdm==4.67.1
