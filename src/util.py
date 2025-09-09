@@ -1,6 +1,7 @@
 import os
 
 import random
+import SimpleITK as sitk
 
 # import splitfolders
 from tqdm import tqdm
@@ -42,8 +43,6 @@ import torch
 # from livelossplot.outputs import MatplotlibPlot, ExtremaPrinter
 
 import splitfolders
-
-
 import logging
 
 logging.basicConfig(
@@ -73,9 +72,6 @@ class TrainingConfig:
     LEARNING_RATE: float = 1e-3
     CHECKPOINT_DIR: str = os.path.join("model_checkpoint", "3D_UNet_Brats2023")
     NUM_WORKERS: int = 4
-
-
-from matplotlib.colors import ListedColormap
 
 
 def show_one_case(
@@ -180,19 +176,6 @@ def show_one_case(
     plt.show()
 
 
-import numpy as np
-import nibabel as nib
-from pathlib import Path
-from tqdm import tqdm
-import torch
-import torch.nn.functional as F
-import glob
-import os
-import logging
-
-logger = logging.getLogger(__name__)
-
-
 # ---------- N4 BIAS FIELD CORRECTION (optional) ----------
 def n4_bias_correct_np(
     x: np.ndarray,
@@ -204,7 +187,6 @@ def n4_bias_correct_np(
     Run N4 bias correction on a 3D NumPy array (float32).
     If brain_mask is None, uses Otsu to estimate one.
     """
-    import SimpleITK as sitk
 
     img = sitk.GetImageFromArray(x.astype(np.float32))  # zyx orientation inside SITK
     if brain_mask is None:
