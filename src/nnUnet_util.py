@@ -16,10 +16,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ---------- Optional N4 bias field correction ----------
+# ---------- Optional N4 ----------
 def n4_bias_correct_np(x: np.ndarray, shrink: int = 2, n_iters: int = 50) -> np.ndarray:
     img = sitk.GetImageFromArray(x.astype(np.float32))
-    mask = sitk.OtsuThreshold(img, 0, 1, 200)  # rough brain mask
+    mask = sitk.OtsuThreshold(img, 0, 1, 200)
     n4 = sitk.N4BiasFieldCorrectionImageFilter()
     n4.SetShrinkFactor(shrink)
     n4.SetMaximumNumberOfIterations([n_iters])
@@ -27,7 +27,7 @@ def n4_bias_correct_np(x: np.ndarray, shrink: int = 2, n_iters: int = 50) -> np.
     return sitk.GetArrayFromImage(out).astype(np.float32)
 
 
-# ---------- Labels: {0,1,2,4} -> {0,1,2,3} ----------
+# ---------- Remap BraTS {0,1,2,4} -> {0,1,2,3} ----------
 def remap_labels(arr: np.ndarray) -> np.ndarray:
     arr = arr.astype(np.uint8)
     if 4 in np.unique(arr):
@@ -52,12 +52,16 @@ def _case_and_modality(path: Path) -> tuple[str, str | None]:
     return (m.group(1), m.group(2))
 
 
-def _save_image_to(path_in: Path, out_path: Path, run_n4: bool):
+def _save_image_to(
+    path_in: Path, out_path: Path, run_n4: bool, n4_shrink: int, n4_iters: int
+):
     nii = nib.load(path_in)
     data = nii.get_fdata().astype(np.float32)
     if run_n4:
         data = n4_bias_correct_np(data, shrink=n4_shrink, n_iters=n4_iters)
-    nib.save(nib.Nifti1Image(data, nii.affine, nii.header), out_path)
+    out = nib.Nifti1Image(data, nii.affine, nii.header)
+    out.set_data_dtype(np.float32)
+    nib.save(out, out_path)
 
 
 def convert_braTS_to_nnUNet(
@@ -66,33 +70,21 @@ def convert_braTS_to_nnUNet(
     *,
     dataset_id: int = 501,
     dataset_name: str = "BraTS3M",
-    modalities: tuple[str, ...] = ("t2f", "t1c", "t2w"),  # add "t1n" for 4 channels
-    split_ratio: tuple = (
-        0.8,
-        0.2,
-    ),  # (train, test). nnU-Net will do its own validation.
+    modalities: tuple[str, ...] = ("t2f", "t1c", "t2w"),
+    split_ratio: tuple = (0.8, 0.2),  # (train, test)
     seed: int = 42,
     do_n4: bool = False,
     n4_shrink: int = 2,
     n4_iters: int = 50,
-    label_names: dict[int, str] | None = None,
     log_level: str = "INFO",
 ) -> Path:
     """
     Train/test-only converter for nnU-Net v2:
       - imagesTr/, labelsTr/ for training (nnU-Net will handle validation folds)
       - imagesTs/ for test (no labels)
-      - dataset.json ("training", "test" only)
-      - summary.txt with split details and case IDs
+      - dataset.json ("training", "test" only) + summary.txt
     """
     logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
-    if label_names is None:
-        label_names = {
-            0: "background",
-            1: "necrotic/non-enhancing",
-            2: "edema",
-            3: "enhancing",
-        }
 
     # allow 2- or 3-tuple; merge val into train if 3 given
     if len(split_ratio) not in (2, 3):
@@ -144,13 +136,14 @@ def convert_braTS_to_nnUNet(
             skipped_train.append((cid, sorted(have.keys())))
             continue
         for ch, m in enumerate(modalities):
-            _save_image_to(have[m], imgTr / f"{cid}_{ch:04d}.nii.gz", do_n4)
+            _save_image_to(
+                have[m], imgTr / f"{cid}_{ch:04d}.nii.gz", do_n4, n4_shrink, n4_iters
+            )
         seg_nii = nib.load(have["seg"])
         seg = remap_labels(seg_nii.get_fdata()).astype(np.uint8)
-        nib.save(
-            nib.Nifti1Image(seg, seg_nii.affine, seg_nii.header),
-            labTr / f"{cid}.nii.gz",
-        )
+        out_lbl = nib.Nifti1Image(seg, seg_nii.affine, seg_nii.header)
+        out_lbl.set_data_dtype(np.uint8)
+        nib.save(out_lbl, labTr / f"{cid}.nii.gz")
         kept_train.append(cid)
 
     # ---- write test cases (require all modalities; no labels) ----
@@ -161,11 +154,26 @@ def convert_braTS_to_nnUNet(
             skipped_test.append((cid, sorted(have.keys())))
             continue
         for ch, m in enumerate(modalities):
-            _save_image_to(have[m], imgTs / f"{cid}_{ch:04d}.nii.gz", do_n4)
+            _save_image_to(
+                have[m], imgTs / f"{cid}_{ch:04d}.nii.gz", do_n4, n4_shrink, n4_iters
+            )
         kept_test.append(cid)
 
-    # ---- dataset.json ----
+    # ---- dataset.json (v2-friendly) ----
+    kept_train_sorted = sorted(kept_train)
+    kept_test_sorted = sorted(kept_test)
+
+    modality_human = {"t2f": "FLAIR", "t1c": "T1CE", "t2w": "T2", "t1n": "T1"}
+    channel_names = {str(i): modality_human.get(m, m) for i, m in enumerate(modalities)}
     modality_map = {str(i): "MRI" for i, _ in enumerate(modalities)}
+
+    labels_name_to_int = {
+        "background": 0,
+        "necrotic/non-enhancing": 1,
+        "edema": 2,
+        "enhancing": 3,
+    }
+
     ds = {
         "name": dataset_name,
         "description": f"BraTS-like with {len(modalities)} modalities {list(modalities)}",
@@ -173,15 +181,17 @@ def convert_braTS_to_nnUNet(
         "licence": "Research",
         "release": "1.0",
         "tensorImageSize": "3D",
+        "file_ending": ".nii.gz",
+        "channel_names": channel_names,
         "modality": modality_map,
-        "labels": {str(k): v for k, v in label_names.items()},
-        "numTraining": len(kept_train),
-        "numTest": len(kept_test),
+        "labels": labels_name_to_int,
+        "numTraining": len(kept_train_sorted),
+        "numTest": len(kept_test_sorted),
         "training": [
             {"image": f"./imagesTr/{cid}.nii.gz", "label": f"./labelsTr/{cid}.nii.gz"}
-            for cid in kept_train
+            for cid in kept_train_sorted
         ],
-        "test": [f"./imagesTs/{cid}.nii.gz" for cid in kept_test],
+        "test": [f"./imagesTs/{cid}.nii.gz" for cid in kept_test_sorted],
     }
     (out_dir / "dataset.json").write_text(json.dumps(ds, indent=2) + "\n")
 
@@ -192,7 +202,7 @@ def convert_braTS_to_nnUNet(
         f"N4: {do_n4} (shrink={n4_shrink}, iters={n4_iters})",
         f"Requested split: train={split_ratio[0]:.3f}, test={split_ratio[1]:.3f}",
         f"Found cases: {n_cases}",
-        f"Kept: train={len(kept_train)}, test={len(kept_test)}",
+        f"Kept: train={len(kept_train_sorted)}, test={len(kept_test_sorted)}",
     ]
     if skipped_train:
         summary_lines.append(
@@ -203,13 +213,13 @@ def convert_braTS_to_nnUNet(
             f"Skipped test (incomplete): {len(skipped_test)} e.g. {skipped_test[0]}"
         )
     summary_lines.append("\n-- TRAIN CASE IDS --")
-    summary_lines.extend(sorted(kept_train))
+    summary_lines.extend(kept_train_sorted)
     summary_lines.append("\n-- TEST CASE IDS --")
-    summary_lines.extend(sorted(kept_test))
+    summary_lines.extend(kept_test_sorted)
     (out_dir / "summary.txt").write_text("\n".join(summary_lines) + "\n")
 
     logger.info(
-        f"✅ Wrote {len(kept_train)} train and {len(kept_test)} test cases to {out_dir}"
+        f"✅ Wrote {len(kept_train_sorted)} train and {len(kept_test_sorted)} test cases to {out_dir}"
     )
     if skipped_train or skipped_test:
         logger.warning(
