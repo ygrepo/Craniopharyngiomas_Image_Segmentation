@@ -3,7 +3,7 @@
 #SBATCH --output=test.out     # Standard output log
 #SBATCH --error=test.err      # Standard error log
 #SBATCH --time=00:05:00            # Time limit (hh:mm:ss)
-#SBATCH --partition=standard       # Partition/queue name
+#SBATCH --partition=cpu       # Partition/queue name
 #SBATCH --ntasks=1                 # Number of tasks (processes)
 #SBATCH --cpus-per-task=1          # Number of CPU cores per task
 #SBATCH --mem=1G                   # Memory per node
