@@ -23,7 +23,7 @@ TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_DIR="logs"
 LOG_LEVEL="INFO"
 mkdir -p "$LOG_DIR"
-LOG_FILE="${LOG_DIR}/download_hf_model_${TIMESTAMP}.log"
+LOG_FILE="${LOG_DIR}/test_job_${TIMESTAMP}.log"
 $PYTHON "$PWD/src/test_job.py" \
     2>&1 | tee -a "$LOG_FILE"
 
