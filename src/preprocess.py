@@ -106,6 +106,7 @@ def n4_bias_correct(
     """
     N4 bias field correction. If no mask is given, we derive one using Otsu on a blurred magnitude image.
     """
+    img_f = sitk.Cast(img, sitk.sitkFloat32)
     if mask is None:
         sm = sitk.SmoothingRecursiveGaussian(img, 1.0)
         sm_abs = sitk.Cast(sitk.Abs(sm), sitk.sitkFloat32)
@@ -274,6 +275,7 @@ def preprocess_case(
     # Load modalities
     img_paths = find_case_files(case_dir, modalities)
     imgs = [read_image(p) for p in img_paths]
+    logger.info(f"Found {len(imgs)} modalities: {[p.name for p in img_paths]}")
 
     # Load provided mask if present
     mask_path = find_mask_file(case_dir, mask_tag)
@@ -281,6 +283,10 @@ def preprocess_case(
     if provided_mask is not None:
         # Ensure binary/label type
         provided_mask = sitk.Cast(provided_mask > 0, sitk.sitkUInt8)
+
+    logger.info(f"Found mask: {mask_path}")
+    logger.info(f"Mask min: {sitk.GetArrayFromImage(provided_mask).min()}")
+    logger.info(f"Mask max: {sitk.GetArrayFromImage(provided_mask).max()}")
 
     # N4 bias correction: use provided mask if available
     n4_mask = provided_mask
@@ -302,9 +308,11 @@ def preprocess_case(
 
     # Crop strategy
     if roi_from_mask == "bbox" and mask_rs is not None:
+        logger.info(f"Cropping from bbox with pad {bbox_pad_mm}")
         imgs_crop = [crop_bbox_with_pad(im, mask_rs, bbox_pad_mm) for im in imgs_rs]
         mask_crop = crop_bbox_with_pad(mask_rs, mask_rs, bbox_pad_mm)
     else:
+        logger.info(f"Cropping from centroid with size {roi_size_mm}")
         # default: fixed box centered at mask centroid (or image center if mask empty)
         if (
             sitk.StatisticsImageFilter().Execute(mask_rs)
@@ -322,6 +330,7 @@ def preprocess_case(
         mask_crop = crop_roi_world(mask_rs, center_world, roi_size_mm)
 
     # Z-score per modality within mask crop (if provided)
+    logger.info("Z-scoring within mask")
     imgs_norm = [zscore(im, mask=mask_crop) for im in imgs_crop]
 
     # Save as NIfTI
@@ -334,12 +343,14 @@ def preprocess_case(
                 tag = m.lower()
                 break
         tag = (tag or "mod").replace("t1wce", "t1ce")
-        write_image(img, out_dir / name / f"{name}_{tag}.nii.gz")
+        out_path = out_dir / name / f"{name}_{tag}.nii.gz"
+        logger.info(f"Saving to {out_path}")
+        write_image(img, out_path)
 
     if save_mask and mask_crop is not None:
-        write_image(
-            sitk.Cast(mask_crop, sitk.sitkUInt8), out_dir / name / f"{name}_mask.nii.gz"
-        )
+        out_mask_path = out_dir / name / f"{name}_mask.nii.gz"
+        logger.info(f"Saving mask to {out_mask_path}")
+        write_image(sitk.Cast(mask_crop, sitk.sitkUInt8), out_mask_path)
 
 
 def main():
