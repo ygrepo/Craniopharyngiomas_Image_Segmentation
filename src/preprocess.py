@@ -29,7 +29,7 @@ import SimpleITK as sitk
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
-from src.util import get_logger
+from src.util import get_logger, setup_logging
 
 logger = get_logger(__name__)
 
@@ -387,7 +387,21 @@ def main():
         action="store_true",
         help="Save the (resampled/cropped) mask as NIfTI.",
     )
+    ap.add_argument(
+        "--log_level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Logging level.",
+    )
+    ap.add_argument(
+        "--log_file",
+        type=Path,
+        default=None,
+        help="Log file path (in addition to console).",
+    )
     args = ap.parse_args()
+
+    setup_logging(Path(args.log_file), args.log_level)
 
     cases = [d for d in args.in_dir.iterdir() if d.is_dir()]
     if not cases:

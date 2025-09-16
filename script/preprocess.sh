@@ -42,9 +42,9 @@ set -e
 
 
 if [[ ${exit_code} -eq 0 ]]; then
-    echo "OK: ${combo} finished at $(date)" | tee -a "${log_file}"
+    echo "OK: Preprocessing finished at $(date)" | tee -a "${LOG_FILE}"
 else
-    echo "ERROR: ${combo} failed with exit code ${exit_code} at $(date)" | tee -a "${log_file}"
+    echo "ERROR: Preprocessing failed with exit code ${exit_code} at $(date)" | tee -a "${LOG_FILE}"
     # Uncomment to stop on first failure:
     exit ${exit_code}
 fi    
