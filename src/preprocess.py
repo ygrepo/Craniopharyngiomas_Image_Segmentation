@@ -97,35 +97,43 @@ def find_mask_file(case_dir: Path, mask_tag: str) -> Optional[Path]:
 
 
 # ---------- PROCESSING ----------
+
+
 def n4_bias_correct(
     img: sitk.Image,
-    mask: Optional[sitk.Image] = None,
+    mask: sitk.Image | None = None,
     shrink_factor: int = 2,
     conv: int = 50,
 ) -> sitk.Image:
     """
-    N4 bias field correction. If no mask is given, we derive one using Otsu on a blurred magnitude image.
+    Force float32 image + uint8 mask for N4.
     """
+    # N4 requires float input
     img_f = sitk.Cast(img, sitk.sitkFloat32)
+
+    # Build/convert mask -> UInt8
     if mask is None:
-        sm = sitk.SmoothingRecursiveGaussian(img, 1.0)
-        sm_abs = sitk.Cast(sitk.Abs(sm), sitk.sitkFloat32)
+        sm = sitk.SmoothingRecursiveGaussian(img_f, 1.0)
+        sm_abs = sitk.Abs(sm)
         mask = sitk.OtsuThreshold(sm_abs, 0, 1, 200)
         mask = sitk.BinaryMorphologicalOpening(mask, (1, 1, 1))
+    mask_u8 = sitk.Cast(mask, sitk.sitkUInt8)
 
     corrector = sitk.N4BiasFieldCorrectionImageFilter()
     corrector.SetMaximumNumberOfIterations([conv])
     corrector.SetConvergenceThreshold(1e-6)
 
-    img_shrunk = sitk.Shrink(img, [shrink_factor] * 3)
-    mask_shrunk = sitk.Shrink(mask, [shrink_factor] * 3)
+    # Speed-up pass (still float image + uint8 mask)
+    img_shrunk = sitk.Shrink(img_f, [shrink_factor] * 3)
+    mask_shrunk = sitk.Shrink(mask_u8, [shrink_factor] * 3)
     _ = corrector.Execute(img_shrunk, mask_shrunk)
 
-    # Apply estimated field to full-res:
-    log_field = corrector.GetLogBiasFieldAsImage(img)
-    corrected = sitk.Exp(sitk.Log(sitk.Cast(img, sitk.sitkFloat32)) - log_field)
-    corrected = sitk.Cast(corrected, img.GetPixelID())
-    return corrected
+    # Apply estimated field to the full-res float image
+    log_field = corrector.GetLogBiasFieldAsImage(img_f)
+    corrected = sitk.Exp(sitk.Log(img_f) - log_field)
+
+    # Keep float32 downstream (recommended)
+    return sitk.Cast(corrected, sitk.sitkFloat32)
 
 
 def resample_isotropic(
@@ -249,13 +257,6 @@ def crop_bbox_with_pad(
     return extractor.Execute(img)
 
 
-# def ensure_4d_stack(mods: List[sitk.Image]) -> sitk.Image:
-#     arrs = [sitk.GetArrayFromImage(m) for m in mods]
-#     arr4 = np.stack(arrs, axis=0)  # [C, Z, Y, X]
-#     img = sitk.GetImageFromArray(arr4)
-#     img.CopyInformation(mods[0])
-#     return img
-
 # ---------- Pipeline ----------
 
 
@@ -340,9 +341,9 @@ def preprocess_case(
         tag = None
         for m in modalities:
             if m in src_path.name or m.lower() in src_path.name.lower():
-                tag = m.lower()
+                tag = m.upper()
                 break
-        tag = (tag or "mod").replace("t1wce", "t1ce")
+        tag = (tag or "MOD").replace("T1WCE", "T1CE")
         out_path = out_dir / name / f"{name}_{tag}.nii.gz"
         logger.info(f"Saving to {out_path}")
         write_image(img, out_path)
