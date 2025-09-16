@@ -113,12 +113,15 @@ def n4_bias_correct(
 
     # Build/convert mask -> UInt8
     if mask is None:
+        logger.info("Estimating mask via Otsu")
         sm = sitk.SmoothingRecursiveGaussian(img_f, 1.0)
         sm_abs = sitk.Abs(sm)
         mask = sitk.OtsuThreshold(sm_abs, 0, 1, 200)
         mask = sitk.BinaryMorphologicalOpening(mask, (1, 1, 1))
     mask_u8 = sitk.Cast(mask, sitk.sitkUInt8)
 
+    # N4
+    logger.info(f"Running N4 with shrink={shrink_factor}, conv={conv}")
     corrector = sitk.N4BiasFieldCorrectionImageFilter()
     corrector.SetMaximumNumberOfIterations([conv])
     corrector.SetConvergenceThreshold(1e-6)
@@ -129,6 +132,7 @@ def n4_bias_correct(
     _ = corrector.Execute(img_shrunk, mask_shrunk)
 
     # Apply estimated field to the full-res float image
+    logger.info("Applying estimated field to full-res image")
     log_field = corrector.GetLogBiasFieldAsImage(img_f)
     corrected = sitk.Exp(sitk.Log(img_f) - log_field)
 
@@ -139,13 +143,17 @@ def n4_bias_correct(
 def resample_isotropic(
     img: sitk.Image, out_spacing: float = 1.0, interpolator=sitk.sitkBSpline
 ) -> sitk.Image:
+    logger.info(f"Resampling to isotropic spacing {out_spacing}")
     original_spacing = np.array(list(img.GetSpacing()), dtype=float)
     original_size = np.array(list(img.GetSize()), dtype=int)
 
+    # Compute new size based on original spacing and desired output spacing
+    logger.info(f"Original spacing: {original_spacing}")
     new_spacing = np.array([out_spacing, out_spacing, out_spacing], dtype=float)
     new_size = np.maximum(
         1, np.round(original_size * (original_spacing / new_spacing)).astype(int)
     )
+    logger.info(f"New size: {new_size}")
 
     resampler = sitk.ResampleImageFilter()
     resampler.SetInterpolator(interpolator)
@@ -159,6 +167,7 @@ def resample_isotropic(
 
 
 def resample_label_like(label: sitk.Image, reference: sitk.Image) -> sitk.Image:
+    logger.info(f"Resampling label to match reference image {reference.GetSize()}")
     resampler = sitk.ResampleImageFilter()
     resampler.SetInterpolator(sitk.sitkNearestNeighbor)
     resampler.SetOutputSpacing(reference.GetSpacing())
@@ -189,6 +198,7 @@ def zscore(
         v = np.clip(vals, np.percentile(vals, 1), np.percentile(vals, 99))
         mean, std = float(np.mean(v)), float(np.std(v) + eps)
 
+    logger.info(f"Z-scoring with mean {mean:.2f}, std {std:.2f}")
     z = (arr - mean) / (std + eps)
     out = sitk.GetImageFromArray(z)
     out.CopyInformation(im)
@@ -196,6 +206,7 @@ def zscore(
 
 
 def mask_centroid_world(mask: sitk.Image) -> Tuple[float, float, float]:
+    logger.info("Computing mask centroid in world coordinates")
     stats = sitk.LabelShapeStatisticsImageFilter()
     stats.Execute(sitk.Cast(mask > 0, sitk.sitkUInt8))
     # If multiple labels exist, merge by using all >0; centroid() expects a label id.
@@ -209,6 +220,7 @@ def mask_centroid_world(mask: sitk.Image) -> Tuple[float, float, float]:
 
 
 def bbox_indices_from_mask(mask: sitk.Image) -> Tuple[np.ndarray, np.ndarray]:
+    logger.info("Computing bounding box from mask")
     arr = sitk.GetArrayFromImage(mask)  # z, y, x
     coords = np.argwhere(arr > 0)
     if coords.size == 0:
@@ -227,6 +239,7 @@ def crop_roi_world(
     center_world: Tuple[float, float, float],
     size_mm: Tuple[float, float, float],
 ) -> sitk.Image:
+    logger.info(f"Cropping ROI of size {size_mm} around {center_world}")
     spacing = np.array(img.GetSpacing(), float)
     size_vox = np.maximum(1, np.round(np.array(size_mm, float) / spacing)).astype(int)
     center_idx = np.array(img.TransformPhysicalPointToIndex(center_world), float)
@@ -243,6 +256,7 @@ def crop_roi_world(
 def crop_bbox_with_pad(
     img: sitk.Image, mask: sitk.Image, pad_mm: Tuple[float, float, float]
 ) -> sitk.Image:
+    logger.info(f"Cropping bbox with pad {pad_mm}")
     spacing = np.array(img.GetSpacing(), float)
     pad_vox = np.maximum(0, np.round(np.array(pad_mm, float) / spacing)).astype(int)
 
