@@ -161,9 +161,6 @@ def resample_label_like(label: sitk.Image, reference: sitk.Image) -> sitk.Image:
     return resampler.Execute(label)
 
 
-ß
-
-
 def zscore(
     img: sitk.Image, mask: Optional[sitk.Image] = None, eps: float = 1e-8
 ) -> sitk.Image:
