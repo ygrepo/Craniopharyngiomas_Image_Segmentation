@@ -14,7 +14,7 @@ conda activate /projects/gbm_modeling/.conda/envs/cp
 
 
 LOG_DIR="logs"
-LOG_LEVEL="INFO"
+LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
 BASE_DATA_DIR="data"
@@ -36,7 +36,9 @@ $PYTHON "$MAIN" \
     --roi_from_mask "centroid" \
     --roi_size_mm 96 96 96 \
     --mask_tag "Tumor.seg" \
-    --save_mask 
+    --save_mask \
+    --log_level "$LOG_LEVEL" \
+    --log_file "$LOG_FILE"
 exit_code=$?
 set -e
 
