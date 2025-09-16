@@ -27,35 +27,35 @@ mkdir -p "$OUTPUT_DIR"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/preprocess_${TIMESTAMP}.log"
 
-# set +e
-# $PYTHON "$MAIN" \
-#     --in_dir "$BASE_DATA_DIR" \
-#     --out_dir "$OUTPUT_DIR" \
-#     --modalities T1_CE_3D_AX_ALIGNED \
-#     --spacing 1.0 \
-#     --roi_from_mask "centroid" \
-#     --roi_size_mm 96 96 96 \
-#     --mask_tag "Tumor.seg" \
-#     --save_mask \
-#     --log_level "$LOG_LEVEL" \
-#     --log_file "$LOG_FILE"
-# exit_code=$?
-# set -e
-
 set +e
 $PYTHON "$MAIN" \
     --in_dir "$BASE_DATA_DIR" \
     --out_dir "$OUTPUT_DIR" \
     --modalities T1_CE_3D_AX_ALIGNED \
     --spacing 1.0 \
-    --roi_from_mask bbox \
-    --bbox_pad_mm 8 8 8 \
+    --roi_from_mask "centroid" \
+    --roi_size_mm 96 96 96 \
     --mask_tag "Tumor.seg" \
     --save_mask \
     --log_level "$LOG_LEVEL" \
     --log_file "$LOG_FILE"
 exit_code=$?
 set -e
+
+# set +e
+# $PYTHON "$MAIN" \
+#     --in_dir "$BASE_DATA_DIR" \
+#     --out_dir "$OUTPUT_DIR" \
+#     --modalities T1_CE_3D_AX_ALIGNED \
+#     --spacing 1.0 \
+#     --roi_from_mask bbox \
+#     --bbox_pad_mm 8 8 8 \
+#     --mask_tag "Tumor.seg" \
+#     --save_mask \
+#     --log_level "$LOG_LEVEL" \
+#     --log_file "$LOG_FILE"
+# exit_code=$?
+# set -e
 
 
 if [[ ${exit_code} -eq 0 ]]; then
