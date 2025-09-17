@@ -41,6 +41,15 @@ def first_match(case_dir: Path, suffix_glob: str) -> Optional[Path]:
     return sorted(hits)[0] if hits else None
 
 
+def compute_feret_diameter(mask_array: np.ndarray, spacing: np.ndarray) -> float:
+    coords = np.argwhere(mask_array > 0)  # voxel indices
+    coords_mm = coords * spacing[::-1]  # convert to mm (careful with axis order)
+    dmax = np.max(
+        np.linalg.norm(coords_mm[:, None, :] - coords_mm[None, :, :], axis=-1)
+    )
+    return dmax
+
+
 def label_stats(mask_u8: sitk.Image, label: int = 1) -> Dict[str, Any]:
     """Compute shape stats with SimpleITK LabelShapeStatistics."""
     lss = sitk.LabelShapeStatisticsImageFilter()
@@ -74,9 +83,15 @@ def label_stats(mask_u8: sitk.Image, label: int = 1) -> Dict[str, Any]:
     except Exception:
         out["elongation"] = np.nan
     try:
-        out["feret_diameter_mm"] = float(lss.GetFeretDiameter(lbl))
+        out["feret_diameter_mm"] = compute_feret_diameter(
+            sitk.GetArrayFromImage(mask_u8), np.array(mask_u8.GetSpacing(), float)
+        )
     except Exception:
         out["feret_diameter_mm"] = np.nan
+    # try:
+    #     out["feret_diameter_mm"] = float(lss.GetFeretDiameter(lbl))
+    # except Exception:
+    #     out["feret_diameter_mm"] = np.nan
     try:
         out["principal_moments"] = tuple(map(float, lss.GetPrincipalMoments(lbl)))
     except Exception:
