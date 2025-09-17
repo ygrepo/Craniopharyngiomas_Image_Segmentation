@@ -17,7 +17,7 @@ LOG_DIR="logs"
 LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
-BASE_DATA_DIR="data"
+BASE_DATA_DIR="output/data"
 PYTHON="/projects/gbm_modeling/.conda/envs/cp/bin/python"
 MAIN="src/compute_tumor_metrics.py"
 
