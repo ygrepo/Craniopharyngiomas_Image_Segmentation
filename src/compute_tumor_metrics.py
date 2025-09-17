@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 import numpy as np
 import pandas as pd
+import fnmatch
 import SimpleITK as sitk
 
 
@@ -21,8 +22,19 @@ def read_vol(path: Path) -> sitk.Image:
     return sitk.ReadImage(str(path))
 
 
-def first_match(pdir: Path, pattern: str) -> Optional[Path]:
-    hits = sorted(pdir.glob(pattern))
+def first_match(case_dir: Path, suffix_glob: str) -> Optional[Path]:
+    """
+    Case-insensitive match for files like <CASE>_<suffix_glob>.
+    We scan filenames once and compare lowercased names with a lowercased pattern.
+    """
+    files = [p for p in case_dir.iterdir() if p.is_file()]
+    patt = suffix_glob.lower()
+    # we expect names like '<CASE>_<suffix>'
+    # so just check the whole filename against '*_<suffix_glob>'
+    # caller will pass e.g. 't1*ce*aligned*.nii.gz'
+    ci_hits = [p for p in files if fnmatch.fnmatch(p.name.lower(), f"*_{patt}")]
+    return sorted(ci_hits)[0] if ci_hits else None
+
     return hits[0] if hits else None
 
 
@@ -179,8 +191,13 @@ def case_stats(
     vol_p = first_match(case_dir, f"{case_id}_{modality_glob}")
     mask_p = first_match(case_dir, f"{case_id}_{mask_glob}")
     if not vol_p or not mask_p:
+        present = ", ".join(sorted(p.name for p in case_dir.iterdir() if p.is_file()))
         logger.warning(
-            f"{case_id}: missing volume or mask (vol:{vol_p}, mask:{mask_p})"
+            "%s: missing volume or mask (vol:%s, mask:%s). Files here: %s",
+            case_id,
+            vol_p,
+            mask_p,
+            present,
         )
         return None
 
@@ -275,14 +292,14 @@ def main():
     ap.add_argument(
         "--modality_glob",
         type=str,
-        default="t1_ce_* .nii.gz",
-        help="Suffix glob for the volume file after '<CASE>_' (e.g., 't1_ce_*.nii.gz').",
+        default="t1*ce*aligned*.nii.gz",
+        help="Suffix glob matched after '<CASE>_'. Case-insensitive matching is applied.",
     )
     ap.add_argument(
         "--mask_glob",
         type=str,
-        default="mask.nii.gz",
-        help="Suffix glob for the mask file after '<CASE>_' (e.g., 'mask.nii.gz').",
+        default="mask.nii.gz",  # in argparse defaults
+        help="Suffix glob matched after '<CASE>_'.",
     )
     ap.add_argument(
         "--si_thresh_mm",
