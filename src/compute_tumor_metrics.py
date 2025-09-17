@@ -310,6 +310,16 @@ def main():
     )
     args = ap.parse_args()
     setup_logging(Path(args.log_file), args.log_level)
+    logger.info(f"Args: {args}")
+    logger.info(f"Case dir: {args.in_dir}")
+    logger.info(f"Output CSV: {args.out_csv}")
+    logger.info(f"Modality glob: {args.modality_glob}")
+    logger.info(f"Mask glob: {args.mask_glob}")
+    logger.info(f"SI threshold (mm): {args.si_thresh_mm}")
+    logger.info(f"Midline tolerance (mm): {args.midline_tol_mm}")
+    logger.info(f"Log level: {args.log_level}")
+    logger.info(f"Log file: {args.log_file}")
+    logger.info(f"Cases: {sorted(args.in_dir.iterdir())}")
 
     rows: List[Dict[str, Any]] = []
     cases = [d for d in sorted(args.in_dir.iterdir()) if d.is_dir()]
