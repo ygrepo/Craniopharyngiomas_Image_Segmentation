@@ -24,18 +24,21 @@ def read_vol(path: Path) -> sitk.Image:
 
 def first_match(case_dir: Path, suffix_glob: str) -> Optional[Path]:
     """
-    Case-insensitive match for files like <CASE>_<suffix_glob>.
-    We scan filenames once and compare lowercased names with a lowercased pattern.
+    Case-insensitive match for files like <CASE>_<suffix>.
+    If the suffix has no '.', we treat it as a stem and allow any extension (adds a trailing '*').
+    Examples:
+      suffix_glob='t1*ce*aligned*.nii.gz'  -> matches exactly
+      suffix_glob='T1_CE_3D_AX_ALIGNED'    -> matches any ext (e.g., .nii.gz)
     """
     files = [p for p in case_dir.iterdir() if p.is_file()]
     patt = suffix_glob.lower()
-    # we expect names like '<CASE>_<suffix>'
-    # so just check the whole filename against '*_<suffix_glob>'
-    # caller will pass e.g. 't1*ce*aligned*.nii.gz'
-    ci_hits = [p for p in files if fnmatch.fnmatch(p.name.lower(), f"*_{patt}")]
-    return sorted(ci_hits)[0] if ci_hits else None
-
-    return hits[0] if hits else None
+    # If no dot in pattern, allow any extension
+    if "." not in patt:
+        patt = patt + "*"
+    # Expect filenames like '<CASE>_<suffix>'
+    pattern = f"*_{patt}"
+    hits = [p for p in files if fnmatch.fnmatch(p.name.lower(), pattern)]
+    return sorted(hits)[0] if hits else None
 
 
 def label_stats(mask_u8: sitk.Image, label: int = 1) -> Dict[str, Any]:
@@ -188,8 +191,9 @@ def case_stats(
     midline_tol_mm: float,
 ) -> Optional[Dict[str, Any]]:
     case_id = case_dir.name
-    vol_p = first_match(case_dir, f"{case_id}_{modality_glob}")
-    mask_p = first_match(case_dir, f"{case_id}_{mask_glob}")
+    vol_p = first_match(case_dir, modality_glob)
+    mask_p = first_match(case_dir, mask_glob)
+
     if not vol_p or not mask_p:
         present = ", ".join(sorted(p.name for p in case_dir.iterdir() if p.is_file()))
         logger.warning(
