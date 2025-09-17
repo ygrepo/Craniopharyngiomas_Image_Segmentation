@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import fnmatch
 import SimpleITK as sitk
+from skimage import measure
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +40,51 @@ def first_match(case_dir: Path, suffix_glob: str) -> Optional[Path]:
     pattern = f"*_{patt}"
     hits = [p for p in files if fnmatch.fnmatch(p.name.lower(), pattern)]
     return sorted(hits)[0] if hits else None
+
+
+def shape_metrics(mask_u8: sitk.Image) -> dict:
+    """
+    Compute compactness, sphericity, elongation etc. using scikit-image.
+    Input: binary mask (sitk.Image).
+    Output: dict of metrics.
+    """
+    arr = sitk.GetArrayFromImage(mask_u8).astype(bool)  # z,y,x
+    spacing = np.array(mask_u8.GetSpacing(), float)  # (sx,sy,sz)
+
+    # --- 1. Surface mesh from marching cubes (isovalue 0.5) ---
+    verts, faces, _, _ = measure.marching_cubes(arr, level=0.5, spacing=spacing[::-1])
+    # NOTE: marching_cubes expects (z,y,x), so spacing reversed
+
+    # Surface area (mm²) and volume (mm³) from mesh
+    surface_area = measure.mesh_surface_area(verts, faces)
+    volume = np.sum(arr) * np.prod(spacing)
+
+    # --- 2. Regionprops for bounding box and inertia ---
+    props = measure.regionprops(arr.astype(np.uint8))[0]
+
+    # Elongation = ratio of largest/smallest principal axis
+    if props.inertia_tensor_eigvals is not None:
+        eigvals = np.sort(props.inertia_tensor_eigvals)[::-1]
+        elongation = np.sqrt(eigvals[0] / eigvals[-1]) if eigvals[-1] > 0 else np.nan
+    else:
+        elongation = np.nan
+
+    # --- 3. Compactness / Sphericity ---
+    # Sphericity formula: (π^(1/3) * (6V)^(2/3)) / A
+    sphericity = (
+        (np.pi ** (1 / 3) * (6 * volume) ** (2 / 3)) / surface_area
+        if surface_area > 0
+        else np.nan
+    )
+
+    # Compactness index (alternative definition)
+    compactness = (volume**2) / (surface_area**3) if surface_area > 0 else np.nan
+
+    return {
+        "surface_area_mm2": surface_area,
+        "sphericity": sphericity,
+        "compactness": compactness,
+    }
 
 
 def compute_feret_diameter(mask_u8: sitk.Image) -> float:
@@ -152,6 +198,8 @@ def label_stats(mask_u8: sitk.Image, label: int = 1) -> Dict[str, Any]:
     except Exception:
         out["principal_moments"] = (np.nan, np.nan, np.nan)
 
+    # Additional metrics from scikit-image
+    out.update(shape_metrics(mask_u8))
     return out
 
 
@@ -315,6 +363,9 @@ def case_stats(
         "label_used": s.get("label_used", 1),
         "voxels_in_label": s["num_voxels"],
         "volume_mm3": s["physical_size_mm3"],
+        "surface_area_mm2": s.get("surface_area_mm2", np.nan),
+        "sphericity": s.get("sphericity", np.nan),
+        "compactness": s.get("compactness", np.nan),
         "volume_mL": s["physical_size_mm3"] / 1000.0,
         "centroid_world_x_mm": centroid_world[0],
         "centroid_world_y_mm": centroid_world[1],
