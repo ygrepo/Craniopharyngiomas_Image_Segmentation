@@ -72,6 +72,7 @@ def label_stats(mask_u8: sitk.Image, label: int = 1) -> Dict[str, Any]:
 
 def basic_geometry(mask_u8: sitk.Image) -> Dict[str, Any]:
     """Axis-aligned extent & centroid also via array, plus spacing-aware metrics."""
+    logger.info("Computing basic geometry")
     arr = sitk.GetArrayFromImage(mask_u8)  # (z,y,x)
     info: Dict[str, Any] = {}
     if arr.max() == 0:
@@ -118,10 +119,10 @@ def compute_location_heuristics(
     Notes:
       * This is only a coarse guess; for clinical-grade zones, use an atlas or landmarks.
     """
+    logger.info("Computing location heuristics")
     D = np.array(vol.GetDirection(), float).reshape(
         3, 3
     )  # columns: image axes in physical (LPS)
-    spacing = np.array(vol.GetSpacing(), float)
     size = np.array(vol.GetSize(), float)
 
     # Volume center in world
@@ -178,7 +179,9 @@ def case_stats(
     vol_p = first_match(case_dir, f"{case_id}_{modality_glob}")
     mask_p = first_match(case_dir, f"{case_id}_{mask_glob}")
     if not vol_p or not mask_p:
-        print(f"[WARN] {case_id}: missing volume or mask (vol:{vol_p}, mask:{mask_p})")
+        logger.warning(
+            f"{case_id}: missing volume or mask (vol:{vol_p}, mask:{mask_p})"
+        )
         return None
 
     vol = read_vol(vol_p)
@@ -191,6 +194,7 @@ def case_stats(
     voxel_mm3 = float(np.prod(spacing))
 
     # primary stats via SITK
+    logger.info(f"Computing label stats for {case_id}")
     s = label_stats(mask, label=1)
     if not s.get("has_label", False) or s.get("num_voxels", 0) == 0:
         return {
@@ -292,6 +296,18 @@ def main():
         default=6.0,
         help="Tolerance (mm) to call midline proximity (stalk/duct-like).",
     )
+    ap.add_argument(
+        "--log_level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Logging level.",
+    )
+    ap.add_argument(
+        "--log_file",
+        type=Path,
+        default=None,
+        help="Log file path (in addition to console).",
+    )
     args = ap.parse_args()
     setup_logging(Path(args.log_file), args.log_level)
 
@@ -301,6 +317,7 @@ def main():
         raise RuntimeError(f"No case folders found in {args.in_dir}")
 
     for c in cases:
+        logger.info(f"Processing {c.name}")
         try:
             row = case_stats(
                 c,
