@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
 import argparse
+import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 import numpy as np
@@ -7,6 +7,14 @@ import pandas as pd
 import SimpleITK as sitk
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+from src.util import get_logger, setup_logging
+
+logger = get_logger(__name__)
+
+
+# ---------- I/O ----------
 def read_vol(path: Path) -> sitk.Image:
     if not path or not path.exists():
         raise FileNotFoundError(f"Missing file: {path}")
@@ -285,6 +293,7 @@ def main():
         help="Tolerance (mm) to call midline proximity (stalk/duct-like).",
     )
     args = ap.parse_args()
+    setup_logging(Path(args.log_file), args.log_level)
 
     rows: List[Dict[str, Any]] = []
     cases = [d for d in sorted(args.in_dir.iterdir()) if d.is_dir()]
