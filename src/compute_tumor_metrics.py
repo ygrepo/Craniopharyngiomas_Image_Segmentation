@@ -82,16 +82,16 @@ def label_stats(mask_u8: sitk.Image, label: int = 1) -> Dict[str, Any]:
         out["elongation"] = float(lss.GetElongation(lbl))
     except Exception:
         out["elongation"] = np.nan
-    try:
-        out["feret_diameter_mm"] = compute_feret_diameter(
-            sitk.GetArrayFromImage(mask_u8), np.array(mask_u8.GetSpacing(), float)
-        )
-    except Exception:
-        out["feret_diameter_mm"] = np.nan
     # try:
-    #     out["feret_diameter_mm"] = float(lss.GetFeretDiameter(lbl))
+    #     out["feret_diameter_mm"] = compute_feret_diameter(
+    #         sitk.GetArrayFromImage(mask_u8), np.array(mask_u8.GetSpacing(), float)
+    #     )
     # except Exception:
     #     out["feret_diameter_mm"] = np.nan
+    try:
+        out["feret_diameter_mm"] = float(lss.GetFeretDiameter(lbl))
+    except Exception:
+        out["feret_diameter_mm"] = np.nan
     try:
         out["principal_moments"] = tuple(map(float, lss.GetPrincipalMoments(lbl)))
     except Exception:
