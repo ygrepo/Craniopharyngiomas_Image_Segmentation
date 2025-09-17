@@ -41,13 +41,70 @@ def first_match(case_dir: Path, suffix_glob: str) -> Optional[Path]:
     return sorted(hits)[0] if hits else None
 
 
-def compute_feret_diameter(mask_array: np.ndarray, spacing: np.ndarray) -> float:
-    coords = np.argwhere(mask_array > 0)  # voxel indices
-    coords_mm = coords * spacing[::-1]  # convert to mm (careful with axis order)
-    dmax = np.max(
-        np.linalg.norm(coords_mm[:, None, :] - coords_mm[None, :, :], axis=-1)
-    )
-    return dmax
+def compute_feret_diameter(mask_u8: sitk.Image) -> float:
+    """
+    Fast Feret diameter (max pairwise distance) for a 3D binary mask.
+    Strategy:
+      1) keep only boundary voxels (massively reduces N),
+      2) map to mm with correct axis order,
+      3) if SciPy present: convex hull -> pairwise distances on hull vertices,
+         else: farthest-point sampling (approximate but fast).
+    Returns distance in mm.
+    """
+    # --- 1) Boundary voxels (SimpleITK, no SciPy needed) ---
+    # boundary = mask - erode(mask)
+    boundary_u8 = sitk.Subtract(mask_u8, sitk.BinaryErode(mask_u8, (1, 1, 1)))
+    boundary_arr = sitk.GetArrayFromImage(boundary_u8).astype(bool)  # (z, y, x)
+    if not boundary_arr.any():
+        return 0.0
+
+    # --- 2) Coordinates in mm (careful with axis order) ---
+    # arr indices are (z,y,x); spacing is (sx,sy,sz) in SimpleITK order (x,y,z).
+    spacing = np.array(mask_u8.GetSpacing(), float)  # (sx, sy, sz)
+    coords_zyx = np.argwhere(boundary_arr)  # shape (M, 3) in (z,y,x)
+    # reorder to (x,y,z) then scale by spacing -> mm
+    coords_xyz = coords_zyx[:, ::-1].astype(np.float64)  # (x,y,z)
+    pts_mm = coords_xyz * spacing  # broadcasting (sx,sy,sz)
+
+    # Optional thinning if still huge
+    M = len(pts_mm)
+    if M > 100_000:
+        # keep ~50k points max
+        step = int(np.ceil(M / 50_000))
+        pts_mm = pts_mm[::step]
+        M = len(pts_mm)
+
+    # --- 3) Diameter on convex hull vertices (exact, needs SciPy) ---
+    try:
+        from scipy.spatial import ConvexHull, distance
+
+        hull = ConvexHull(pts_mm, qhull_options="QJ")  # joggle = robustness
+        verts = pts_mm[hull.vertices]  # typically << M
+        # pairwise distances on vertices (much smaller)
+        # pdist is memory-friendly vs broadcasting
+        dmax = (
+            float(np.max(distance.pdist(verts, metric="euclidean")))
+            if len(verts) > 1
+            else 0.0
+        )
+        return dmax
+    except Exception:
+        # --- Fallback: fast approximation (farthest-point sampling) ---
+        if len(pts_mm) < 2:
+            return 0.0
+        # choose an arbitrary start, then alternate farthest endpoints a few iters
+        idx = 0
+        a = pts_mm[idx]
+        for _ in range(6):  # 6–8 iters is plenty
+            # farthest from a
+            d2 = np.sum((pts_mm - a) ** 2, axis=1)
+            j = int(np.argmax(d2))
+            b = pts_mm[j]
+            # farthest from b
+            d2b = np.sum((pts_mm - b) ** 2, axis=1)
+            i = int(np.argmax(d2b))
+            a = pts_mm[i]
+        return float(np.linalg.norm(a - b))
 
 
 def label_stats(mask_u8: sitk.Image, label: int = 1) -> Dict[str, Any]:
@@ -82,16 +139,14 @@ def label_stats(mask_u8: sitk.Image, label: int = 1) -> Dict[str, Any]:
         out["elongation"] = float(lss.GetElongation(lbl))
     except Exception:
         out["elongation"] = np.nan
-    # try:
-    #     out["feret_diameter_mm"] = compute_feret_diameter(
-    #         sitk.GetArrayFromImage(mask_u8), np.array(mask_u8.GetSpacing(), float)
-    #     )
-    # except Exception:
-    #     out["feret_diameter_mm"] = np.nan
     try:
-        out["feret_diameter_mm"] = float(lss.GetFeretDiameter(lbl))
+        out["feret_diameter_mm"] = compute_feret_diameter(mask_u8)
     except Exception:
         out["feret_diameter_mm"] = np.nan
+    # try:
+    #     out["feret_diameter_mm"] = float(lss.GetFeretDiameter(lbl))
+    # except Exception:
+    #     out["feret_diameter_mm"] = np.nan
     try:
         out["principal_moments"] = tuple(map(float, lss.GetPrincipalMoments(lbl)))
     except Exception:
