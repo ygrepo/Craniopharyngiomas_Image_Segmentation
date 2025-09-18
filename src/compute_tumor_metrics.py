@@ -8,7 +8,6 @@ import fnmatch
 import SimpleITK as sitk
 from skimage import measure
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 from src.util import get_logger, setup_logging
@@ -24,60 +23,36 @@ def read_vol(path: Path) -> sitk.Image:
 
 
 def first_match(case_dir: Path, suffix_glob: str) -> Optional[Path]:
-    """
-    Case-insensitive match for files like <CASE>_<suffix>.
-    If the suffix has no '.', we treat it as a stem and allow any extension (adds a trailing '*').
-    Examples:
-      suffix_glob='t1*ce*aligned*.nii.gz'  -> matches exactly
-      suffix_glob='T1_CE_3D_AX_ALIGNED'    -> matches any ext (e.g., .nii.gz)
-    """
     files = [p for p in case_dir.iterdir() if p.is_file()]
     patt = suffix_glob.lower()
-    # If no dot in pattern, allow any extension
     if "." not in patt:
         patt = patt + "*"
-    # Expect filenames like '<CASE>_<suffix>'
     pattern = f"*_{patt}"
     hits = [p for p in files if fnmatch.fnmatch(p.name.lower(), pattern)]
     return sorted(hits)[0] if hits else None
 
 
+# ---------- Shape metrics ----------
 def shape_metrics(mask_u8: sitk.Image) -> dict:
-    """
-    Compute compactness, sphericity, elongation etc. using scikit-image.
-    Input: binary mask (sitk.Image).
-    Output: dict of metrics.
-    """
-    arr = sitk.GetArrayFromImage(mask_u8).astype(bool)  # z,y,x
-    spacing = np.array(mask_u8.GetSpacing(), float)  # (sx,sy,sz)
+    arr = sitk.GetArrayFromImage(mask_u8).astype(bool)
+    spacing = np.array(mask_u8.GetSpacing(), float)
 
-    # --- 1. Surface mesh from marching cubes (isovalue 0.5) ---
     verts, faces, _, _ = measure.marching_cubes(arr, level=0.5, spacing=spacing[::-1])
-    # NOTE: marching_cubes expects (z,y,x), so spacing reversed
-
-    # Surface area (mm²) and volume (mm³) from mesh
     surface_area = measure.mesh_surface_area(verts, faces)
     volume = np.sum(arr) * np.prod(spacing)
 
-    # --- 2. Regionprops for bounding box and inertia ---
     props = measure.regionprops(arr.astype(np.uint8))[0]
-
-    # Elongation = ratio of largest/smallest principal axis
     if props.inertia_tensor_eigvals is not None:
         eigvals = np.sort(props.inertia_tensor_eigvals)[::-1]
         elongation = np.sqrt(eigvals[0] / eigvals[-1]) if eigvals[-1] > 0 else np.nan
     else:
         elongation = np.nan
 
-    # --- 3. Compactness / Sphericity ---
-    # Sphericity formula: (π^(1/3) * (6V)^(2/3)) / A
     sphericity = (
         (np.pi ** (1 / 3) * (6 * volume) ** (2 / 3)) / surface_area
         if surface_area > 0
         else np.nan
     )
-
-    # Compactness index (alternative definition)
     compactness = (volume**2) / (surface_area**3) if surface_area > 0 else np.nan
 
     return {
@@ -88,46 +63,26 @@ def shape_metrics(mask_u8: sitk.Image) -> dict:
 
 
 def compute_feret_diameter(mask_u8: sitk.Image) -> float:
-    """
-    Fast Feret diameter (max pairwise distance) for a 3D binary mask.
-    Strategy:
-      1) keep only boundary voxels (massively reduces N),
-      2) map to mm with correct axis order,
-      3) if SciPy present: convex hull -> pairwise distances on hull vertices,
-         else: farthest-point sampling (approximate but fast).
-    Returns distance in mm.
-    """
-    # --- 1) Boundary voxels (SimpleITK, no SciPy needed) ---
-    # boundary = mask - erode(mask)
     boundary_u8 = sitk.Subtract(mask_u8, sitk.BinaryErode(mask_u8, (1, 1, 1)))
-    boundary_arr = sitk.GetArrayFromImage(boundary_u8).astype(bool)  # (z, y, x)
+    boundary_arr = sitk.GetArrayFromImage(boundary_u8).astype(bool)
     if not boundary_arr.any():
         return 0.0
 
-    # --- 2) Coordinates in mm (careful with axis order) ---
-    # arr indices are (z,y,x); spacing is (sx,sy,sz) in SimpleITK order (x,y,z).
-    spacing = np.array(mask_u8.GetSpacing(), float)  # (sx, sy, sz)
-    coords_zyx = np.argwhere(boundary_arr)  # shape (M, 3) in (z,y,x)
-    # reorder to (x,y,z) then scale by spacing -> mm
-    coords_xyz = coords_zyx[:, ::-1].astype(np.float64)  # (x,y,z)
-    pts_mm = coords_xyz * spacing  # broadcasting (sx,sy,sz)
+    spacing = np.array(mask_u8.GetSpacing(), float)
+    coords_zyx = np.argwhere(boundary_arr)
+    coords_xyz = coords_zyx[:, ::-1].astype(np.float64)
+    pts_mm = coords_xyz * spacing
 
-    # Optional thinning if still huge
     M = len(pts_mm)
     if M > 100_000:
-        # keep ~50k points max
         step = int(np.ceil(M / 50_000))
         pts_mm = pts_mm[::step]
-        M = len(pts_mm)
 
-    # --- 3) Diameter on convex hull vertices (exact, needs SciPy) ---
     try:
         from scipy.spatial import ConvexHull, distance
 
-        hull = ConvexHull(pts_mm, qhull_options="QJ")  # joggle = robustness
-        verts = pts_mm[hull.vertices]  # typically << M
-        # pairwise distances on vertices (much smaller)
-        # pdist is memory-friendly vs broadcasting
+        hull = ConvexHull(pts_mm, qhull_options="QJ")
+        verts = pts_mm[hull.vertices]
         dmax = (
             float(np.max(distance.pdist(verts, metric="euclidean")))
             if len(verts) > 1
@@ -135,18 +90,14 @@ def compute_feret_diameter(mask_u8: sitk.Image) -> float:
         )
         return dmax
     except Exception:
-        # --- Fallback: fast approximation (farthest-point sampling) ---
         if len(pts_mm) < 2:
             return 0.0
-        # choose an arbitrary start, then alternate farthest endpoints a few iters
         idx = 0
         a = pts_mm[idx]
-        for _ in range(6):  # 6–8 iters is plenty
-            # farthest from a
+        for _ in range(6):
             d2 = np.sum((pts_mm - a) ** 2, axis=1)
             j = int(np.argmax(d2))
             b = pts_mm[j]
-            # farthest from b
             d2b = np.sum((pts_mm - b) ** 2, axis=1)
             i = int(np.argmax(d2b))
             a = pts_mm[i]
@@ -154,14 +105,12 @@ def compute_feret_diameter(mask_u8: sitk.Image) -> float:
 
 
 def label_stats(mask_u8: sitk.Image, label: int = 1) -> Dict[str, Any]:
-    """Compute shape stats with SimpleITK LabelShapeStatistics."""
     lss = sitk.LabelShapeStatisticsImageFilter()
     lss.Execute(mask_u8)
     labels = list(lss.GetLabels())
     if not labels:
         return {"has_label": False}
 
-    # pick 'label' if present else largest by voxel count
     if label in labels:
         lbl = label
     else:
@@ -170,43 +119,31 @@ def label_stats(mask_u8: sitk.Image, label: int = 1) -> Dict[str, Any]:
 
     out: Dict[str, Any] = {"has_label": True, "label_used": int(lbl)}
     out["num_voxels"] = int(lss.GetNumberOfPixels(lbl))
-    out["physical_size_mm3"] = float(lss.GetPhysicalSize(lbl))  # volume in mm^3
-    out["centroid_world_xyz_mm"] = tuple(
-        map(float, lss.GetCentroid(lbl))
-    )  # (x,y,z) in mm
-
-    # Bounding box in index space (start index, size) -> convert to mm
-    bb_index = lss.GetBoundingBox(lbl)  # (startX, startY, startZ, sizeX, sizeY, sizeZ)
+    out["physical_size_mm3"] = float(lss.GetPhysicalSize(lbl))
+    out["centroid_world_xyz_mm"] = tuple(map(float, lss.GetCentroid(lbl)))
+    bb_index = lss.GetBoundingBox(lbl)
     out["bbox_index_start_xyz"] = tuple(int(v) for v in bb_index[:3])
     out["bbox_index_size_xyz"] = tuple(int(v) for v in bb_index[3:6])
 
-    # Extra (not always available in older SITK versions) – guard in try/except
     try:
         out["elongation"] = float(lss.GetElongation(lbl))
     except Exception:
         out["elongation"] = np.nan
     try:
-        out["feret_diameter_mm"] = compute_feret_diameter(mask_u8)
+        out["max_diameter_mm"] = compute_feret_diameter(mask_u8)  # renamed
     except Exception:
-        out["feret_diameter_mm"] = np.nan
-    # try:
-    #     out["feret_diameter_mm"] = float(lss.GetFeretDiameter(lbl))
-    # except Exception:
-    #     out["feret_diameter_mm"] = np.nan
+        out["max_diameter_mm"] = np.nan
     try:
         out["principal_moments"] = tuple(map(float, lss.GetPrincipalMoments(lbl)))
     except Exception:
         out["principal_moments"] = (np.nan, np.nan, np.nan)
 
-    # Additional metrics from scikit-image
     out.update(shape_metrics(mask_u8))
     return out
 
 
 def basic_geometry(mask_u8: sitk.Image) -> Dict[str, Any]:
-    """Axis-aligned extent & centroid also via array, plus spacing-aware metrics."""
-    logger.info("Computing basic geometry")
-    arr = sitk.GetArrayFromImage(mask_u8)  # (z,y,x)
+    arr = sitk.GetArrayFromImage(mask_u8)
     info: Dict[str, Any] = {}
     if arr.max() == 0:
         info.update(
@@ -218,10 +155,10 @@ def basic_geometry(mask_u8: sitk.Image) -> Dict[str, Any]:
         )
         return info
 
-    spacing = np.array(mask_u8.GetSpacing(), float)  # (x,y,z)
-    coords = np.argwhere(arr > 0)  # (n, 3) in z,y,x
+    spacing = np.array(mask_u8.GetSpacing(), float)
+    coords = np.argwhere(arr > 0)
     zmin, ymin, xmin = coords.min(axis=0)
-    zmax, ymax, xmax = coords.max(axis=0)  # inclusive index
+    zmax, ymax, xmax = coords.max(axis=0)
     size_z, size_y, size_x = (zmax - zmin + 1), (ymax - ymin + 1), (xmax - xmin + 1)
     info["vox_count_total"] = int(coords.shape[0])
     info["extent_index_size_xyz"] = (int(size_x), int(size_y), int(size_z))
@@ -231,12 +168,81 @@ def basic_geometry(mask_u8: sitk.Image) -> Dict[str, Any]:
     return info
 
 
+# ---------- Helpers (orientation + heuristics) ----------
 def index_center_world(
     img: sitk.Image, idx_xyz: Tuple[float, float, float]
 ) -> Tuple[float, float, float]:
     return tuple(
         map(float, img.TransformIndexToPhysicalPoint([int(round(i)) for i in idx_xyz]))
     )
+
+
+def axis_mapping_from_direction(D: np.ndarray) -> dict:
+    """
+    Map physical axes (LPS: X=Left-Right, Y=Posterior-Anterior, Z=Inferior-Superior)
+    to image axes (0,1,2). Returns dict with keys 'SI', 'AP', 'LR'.
+    """
+    # rows are physical axes (L, P, S). We want which image axis maximally aligns.
+    si_axis = int(np.argmax(np.abs(D[2, :])))  # physical Z (S/I)
+    ap_axis = int(np.argmax(np.abs(D[1, :])))  # physical Y (P/A)
+    lr_axis = int(np.argmax(np.abs(D[0, :])))  # physical X (L/R)
+    return {"SI": si_axis, "AP": ap_axis, "LR": lr_axis}
+
+
+def ap_displacement_mm(
+    vol: sitk.Image, centroid_world_mm: Tuple[float, float, float]
+) -> float:
+    """
+    Signed displacement along physical AP (Y) axis in mm.
+    Positive -> posterior; Negative -> anterior.
+    """
+    D = np.array(vol.GetDirection(), float).reshape(3, 3)
+    size = np.array(vol.GetSize(), float)
+    center_idx = (size - 1) / 2.0
+    center_world = np.array(index_center_world(vol, tuple(center_idx)))
+    disp_vec = np.array(centroid_world_mm) - center_world
+
+    ap_img_axis = int(np.argmax(np.abs(D[1, :])))
+    ap_dir = D[:, ap_img_axis]
+    ap_sign = np.sign(D[1, ap_img_axis])  # +1 if increasing index goes posterior
+    return float(np.dot(disp_vec, ap_dir) * ap_sign)
+
+
+def max_transverse_slice_location(
+    mask_u8: sitk.Image, si_img_axis: int, si_center_tol_mm: float
+) -> Tuple[str, int]:
+    """
+    Find slice along SI with maximum cross-sectional area.
+    Returns ('inferior'|'superior'|'indeterminate', slice_index)
+    """
+    arr = sitk.GetArrayFromImage(mask_u8)  # (z,y,x)
+    spacing_xyz = np.array(mask_u8.GetSpacing(), float)  # (x,y,z)
+
+    # map image axis -> array axis index (z=0,y=1,x=2)
+    imgax_to_arrax = {2: 0, 1: 1, 0: 2}
+    si_arr_axis = imgax_to_arrax[si_img_axis]
+
+    arr_si_major = np.moveaxis(arr, si_arr_axis, 0)  # (S, .., ..)
+
+    # pixel area of an in-plane slice (two axes not including SI)
+    other_img_axes = [a for a in (0, 1, 2) if a != si_img_axis]
+    pix_area = float(spacing_xyz[other_img_axes[0]] * spacing_xyz[other_img_axes[1]])
+    areas = (arr_si_major > 0).sum(axis=(1, 2)) * pix_area
+    k = int(np.argmax(areas))
+
+    # compare slice position vs volume center
+    size = np.array(mask_u8.GetSize(), float)
+    center_idx = (size[si_img_axis] - 1) / 2.0
+    offset_idx = k - center_idx
+    step_mm = float(spacing_xyz[si_img_axis])
+    offset_mm = offset_idx * step_mm
+    if offset_mm > si_center_tol_mm:
+        loc = "superior"
+    elif offset_mm < -si_center_tol_mm:
+        loc = "inferior"
+    else:
+        loc = "indeterminate"
+    return loc, k
 
 
 def compute_location_heuristics(
@@ -247,15 +253,8 @@ def compute_location_heuristics(
 ) -> Dict[str, Any]:
     """
     Heuristic location flags WITHOUT an atlas.
-    - 'sellar' vs 'suprasellar': by centroid superior/inferior shift relative to volume center along SI axis.
-    - 'stalk_like' or 'duct_like': by midline proximity (small |x|) and AP near mid-anterior corridor (very rough).
-    Notes:
-      * This is only a coarse guess; for clinical-grade zones, use an atlas or landmarks.
     """
-    logger.info("Computing location heuristics")
-    D = np.array(vol.GetDirection(), float).reshape(
-        3, 3
-    )  # columns: image axes in physical (LPS)
+    D = np.array(vol.GetDirection(), float).reshape(3, 3)
     size = np.array(vol.GetSize(), float)
 
     # Volume center in world
@@ -263,18 +262,15 @@ def compute_location_heuristics(
     center_world = np.array(index_center_world(vol, tuple(center_idx)))
     centroid = np.array(centroid_world_mm)
 
-    # Determine the image axis most aligned with physical Z (superior-inferior)
-    si_axis = np.argmax(
-        np.abs(D[2, :])
-    )  # which image axis contributes most to physical Z
-    si_sign = np.sign(D[2, si_axis])  # +1 if increasing index goes superior
-    axis_dir = D[:, si_axis]  # unit vector in physical space for that axis
+    # SI axis and sign (toward superior is +)
+    si_img_axis = int(np.argmax(np.abs(D[2, :])))
+    si_dir = D[:, si_img_axis]
+    si_sign = np.sign(D[2, si_img_axis])
 
-    # Signed SI displacement (mm): positive if centroid is superior to center
     disp_vec = centroid - center_world
-    disp_si = float(np.dot(disp_vec, axis_dir) * si_sign)
+    disp_si = float(np.dot(disp_vec, si_dir) * si_sign)
 
-    # Midline proximity (mm): distance to the mid-sagittal plane estimated by x = center_world_x
+    # Midline proximity (x ~ center_world_x)
     midline_offset_mm = float(abs(centroid[0] - center_world[0]))
 
     flags = {
@@ -292,7 +288,6 @@ def compute_location_heuristics(
     if flags["is_suprasellar_like"]:
         label.append("Suprasellar")
     if flags["is_midline_like"]:
-        # midline proximity could suggest stalk/duct region
         label.append("Stalk/Duct-like")
     if not label:
         label.append("Indeterminate")
@@ -301,12 +296,72 @@ def compute_location_heuristics(
     return flags
 
 
+# ---------- Q/S/T points from available data ----------
+def compute_qst_points(
+    *,
+    ap_diam_cm: float,
+    si_diam_cm: float,
+    ap_position: str,
+    max_transv_loc: str,
+    aspect_ratio_gt_1p1: bool,
+    pituitary_seen: str,
+    ventricles_dilated: str,
+    pit_fossa_vol_cm3: Optional[float],
+    front_tub_sellae_vol_cm3: Optional[float],
+) -> Tuple[int, int, int]:
+    Q_pts = 0
+    S_pts = 0
+    T_pts = 0
+
+    # Q rules (examples from your table subset)
+    if pituitary_seen == "not_clear":
+        Q_pts += 8
+    if np.isfinite(ap_diam_cm) and ap_diam_cm < 3.5:
+        Q_pts += 3
+    if np.isfinite(si_diam_cm) and si_diam_cm > 3.5:
+        Q_pts += 2
+
+    # S rules
+    if ventricles_dilated == "no":
+        S_pts += 5
+    if ap_position == "anterior":
+        S_pts += 2
+    if max_transv_loc == "inferior":
+        S_pts += 2
+    if (front_tub_sellae_vol_cm3 is not None) and (front_tub_sellae_vol_cm3 > 0.8):
+        S_pts += 3
+    if aspect_ratio_gt_1p1:
+        S_pts += 4
+
+    # T rules
+    if pituitary_seen == "clear":
+        T_pts += 6
+    if ventricles_dilated == "yes":
+        T_pts += 3
+    if ap_position == "posterior":
+        T_pts += 1
+    if max_transv_loc == "superior":
+        T_pts += 2
+    if (pit_fossa_vol_cm3 is not None) and (pit_fossa_vol_cm3 < 2.1):
+        T_pts += 4
+
+    return Q_pts, S_pts, T_pts
+
+
+# ---------- Case stats ----------
 def case_stats(
     case_dir: Path,
     modality_glob: str,
     mask_glob: str,
+    *,
     si_thresh_mm: float,
     midline_tol_mm: float,
+    ap_thresh_mm: float,
+    si_center_tol_mm: float,
+    pituitary_seen: str,
+    ventricles_dilated: str,
+    pit_fossa_vol_cm3: Optional[float],
+    front_tub_sellae_vol_cm3: Optional[float],
 ) -> Optional[Dict[str, Any]]:
     case_id = case_dir.name
     vol_p = first_match(case_dir, modality_glob)
@@ -325,84 +380,162 @@ def case_stats(
 
     vol = read_vol(vol_p)
     mask = read_vol(mask_p)
-    # enforce label dtype
     mask = sitk.Cast(mask > 0, sitk.sitkUInt8)
 
-    # spacing & voxel volume
-    spacing = np.array(vol.GetSpacing(), float)  # (x,y,z) mm
+    spacing = np.array(vol.GetSpacing(), float)  # (x,y,z)
     voxel_mm3 = float(np.prod(spacing))
 
     # primary stats via SITK
     logger.info(f"Computing label stats for {case_id}")
     s = label_stats(mask, label=1)
     if not s.get("has_label", False) or s.get("num_voxels", 0) == 0:
-        return {
-            "case_id": case_id,
-            "has_label": False,
-        }
+        return {"case_id": case_id, "label_present": False}
 
-    # supplement
+    # extents
     geo = basic_geometry(mask)
-
-    # centroid & location heuristics
     centroid_world = s["centroid_world_xyz_mm"]
-    loc = compute_location_heuristics(
-        vol, centroid_world, midline_tol_mm=midline_tol_mm, si_thresh_mm=si_thresh_mm
+
+    # axis mapping
+    D = np.array(vol.GetDirection(), float).reshape(3, 3)
+    axes = axis_mapping_from_direction(D)
+
+    # extent (mm) along x/y/z in the *image* axis sense
+    extent_mm_xyz = np.array(
+        [
+            geo["extent_mm_size_xyz"][0],
+            geo["extent_mm_size_xyz"][1],
+            geo["extent_mm_size_xyz"][2],
+        ],
+        dtype=float,
     )
 
-    # aggregate
+    # diameters in cm: SI (height), AP (depth)
+    si_diam_mm = float(extent_mm_xyz[axes["SI"]])
+    ap_diam_mm = float(extent_mm_xyz[axes["AP"]])
+    si_diam_cm = si_diam_mm / 10.0
+    ap_diam_cm = ap_diam_mm / 10.0
+
+    # aspect ratio AP/SI
+    aspect_ratio = ap_diam_cm / si_diam_cm if si_diam_cm > 0 else np.nan
+    aspect_ratio_gt_1p1 = (
+        bool(aspect_ratio > 1.1) if np.isfinite(aspect_ratio) else False
+    )
+
+    # AP displacement and categorical call
+    disp_ap = ap_displacement_mm(vol, centroid_world)
+    if disp_ap < -ap_thresh_mm:
+        ap_position = "anterior"
+    elif disp_ap > ap_thresh_mm:
+        ap_position = "posterior"
+    else:
+        ap_position = "indeterminate"
+
+    # Max transverse slice location (inferior/superior/indeterminate)
+    max_transv_loc, _ = max_transverse_slice_location(
+        mask, axes["SI"], si_center_tol_mm
+    )
+
+    # volumes
+    vol_mm3 = s["physical_size_mm3"]
+    vol_cm3 = vol_mm3 / 1000.0
+
+    # Q/S/T points
+    Q_pts, S_pts, T_pts = compute_qst_points(
+        ap_diam_cm=ap_diam_cm,
+        si_diam_cm=si_diam_cm,
+        ap_position=ap_position,
+        max_transv_loc=max_transv_loc,
+        aspect_ratio_gt_1p1=aspect_ratio_gt_1p1,
+        pituitary_seen=pituitary_seen,
+        ventricles_dilated=ventricles_dilated,
+        pit_fossa_vol_cm3=pit_fossa_vol_cm3,
+        front_tub_sellae_vol_cm3=front_tub_sellae_vol_cm3,
+    )
+
+    # SI/midline heuristics (existing)
+    loc = compute_location_heuristics(
+        vol,
+        centroid_world,
+        midline_tol_mm=midline_tol_mm,
+        si_thresh_mm=si_thresh_mm,
+    )
+
+    # row with cleaned labels
     row: Dict[str, Any] = {
+        # IDs & files
         "case_id": case_id,
-        "image_file": vol_p.name,
+        "img_file": vol_p.name,
         "mask_file": mask_p.name,
-        "spacing_x_mm": spacing[0],
-        "spacing_y_mm": spacing[1],
-        "spacing_z_mm": spacing[2],
-        "voxel_volume_mm3": voxel_mm3,
-        "has_label": True,
-        "label_used": s.get("label_used", 1),
-        "voxels_in_label": s["num_voxels"],
-        "volume_mm3": s["physical_size_mm3"],
+        # voxel / spacing
+        # "spacing_mm_x": spacing[0],
+        # "spacing_mm_y": spacing[1],
+        # "spacing_mm_z": spacing[2],
+        # "voxel_mm3": voxel_mm3,
+        # label basics
+        # "label_present": True,
+        # "label": s.get("label_used", 1),
+        # "voxel_count": s["num_voxels"],
+        # # volumes & area
+        # "vol_mm3": vol_mm3,
+        # "vol_cm3": vol_cm3,  # explicit cm^3
         "surface_area_mm2": s.get("surface_area_mm2", np.nan),
+        # shape descriptors
         "sphericity": s.get("sphericity", np.nan),
         "compactness": s.get("compactness", np.nan),
-        "volume_mL": s["physical_size_mm3"] / 1000.0,
-        "centroid_world_x_mm": centroid_world[0],
-        "centroid_world_y_mm": centroid_world[1],
-        "centroid_world_z_mm": centroid_world[2],
-        "bbox_start_x": s["bbox_index_start_xyz"][0],
-        "bbox_start_y": s["bbox_index_start_xyz"][1],
-        "bbox_start_z": s["bbox_index_start_xyz"][2],
-        "bbox_size_x": s["bbox_index_size_xyz"][0],
-        "bbox_size_y": s["bbox_index_size_xyz"][1],
-        "bbox_size_z": s["bbox_index_size_xyz"][2],
-        "extent_size_x_vox": geo["extent_index_size_xyz"][0],
-        "extent_size_y_vox": geo["extent_index_size_xyz"][1],
-        "extent_size_z_vox": geo["extent_index_size_xyz"][2],
-        "extent_size_x_mm": geo["extent_mm_size_xyz"][0],
-        "extent_size_y_mm": geo["extent_mm_size_xyz"][1],
-        "extent_size_z_mm": geo["extent_mm_size_xyz"][2],
-        "feret_diameter_mm": s.get("feret_diameter_mm", np.nan),
+        # diameters & aspect ratio
+        "height_cm": si_diam_cm,  # SI
+        "depth_cm": ap_diam_cm,  # AP
+        "aspect_ratio_ap_over_si": aspect_ratio,
+        "aspect_ratio_gt_1_1": aspect_ratio_gt_1p1,
+        # centroid (world, mm)
+        # "centroid_mm_x": centroid_world[0],
+        # "centroid_mm_y": centroid_world[1],
+        # "centroid_mm_z": centroid_world[2],
+        # # bounding box (index space)
+        # "bbox_start_x": s["bbox_index_start_xyz"][0],
+        # "bbox_start_y": s["bbox_index_start_xyz"][1],
+        # "bbox_start_z": s["bbox_index_start_xyz"][2],
+        # "bbox_size_x": s["bbox_index_size_xyz"][0],
+        # "bbox_size_y": s["bbox_index_size_xyz"][1],
+        # "bbox_size_z": s["bbox_index_size_xyz"][2],
+        # # extents (voxels & mm)
+        # "extent_vox_x": geo["extent_index_size_xyz"][0],
+        # "extent_vox_y": geo["extent_index_size_xyz"][1],
+        # "extent_vox_z": geo["extent_index_size_xyz"][2],
+        # "extent_mm_x": geo["extent_mm_size_xyz"][0],
+        # "extent_mm_y": geo["extent_mm_size_xyz"][1],
+        # "extent_mm_z": geo["extent_mm_size_xyz"][2],
+        # # additional shape
+        "max_diameter_mm": s.get("max_diameter_mm", np.nan),  # Feret (renamed)
         "elongation": s.get("elongation", np.nan),
-        "principal_moment_1": (s.get("principal_moments") or (np.nan, np.nan, np.nan))[
-            0
-        ],
-        "principal_moment_2": (s.get("principal_moments") or (np.nan, np.nan, np.nan))[
-            1
-        ],
-        "principal_moment_3": (s.get("principal_moments") or (np.nan, np.nan, np.nan))[
-            2
-        ],
-        "si_disp_mm": loc["si_disp_mm"],
-        "midline_offset_mm": loc["midline_offset_mm"],
-        "is_sellar_like": loc["is_sellar_like"],
-        "is_suprasellar_like": loc["is_suprasellar_like"],
-        "is_midline_like": loc["is_midline_like"],
-        "heuristic_region_label": loc["heuristic_region_label"],
+        # "pm1": (s.get("principal_moments") or (np.nan, np.nan, np.nan))[0],
+        # "pm2": (s.get("principal_moments") or (np.nan, np.nan, np.nan))[1],
+        # "pm3": (s.get("principal_moments") or (np.nan, np.nan, np.nan))[2],
+        # SI/midline heuristics
+        "vertical_shift_mm": loc["si_disp_mm"],  # renamed from si_disp_mm
+        "midline_shift_mm": loc["midline_offset_mm"],  # renamed from midline_offset_mm
+        "sellar_like": loc["is_sellar_like"],
+        "suprasellar_like": loc["is_suprasellar_like"],
+        "midline_like": loc["is_midline_like"],
+        "region_heuristic": loc["heuristic_region_label"],
+        # AP heuristics
+        "ap_shift_mm": disp_ap,  # renamed from ap_disp_mm
+        "ap_position": ap_position,  # anterior/posterior/indeterminate
+        "max_area_slice_loc": max_transv_loc,  # inferior/superior/indeterminate
+        # Q/S/T partial points
+        "Q_pts": Q_pts,
+        "S_pts": S_pts,
+        "T_pts": T_pts,
+        # inputs echoed back
+        "ventricles_dilated": ventricles_dilated,
+        "pituitary_seen": pituitary_seen,
+        "pit_fossa_cm3": pit_fossa_vol_cm3,
+        "front_tub_sellae_cm3": front_tub_sellae_vol_cm3,
     }
     return row
 
 
+# ---------- CLI / main ----------
 def main():
     ap = argparse.ArgumentParser(
         description="Compute tumor mask statistics and heuristic location; save CSV."
@@ -418,26 +551,67 @@ def main():
         "--modality_glob",
         type=str,
         default="t1*ce*aligned*.nii.gz",
-        help="Suffix glob matched after '<CASE>_'. Case-insensitive matching is applied.",
+        help="Suffix glob matched after '<CASE>_'. Case-insensitive.",
     )
     ap.add_argument(
         "--mask_glob",
         type=str,
-        default="mask.nii.gz",  # in argparse defaults
+        default="mask.nii.gz",
         help="Suffix glob matched after '<CASE>_'.",
     )
+    # thresholds / heuristics
     ap.add_argument(
         "--si_thresh_mm",
         type=float,
         default=6.0,
-        help="Threshold (mm) to call suprasellar (>+thr) vs sellar (<-thr) relative to volume center along SI axis.",
+        help="SI threshold for sellar/suprasellar call.",
     )
     ap.add_argument(
         "--midline_tol_mm",
         type=float,
         default=6.0,
-        help="Tolerance (mm) to call midline proximity (stalk/duct-like).",
+        help="Tolerance (mm) for midline proximity.",
     )
+    ap.add_argument(
+        "--ap_thresh_mm",
+        type=float,
+        default=6.0,
+        help="Threshold (mm) for anterior/posterior call.",
+    )
+    ap.add_argument(
+        "--si_center_tol_mm",
+        type=float,
+        default=6.0,
+        help="Tolerance (mm) to call max area slice superior vs inferior.",
+    )
+
+    # inputs used in partial Q/S/T scores
+    ap.add_argument(
+        "--pituitary_seen",
+        choices=["clear", "not_clear", "na"],
+        default="na",
+        help="If the pituitary is clearly seen (for Q/T scoring).",
+    )
+    ap.add_argument(
+        "--ventricles_dilated",
+        choices=["yes", "no", "na"],
+        default="na",
+        help="If ventricles are dilated (for S/T scoring).",
+    )
+    ap.add_argument(
+        "--pit_fossa_vol_cm3",
+        type=float,
+        default=None,
+        help="Tumor volume inside pituitary fossa (cm^3), if available (T scoring).",
+    )
+    ap.add_argument(
+        "--front_tub_sellae_vol_cm3",
+        type=float,
+        default=None,
+        help="Tumor volume anterior to tuberculum sellae (cm^3), if available (S scoring).",
+    )
+
+    # logging
     ap.add_argument(
         "--log_level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -450,18 +624,13 @@ def main():
         default=None,
         help="Log file path (in addition to console).",
     )
+
     args = ap.parse_args()
-    setup_logging(Path(args.log_file), args.log_level)
+    setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
+
     logger.info(f"Args: {args}")
     logger.info(f"Case dir: {args.in_dir}")
     logger.info(f"Output CSV: {args.out_csv}")
-    logger.info(f"Modality glob: {args.modality_glob}")
-    logger.info(f"Mask glob: {args.mask_glob}")
-    logger.info(f"SI threshold (mm): {args.si_thresh_mm}")
-    logger.info(f"Midline tolerance (mm): {args.midline_tol_mm}")
-    logger.info(f"Log level: {args.log_level}")
-    logger.info(f"Log file: {args.log_file}")
-    logger.info(f"Cases: {sorted(args.in_dir.iterdir())}")
 
     rows: List[Dict[str, Any]] = []
     cases = [d for d in sorted(args.in_dir.iterdir()) if d.is_dir()]
@@ -477,6 +646,12 @@ def main():
                 args.mask_glob,
                 si_thresh_mm=args.si_thresh_mm,
                 midline_tol_mm=args.midline_tol_mm,
+                ap_thresh_mm=args.ap_thresh_mm,
+                si_center_tol_mm=args.si_center_tol_mm,
+                pituitary_seen=args.pituitary_seen,
+                ventricles_dilated=args.ventricles_dilated,
+                pit_fossa_vol_cm3=args.pit_fossa_vol_cm3,
+                front_tub_sellae_vol_cm3=args.front_tub_sellae_vol_cm3,
             )
             if row is not None:
                 rows.append(row)
