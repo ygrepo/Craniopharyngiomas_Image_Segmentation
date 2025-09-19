@@ -4,11 +4,11 @@
 #SBATCH --output=logs/mri_core_predict_3d_%A_%a.out
 #SBATCH --error=logs/mri_core_predict_3d_%A_%a.err
 #SBATCH --time=04:00:00
-#SBATCH --partition=gpua100
+#SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=64G
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=32G
 
 set -euo pipefail
 
