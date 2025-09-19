@@ -1,6 +1,14 @@
 #!/bin/bash
 #   mri_core_predict_3d.sh    —  Predict 3D mask using MRI-CORE.
-
+#SBATCH --job-name=mri_core_predict_3d
+#SBATCH --output=logs/mri_core_predict_3d_%A_%a.out
+#SBATCH --error=logs/mri_core_predict_3d_%A_%a.err
+#SBATCH --time=04:00:00
+#SBATCH --partition=gpua100
+#SBATCH --gres=gpu:1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=64G
 
 set -euo pipefail
 
@@ -35,7 +43,7 @@ OUTPUT_DIR="output/mri_core_3d"
 mkdir -p "$OUTPUT_DIR"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="${LOG_DIR}/mricore_predict_3d_${TIMESTAMP}.log"
+LOG_FILE="${LOG_DIR}/mri_core_predict_3d_${TIMESTAMP}.log"
 
 
 set +e
