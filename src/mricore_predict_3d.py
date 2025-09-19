@@ -17,7 +17,7 @@ sys.path.append("../mri_foundation")
 from models.sam import sam_model_registry
 
 
-def _ensure_defaults(ns):
+def _ensure_defaults(ns, image_size: int = 1024):
     def setdef(k, v):
         if not hasattr(ns, k):
             setattr(ns, k, v)
@@ -31,11 +31,13 @@ def _ensure_defaults(ns):
     setdef("if_prompt_adapter", False)
     setdef("if_low_rank_adapter", False)
     setdef("low_rank_rank", 8)  # harmless default
-    setdef("decoder_adapt_depth", [])
+    setdef("decoder_adapt_depth", 0)
     # normalization used by MRI-CORE; 'slice_norm' is their common default
     setdef("normalize_type", "slice_norm")
-    # occasionally referenced names in repos derived from finetune-SAM:
+    setdef("image_size", image_size)
     setdef("num_cls", 1)  # binary
+    setdef("mask_decoder_type", "default")
+    setdef("prompt_type", "none")
     return ns
 
 
