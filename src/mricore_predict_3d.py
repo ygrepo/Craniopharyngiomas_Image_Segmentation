@@ -128,6 +128,12 @@ def predict_case(
     logger.info(f"[ok] {case_dir.name} → {out_dir/'pred_mask.nii.gz'}")
 
 
+def sanity(model):
+    total = sum(p.numel() for p in model.parameters())
+    nanp = sum(torch.isnan(p).sum().item() for p in model.parameters())
+    logger.info(f"[model] params={total:,}  NaNs={nanp}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="MRI-CORE slice inference → 3D mask")
     ap.add_argument(
@@ -183,6 +189,7 @@ def main():
         .eval()
         .to(args.device)
     )
+    sanity(model)
 
     cases = [d for d in sorted(args.slices_root.iterdir()) if d.is_dir()]
     for c in cases:
