@@ -42,41 +42,40 @@ def _ensure_defaults(ns, image_size: int = 1024):
     return ns
 
 
+#
 @torch.no_grad()
-def run_case(
+def predict_case(
     case_dir: Path, out_dir: Path, model, device: torch.device, image_size: int = 1024
 ):
     imgs_dir = case_dir / "images"
     meta_p = case_dir / "meta.json"
     if not imgs_dir.exists() or not meta_p.exists():
-        logger.warning(f"[warn] {case_dir.name}: missing images/ or meta.json")
+        print(f"[warn] {case_dir.name}: missing images/ or meta.json, skip")
         return
 
-    meta = json.loads(Path(meta_p).read_text())
-    H, W, Z = meta["shape_xyz"]
+    meta = json.loads(meta_p.read_text())
+    X, Y, Z = meta["shape_xyz"]
     affine = np.array(meta["affine"], dtype=np.float32)
+    export_axis = int(meta.get("export_axis", 2))
+    assert export_axis == 2, "This script assumes axial export along axis=2."
+
     out_dir.mkdir(parents=True, exist_ok=True)
+    mask_vol = np.zeros((X, Y, Z), dtype=np.uint8)
 
-    mask_stack = np.zeros((Z, H, W), dtype=np.uint8)
-
-    # dense positional enc is used in many SAM forks; MRI-CORE mirrors SAM API
-    # (README shows image_encoder / prompt_encoder / mask_decoder usage)
-    # imgs must be (B,3,1024,1024) in [0,1]
-    for z_png in sorted(imgs_dir.glob("*.png")):
-        logger.info(f"[slice] {case_dir.name} / {z_png.name}")
-        z = int(z_png.stem)
-        img = cv2.imread(str(z_png), cv2.IMREAD_COLOR)  # HxWx3 uint8
+    for png_p in sorted(imgs_dir.glob("*.png")):
+        z = int(png_p.stem)  # 0000.png → 0
+        img = cv2.imread(str(png_p), cv2.IMREAD_COLOR)  # HxW×3 uint8
         h0, w0 = img.shape[:2]
         img01 = img.astype(np.float32) / 255.0
         inp = cv2.resize(
             img01, (image_size, image_size), interpolation=cv2.INTER_LINEAR
         )
-        x = (
+        xt = (
             torch.from_numpy(inp.transpose(2, 0, 1)).unsqueeze(0).to(device)
         )  # 1,3,1024,1024
 
-        # ---- MRI-CORE forward (SAM-style) ----
-        img_emb = model.image_encoder(x)
+        # SAM-like forward
+        img_emb = model.image_encoder(xt)
         sparse_emb, dense_emb = model.prompt_encoder(
             points=None, boxes=None, masks=None
         )
@@ -87,8 +86,7 @@ def run_case(
             dense_prompt_embeddings=dense_emb,
             multimask_output=False,
         )
-        logit = logits[:, 0:1]  # (1,1,h,w)
-        # upsample to 1024 if needed
+        logit = logits[:, 0:1]
         if logit.shape[-1] != image_size:
             logit = F.interpolate(
                 logit,
@@ -98,24 +96,88 @@ def run_case(
             )
         prob = torch.sigmoid(logit)[0, 0].cpu().numpy()
         mask_1024 = (prob > 0.5).astype(np.uint8)
-        logger.info(f"[slice] {case_dir.name} / {z_png.name}  {mask_1024.sum()}")
-
-        # back to native HxW
         mask_hw = cv2.resize(mask_1024, (w0, h0), interpolation=cv2.INTER_NEAREST)
-        mask_stack[z] = mask_hw
 
-    # optional: keep largest CC to remove speckles
-    # (comment out if you prefer raw outputs)
-    # from skimage.measure import label
-    # lab = label(mask_stack, connectivity=1)
-    # if lab.max() > 0:
-    #     sizes = np.bincount(lab.ravel())
-    #     keep = np.argmax(sizes[1:]) + 1
-    #     mask_stack = (lab == keep).astype(np.uint8)
+        # write into (X,Y,Z) volume as axial slice at z
+        # png was HxW ~ equals YxX; nibabel shape is (X,Y,Z)
+        if (w0, h0) != (X, Y):
+            # safety: resize to exact NIfTI in-plane size if export changed it
+            mask_hw = cv2.resize(mask_hw, (X, Y), interpolation=cv2.INTER_NEAREST)
+        mask_vol[..., z] = mask_hw  # axial placement (axis=2)
 
-    # write pred NIfTI with original affine/orientation
-    nii = nib.Nifti1Image(mask_stack.transpose(2, 1, 0), affine)  # (X,Y,Z) in nib
-    nib.save(nii, str(out_dir / "pred_mask.nii.gz"))
+    # save with original affine — no transpose
+    out_nii = nib.Nifti1Image(mask_vol, affine)
+    nib.save(out_nii, str(out_dir / "pred_mask.nii.gz"))
+    print(f"[ok] {case_dir.name} → {out_dir/'pred_mask.nii.gz'}")
+
+
+@torch.no_grad()
+def predict_case(
+    case_dir: Path, out_dir: Path, model, device: torch.device, image_size: int = 1024
+):
+    imgs_dir = case_dir / "images"
+    meta_p = case_dir / "meta.json"
+    if not imgs_dir.exists() or not meta_p.exists():
+        logger.warning(f"[warn] {case_dir.name}: missing images/ or meta.json")
+        return
+
+    meta = json.loads(Path(meta_p).read_text())
+    X, Y, Z = meta["shape_xyz"]
+    affine = np.array(meta["affine"], dtype=np.float32)
+    export_axis = int(meta.get("export_axis", 2))
+    assert export_axis == 2, "This script assumes axial export along axis=2."
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    mask_vol = np.zeros((X, Y, Z), dtype=np.uint8)
+
+    for png_p in sorted(imgs_dir.glob("*.png")):
+        z = int(png_p.stem)  # 0000.png → 0
+        img = cv2.imread(str(png_p), cv2.IMREAD_COLOR)  # HxW×3 uint8
+        h0, w0 = img.shape[:2]
+        img01 = img.astype(np.float32) / 255.0
+        inp = cv2.resize(
+            img01, (image_size, image_size), interpolation=cv2.INTER_LINEAR
+        )
+        xt = (
+            torch.from_numpy(inp.transpose(2, 0, 1)).unsqueeze(0).to(device)
+        )  # 1,3,1024,1024
+
+        # SAM-like forward
+        img_emb = model.image_encoder(xt)
+        sparse_emb, dense_emb = model.prompt_encoder(
+            points=None, boxes=None, masks=None
+        )
+        logits, _ = model.mask_decoder(
+            image_embeddings=img_emb,
+            image_pe=model.prompt_encoder.get_dense_pe(),
+            sparse_prompt_embeddings=sparse_emb,
+            dense_prompt_embeddings=dense_emb,
+            multimask_output=False,
+        )
+        logit = logits[:, 0:1]
+        if logit.shape[-1] != image_size:
+            logit = F.interpolate(
+                logit,
+                size=(image_size, image_size),
+                mode="bilinear",
+                align_corners=False,
+            )
+        prob = torch.sigmoid(logit)[0, 0].cpu().numpy()
+        mask_1024 = (prob > 0.5).astype(np.uint8)
+        mask_hw = cv2.resize(mask_1024, (w0, h0), interpolation=cv2.INTER_NEAREST)
+
+        # write into (X,Y,Z) volume as axial slice at z
+        # png was HxW ~ equals YxX; nibabel shape is (X,Y,Z)
+        if (w0, h0) != (X, Y):
+            # safety: resize to exact NIfTI in-plane size if export changed it
+            mask_hw = cv2.resize(mask_hw, (X, Y), interpolation=cv2.INTER_NEAREST)
+        mask_vol[..., z] = mask_hw  # axial placement (axis=2)
+
+    # save with original affine — no transpose
+    out_nii = nib.Nifti1Image(mask_vol, affine)
+    nib.save(out_nii, str(out_dir / "pred_mask.nii.gz"))
     logger.info(f"[ok] {case_dir.name} → {out_dir/'pred_mask.nii.gz'}")
 
 
@@ -180,7 +242,7 @@ def main():
 
     cases = [d for d in sorted(args.slices_root.iterdir()) if d.is_dir()]
     for c in cases:
-        run_case(
+        predict_case(
             c,
             args.predict_root / c.name,
             model,

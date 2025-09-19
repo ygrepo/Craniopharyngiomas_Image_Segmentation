@@ -67,11 +67,10 @@ def main():
         out_dir.mkdir(parents=True, exist_ok=True)
 
         nii = nib.load(str(img_p))
-        vol = nii.get_fdata().astype(
-            np.float32
-        )  # (X,Y,Z) or (Y,X,Z) depending on affine; nib uses (X,Y,Z)
-        # we’ll treat axis 2 as axial slices (Z)
-        H, W, Z = vol.shape if vol.ndim == 3 else vol.shape[:3]
+        vol = nii.get_fdata().astype(np.float32)
+        X, Y, Z = vol.shape
+        affine = nii.affine
+        axcodes = nib.aff2axcodes(affine)  # e.g. ('L','P','S')
 
         # simple per-slice min–max to [0,1] → uint8 PNG
         for z in range(Z):
@@ -85,8 +84,10 @@ def main():
         # store geometry to rebuild
         meta = {
             "nifti_path": str(img_p),
-            "shape_xyz": [int(s) for s in vol.shape],
-            "affine": nii.affine.tolist(),
+            "shape_xyz": [int(X), int(Y), int(Z)],
+            "affine": affine.tolist(),
+            "axcodes": list(axcodes),  # for sanity checks
+            "export_axis": 2,  # we exported along Z
         }
         (args.out_root / c.name).mkdir(parents=True, exist_ok=True)
         with open(args.out_root / c.name / "meta.json", "w") as f:

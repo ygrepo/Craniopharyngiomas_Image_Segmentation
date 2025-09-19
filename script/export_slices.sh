@@ -47,7 +47,6 @@ $PYTHON "$MAIN" \
 exit_code=$?
 set -e
 
-
 if [[ ${exit_code} -eq 0 ]]; then
     echo "OK: Preprocessing finished at $(date)" | tee -a "${LOG_FILE}"
 else
