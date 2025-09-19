@@ -26,7 +26,7 @@ LOG_DIR="logs"
 LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
-BASE_DATA_DIR="output/data"
+BASE_DATA_DIR="output/preprocessed"
 PYTHON="${ENV_PREFIX}/bin/python"
 MAIN="src/compute_tumor_metrics.py"
 
