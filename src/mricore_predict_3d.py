@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 from src.util import get_logger, setup_logging
 
+logger = get_logger(__name__)
 
 sys.path.append("../mri_foundation")
 from models.sam import sam_model_registry
@@ -48,7 +49,7 @@ def run_case(
     imgs_dir = case_dir / "images"
     meta_p = case_dir / "meta.json"
     if not imgs_dir.exists() or not meta_p.exists():
-        print(f"[warn] {case_dir.name}: missing images/ or meta.json")
+        logger.warning(f"[warn] {case_dir.name}: missing images/ or meta.json")
         return
 
     meta = json.loads(Path(meta_p).read_text())
@@ -62,6 +63,7 @@ def run_case(
     # (README shows image_encoder / prompt_encoder / mask_decoder usage)
     # imgs must be (B,3,1024,1024) in [0,1]
     for z_png in sorted(imgs_dir.glob("*.png")):
+        logger.info(f"[slice] {case_dir.name} / {z_png.name}")
         z = int(z_png.stem)
         img = cv2.imread(str(z_png), cv2.IMREAD_COLOR)  # HxWx3 uint8
         h0, w0 = img.shape[:2]
@@ -96,6 +98,7 @@ def run_case(
             )
         prob = torch.sigmoid(logit)[0, 0].cpu().numpy()
         mask_1024 = (prob > 0.5).astype(np.uint8)
+        logger.info(f"[slice] {case_dir.name} / {z_png.name}  {mask_1024.sum()}")
 
         # back to native HxW
         mask_hw = cv2.resize(mask_1024, (w0, h0), interpolation=cv2.INTER_NEAREST)
@@ -113,7 +116,7 @@ def run_case(
     # write pred NIfTI with original affine/orientation
     nii = nib.Nifti1Image(mask_stack.transpose(2, 1, 0), affine)  # (X,Y,Z) in nib
     nib.save(nii, str(out_dir / "pred_mask.nii.gz"))
-    print(f"[ok] {case_dir.name} → {out_dir/'pred_mask.nii.gz'}")
+    logger.info(f"[ok] {case_dir.name} → {out_dir/'pred_mask.nii.gz'}")
 
 
 def main():
