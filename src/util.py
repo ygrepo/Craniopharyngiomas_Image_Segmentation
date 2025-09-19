@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 # ---- One base for everything ----
-BASE_LOGGER = "drugdiscovery"
+BASE_LOGGER = "base_logger"
 _BASE = logging.getLogger(BASE_LOGGER)  # the only logger we configure here
 
 

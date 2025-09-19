@@ -18,51 +18,128 @@ sys.path.append("../mri_foundation")
 from models.sam import sam_model_registry
 
 
-def smart_load(model, ckpt_path: str, device: str = "cuda", strict: bool = False):
+def smart_load(
+    model,
+    ckpt_path: str,
+    device: str = "cuda",
+    strict: bool = False,
+    image_size: int = 1024,
+    vit_patch_size: int = 16,
+):
     """
-    Robustly load a checkpoint into `model`, unwrapping common nesting:
-      - state_dict / model / net / module / teacher / student
-      - DataParallel prefixes "module."
-    Leaves keys untouched otherwise (no risky remapping).
+    Robust loader that:
+      1) unwraps common containers (state_dict/model/net/module/teacher/student),
+      2) tries direct load,
+      3) if coverage is ~0, remaps MAE/DINO/MRI-CORE keys -> SAM names (image_encoder.*),
+      4) handles pos_embed reshape to (1, H, W, C).
     """
-    import torch
+    import torch, numpy as np
 
     sd = torch.load(
         ckpt_path, map_location=torch.device(device if device != "cuda" else "cuda:0")
     )
 
-    # 1) Unwrap common container keys once
+    # 1) unwrap
     for k in ("state_dict", "model", "net", "module", "teacher", "student"):
         if isinstance(sd, dict) and k in sd and isinstance(sd[k], dict):
             sd = sd[k]
             break
-
     if not isinstance(sd, dict):
-        raise ValueError(f"[smart_load] Unexpected checkpoint format at {ckpt_path}")
+        raise ValueError(f"[smart_load] Unexpected checkpoint format: {type(sd)}")
 
-    # 2) Strip a single leading "module." (from DataParallel)
-    if any(key.startswith("module.") for key in sd.keys()):
-        sd = {key.replace("module.", "", 1): val for key, val in sd.items()}
+    # strip single 'module.' if present
+    if any(k.startswith("module.") for k in sd.keys()):
+        sd = {k.replace("module.", "", 1): v for k, v in sd.items()}
 
-    # 3) Load
-    msg = model.load_state_dict(sd, strict=strict)
+    # helper: coverage vs model
+    def coverage_keys(sd_keys, model_keys):
+        inter = set(sd_keys) & set(model_keys)
+        return len(inter), inter
 
-    # 4) Report
-    missing = getattr(msg, "missing_keys", [])
-    unexpected = getattr(msg, "unexpected_keys", [])
+    # 2) try direct
+    msg_direct = model.load_state_dict(sd, strict=False)
+    inter_len, _ = coverage_keys(sd.keys(), model.state_dict().keys())
+    if inter_len > 1000:  # good overlap -> done
+        logger.info("[smart_load] direct load ok:", msg_direct)
+        return msg_direct
 
+    # 3) remap MRI-CORE/MAE/DINO -> SAM encoder
+    new_sd = {}
+    token_size = image_size // vit_patch_size
+
+    # detect if pos_embed needs 2D reshape
+    def fix_pos_embed(arr):
+        # expect shape (1, L(+cls), C)
+        if (
+            arr.ndim == 3
+            and arr.shape[0] == 1
+            and (arr.shape[1] == token_size * token_size + 1)
+        ):
+            pe = arr[:, 1:, :]  # drop cls
+            ts = int(np.sqrt(pe.shape[1]))
+            pe = pe.reshape(1, ts, ts, arr.shape[2])  # 1,H,W,C
+            # resize to target token grid
+            pe_t = (
+                torch.from_numpy(pe).permute(0, 3, 1, 2)
+                if isinstance(pe, np.ndarray)
+                else pe.permute(0, 3, 1, 2)
+            )
+            pe_t = torch.nn.functional.interpolate(
+                pe_t,
+                size=(token_size, token_size),
+                mode="bilinear",
+                align_corners=False,
+            )
+            pe = pe_t.permute(0, 2, 3, 1)  # back to 1,H,W,C
+            return pe
+        return arr
+
+    for k, v in sd.items():
+        if k.startswith("decoder") or k.startswith("mask_decoder"):
+            continue  # ignore task heads
+        nk = k
+
+        # common renames from MRI-CORE/DINO to SAM
+        nk = nk.replace("backbone.", "image_encoder.")
+        nk = nk.replace("fc", "lin")  # mlp.fc -> mlp.lin
+        nk = nk.replace("patch_embed.proj.", "patch_embed.proj.")
+        nk = nk.replace("norm1", "norm1")
+        nk = nk.replace("norm2", "norm2")
+
+        # some DINOv2 dumps have chunked indices like image_encoder.0.0... collapse those
+        parts = nk.split(".")
+        if len(parts) > 3 and parts[2].isdigit() and parts[3].isdigit():
+            nk = ".".join([p for i, p in enumerate(parts) if i != 2])
+
+        # pos_embed special-case: SAM expects 1,H,W,C (later transposed inside)
+        if "pos_embed" in k and "image_encoder" in nk:
+            v = fix_pos_embed(
+                v.detach().cpu().numpy() if isinstance(v, torch.Tensor) else v
+            )
+
+        # ensure all encoder weights live under image_encoder.*
+        if not nk.startswith("image_encoder."):
+            if "pos_embed" in k or "patch_embed" in k or "blocks" in k or "neck" in k:
+                nk = "image_encoder." + nk
+
+        new_sd[nk] = v
+
+    # 4) load remapped
+    msg = model.load_state_dict(new_sd, strict=False)
+
+    # report
+    model_keys = set(model.state_dict().keys())
+    inter_len2, _ = coverage_keys(new_sd.keys(), model_keys)
     total = sum(p.numel() for p in model.parameters())
     nanp = sum(torch.isnan(p).sum().item() for p in model.parameters())
-
-    logger.info(f"[smart_load] from: {ckpt_path}")
-    logger.info(f"[smart_load] strict={strict}  params={total:,}  NaNs={nanp}")
-    logger.info(f"[smart_load] missing={len(missing)}  unexpected={len(unexpected)}")
-    # If lots are missing, give a friendly hint
-    if len(missing) > 1000:
+    logger.info(
+        f"[smart_load] remap load: intersect={inter_len2}  params={total:,}  NaNs={nanp}"
+    )
+    logger.info(f"[smart_load] msg: {msg}")
+    if inter_len2 < 1000:
         logger.warning(
-            "[smart_load][warn] A very large number of parameters are missing. "
-            "This usually means the checkpoint structure doesn’t match this model. "
-            "Double-check you’re using an MRI-CORE/SAM-compatible checkpoint."
+            "[smart_load][warn] Very low overlap after remap — this checkpoint may not match the SAM ViT-B encoder. "
+            "Try the other file (e.g., pretrained_weights/mri_foundation.pth) or confirm this is a SAM/MRI-CORE encoder dump."
         )
     return msg
 
@@ -276,10 +353,35 @@ def main():
         .eval()
         .to(args.device)
     )
-    smart_load(model, str(args.checkpoint), device=args.device, strict=False)
-    model.eval()  # after loading
+    smart_load(
+        model,
+        str(args.checkpoint),
+        device=args.device,
+        strict=False,
+        image_size=args.image_size,
+        vit_patch_size=16,
+    )
+    model.eval()
     sanity(model)
     load_report(model, str(args.checkpoint), args.device)
+
+    # Inspect checkpoint keys (after unwrapping)
+    import torch
+
+    ckpt_path = str(args.checkpoint)
+    sd = torch.load(
+        ckpt_path,
+        map_location=torch.device(args.device if args.device != "cuda" else "cuda:0"),
+    )
+    for k in ("state_dict", "model", "net", "module", "teacher", "student"):
+        if isinstance(sd, dict) and k in sd and isinstance(sd[k], dict):
+            sd = sd[k]
+            break
+
+    keys = list(sd.keys())
+    sample = sorted(keys)[:50]
+    logger.info("Checkpoint: %s | total keys: %d", ckpt_path, len(keys))
+    logger.info("Sample keys (first %d): %s", len(sample), sample)
 
     cases = [d for d in sorted(args.slices_root.iterdir()) if d.is_dir()]
     for c in cases:
