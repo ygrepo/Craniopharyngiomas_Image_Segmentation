@@ -196,9 +196,12 @@ def predict_case(
                 mode="bilinear",
                 align_corners=False,
             )
+        logger.info(
+            f"logit mean/std: {float(logit.mean()):.4f} / {float(logit.std()):.4f}"
+        )
         prob = torch.sigmoid(logit)[0, 0].cpu().numpy()
 
-        mask_1024 = (prob > 0.5).astype(np.uint8)
+        mask_1024 = (prob > 0.35).astype(np.uint8)
         mask_hw = cv2.resize(mask_1024, (w0, h0), interpolation=cv2.INTER_NEAREST)
 
         # place into (X,Y,Z) as axial slice z
