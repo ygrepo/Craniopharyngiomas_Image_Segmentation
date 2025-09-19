@@ -17,6 +17,53 @@ sys.path.append("../mri_foundation")
 from models.sam import sam_model_registry
 
 
+def smart_load(model, ckpt_path: str, device: str = "cuda", strict: bool = False):
+    """
+    Robustly load a checkpoint into `model`, unwrapping common nesting:
+      - state_dict / model / net / module / teacher / student
+      - DataParallel prefixes "module."
+    Leaves keys untouched otherwise (no risky remapping).
+    """
+    import torch
+
+    sd = torch.load(ckpt_path, map_location=device)
+
+    # 1) Unwrap common container keys once
+    for k in ("state_dict", "model", "net", "module", "teacher", "student"):
+        if isinstance(sd, dict) and k in sd and isinstance(sd[k], dict):
+            sd = sd[k]
+            break
+
+    if not isinstance(sd, dict):
+        raise ValueError(f"[smart_load] Unexpected checkpoint format at {ckpt_path}")
+
+    # 2) Strip a single leading "module." (from DataParallel)
+    if any(key.startswith("module.") for key in sd.keys()):
+        sd = {key.replace("module.", "", 1): val for key, val in sd.items()}
+
+    # 3) Load
+    msg = model.load_state_dict(sd, strict=strict)
+
+    # 4) Report
+    missing = getattr(msg, "missing_keys", [])
+    unexpected = getattr(msg, "unexpected_keys", [])
+
+    total = sum(p.numel() for p in model.parameters())
+    nanp = sum(torch.isnan(p).sum().item() for p in model.parameters())
+
+    logger.info(f"[smart_load] from: {ckpt_path}")
+    logger.info(f"[smart_load] strict={strict}  params={total:,}  NaNs={nanp}")
+    logger.info(f"[smart_load] missing={len(missing)}  unexpected={len(unexpected)}")
+    # If lots are missing, give a friendly hint
+    if len(missing) > 1000:
+        logger.warning(
+            "[smart_load][warn] A very large number of parameters are missing. "
+            "This usually means the checkpoint structure doesn’t match this model. "
+            "Double-check you’re using an MRI-CORE/SAM-compatible checkpoint."
+        )
+    return msg
+
+
 def _ensure_defaults(ns, image_size: int = 1024):
     def setdef(k, v):
         if not hasattr(ns, k):
@@ -181,7 +228,7 @@ def main():
     model = (
         sam_model_registry[args.arch](
             margs,
-            checkpoint=str(args.checkpoint),
+            checkpoint=None,
             num_classes=1,
             image_size=args.image_size,
             pretrained_sam=False,  # use MRI-CORE weights, not SAM
@@ -189,6 +236,7 @@ def main():
         .eval()
         .to(args.device)
     )
+    smart_load(model, str(args.checkpoint), device=args.device, strict=False)
     sanity(model)
 
     cases = [d for d in sorted(args.slices_root.iterdir()) if d.is_dir()]
