@@ -48,14 +48,14 @@ LOG_FILE="${LOG_DIR}/mri_core_predict_3d_${TIMESTAMP}.log"
 
 set +e
 $PYTHON "$MAIN" \
-    --slices_root "$BASE_DATA_DIR" \
-    --predict_root "$OUTPUT_DIR" \
-    --checkpoint "pretrained_weights/MRI_CORE_vit_b.pth" \
-    --arch "vit_b" \
-    --image_size 1024 \
-    --device "cuda" \
-    --log_level "$LOG_LEVEL" \
-    --log_file "$LOG_FILE"
+  --slices_root "$BASE_DATA_DIR" \
+  --predict_root "$OUTPUT_DIR" \
+  --checkpoint "pretrained_weights/sam_vit_b_mricore.pth" \
+  --arch "vit_b" \
+  --image_size 1024 \
+  --device "cuda" \   # use "cpu" if you're not actually on a GPU node
+  --log_level "$LOG_LEVEL" \
+  --log_file "$LOG_FILE"
 exit_code=$?
 set -e
 
