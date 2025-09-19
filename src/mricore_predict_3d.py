@@ -169,7 +169,7 @@ def main():
             checkpoint=str(args.checkpoint),
             num_classes=1,
             image_size=args.image_size,
-            pretrained_sam=True,
+            pretrained_sam=False,
         )
         .eval()
         .to(args.device)
