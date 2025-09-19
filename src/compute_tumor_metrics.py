@@ -662,17 +662,17 @@ def main():
             if row is not None:
                 rows.append(row)
             else:
-                print(f"[WARN] Skipped {c.name}")
+                logger.warning(f"[WARN] Skipped {c.name}")
         except Exception as e:
-            print(f"[FAIL] {c.name}: {e}")
+            logger.error(f"[FAIL] {c.name}: {e}")
 
     if rows:
         df = pd.DataFrame(rows).sort_values("case_id")
         args.out_csv.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(args.out_csv, index=False)
-        print(f"[OK] Wrote {args.out_csv} with {len(df)} rows.")
+        logger.info(f"[OK] Wrote {args.out_csv} with {len(df)} rows.")
     else:
-        print("[WARN] No rows written.")
+        logger.warning("[WARN] No rows written.")
 
 
 if __name__ == "__main__":
