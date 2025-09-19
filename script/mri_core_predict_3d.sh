@@ -45,7 +45,7 @@ $PYTHON "$MAIN" \
     --checkpoint "pretrained_weights/MRI_CORE_vit_b.pth" \
     --arch "vit_b" \
     --image_size 1024 \
-    --device "cpu" \
+    --device "cuda" \
     --log_level "$LOG_LEVEL" \
     --log_file "$LOG_FILE"
 exit_code=$?
