@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import torch, torch.nn.functional as F
 import cv2, nibabel as nib
-import torch, re
+import torch
 
 # project logging
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -299,6 +299,8 @@ def sanity(model):
 
 
 def main():
+    import torch
+
     ap = argparse.ArgumentParser(description="MRI-CORE slice inference → 3D mask")
     ap.add_argument(
         "--slices_root",
