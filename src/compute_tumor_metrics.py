@@ -37,9 +37,12 @@ def shape_metrics(mask_u8: sitk.Image) -> dict:
     arr = sitk.GetArrayFromImage(mask_u8).astype(bool)
     spacing = np.array(mask_u8.GetSpacing(), float)
 
+    # marching cubes expects (z,y,x) spacing order, so reverse
     verts, faces, _, _ = measure.marching_cubes(arr, level=0.5, spacing=spacing[::-1])
-    surface_area = measure.mesh_surface_area(verts, faces)
-    volume = np.sum(arr) * np.prod(spacing)
+    surface_area_mm2 = measure.mesh_surface_area(verts, faces)
+    surface_area_cm2 = surface_area_mm2 / 100.0  # convert to cm²
+
+    volume_mm3 = np.sum(arr) * np.prod(spacing)
 
     props = measure.regionprops(arr.astype(np.uint8))[0]
     if props.inertia_tensor_eigvals is not None:
@@ -49,16 +52,19 @@ def shape_metrics(mask_u8: sitk.Image) -> dict:
         elongation = np.nan
 
     sphericity = (
-        (np.pi ** (1 / 3) * (6 * volume) ** (2 / 3)) / surface_area
-        if surface_area > 0
+        (np.pi ** (1 / 3) * (6 * volume_mm3) ** (2 / 3)) / surface_area_mm2
+        if surface_area_mm2 > 0
         else np.nan
     )
-    compactness = (volume**2) / (surface_area**3) if surface_area > 0 else np.nan
+    compactness = (
+        (volume_mm3**2) / (surface_area_mm2**3) if surface_area_mm2 > 0 else np.nan
+    )
 
     return {
-        "surface_area_mm2": surface_area,
+        "surface_area_cm2": surface_area_cm2,
         "sphericity": sphericity,
         "compactness": compactness,
+        "elongation": elongation,
     }
 
 
@@ -478,7 +484,7 @@ def case_stats(
         # # volumes & area
         # "vol_mm3": vol_mm3,
         # "vol_cm3": vol_cm3,  # explicit cm^3
-        "surface_area_mm2": s.get("surface_area_mm2", np.nan),
+        "surface_area_cm2": s.get("surface_area_cm2", np.nan),
         # shape descriptors
         "sphericity": s.get("sphericity", np.nan),
         "compactness": s.get("compactness", np.nan),
@@ -512,14 +518,14 @@ def case_stats(
         # "pm2": (s.get("principal_moments") or (np.nan, np.nan, np.nan))[1],
         # "pm3": (s.get("principal_moments") or (np.nan, np.nan, np.nan))[2],
         # SI/midline heuristics
-        "vertical_shift_mm": loc["si_disp_mm"],  # renamed from si_disp_mm
-        "midline_shift_mm": loc["midline_offset_mm"],  # renamed from midline_offset_mm
+        "vertical_offset_mm": loc["si_disp_mm"],
+        "midline_offset_mm": loc["midline_offset_mm"],  # renamed from midline_offset_mm
         "sellar_like": loc["is_sellar_like"],
         "suprasellar_like": loc["is_suprasellar_like"],
         "midline_like": loc["is_midline_like"],
         "region_heuristic": loc["heuristic_region_label"],
         # AP heuristics
-        "ap_shift_mm": disp_ap,  # renamed from ap_disp_mm
+        "ap_offset_mm": disp_ap,  # renamed from ap_disp_mm
         "ap_position": ap_position,  # anterior/posterior/indeterminate
         "max_area_slice_loc": max_transv_loc,  # inferior/superior/indeterminate
         # Q/S/T partial points
