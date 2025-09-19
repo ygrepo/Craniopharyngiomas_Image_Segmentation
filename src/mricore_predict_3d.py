@@ -14,7 +14,6 @@ from src.util import get_logger, setup_logging
 
 
 sys.path.append("../mri_foundation")
-from mri_foundation.models import cfg
 from models.sam import sam_model_registry
 
 
@@ -123,6 +122,7 @@ def main():
     args = ap.parse_args()
 
     # build model like in README
+    cfg = argparse.ArgumentParser()
     margs = cfg.parse_args([])  # empty to get default args object
     model = (
         sam_model_registry[args.arch](
