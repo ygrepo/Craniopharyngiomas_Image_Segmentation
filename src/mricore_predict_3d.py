@@ -119,7 +119,20 @@ def main():
     ap.add_argument(
         "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu"
     )
+    ap.add_argument(
+        "--log_level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Logging level.",
+    )
+    ap.add_argument(
+        "--log_file",
+        type=Path,
+        default=None,
+        help="Log file path (in addition to console).",
+    )
     args = ap.parse_args()
+    setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
 
     # build model like in README
     cfg = argparse.ArgumentParser()
