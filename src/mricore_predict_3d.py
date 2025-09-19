@@ -26,7 +26,9 @@ def smart_load(model, ckpt_path: str, device: str = "cuda", strict: bool = False
     """
     import torch
 
-    sd = torch.load(ckpt_path, map_location=device)
+    sd = torch.load(
+        ckpt_path, map_location=torch.device(device if device != "cuda" else "cuda:0")
+    )
 
     # 1) Unwrap common container keys once
     for k in ("state_dict", "model", "net", "module", "teacher", "student"):
@@ -237,6 +239,7 @@ def main():
         .to(args.device)
     )
     smart_load(model, str(args.checkpoint), device=args.device, strict=False)
+    model.eval()  # after loading
     sanity(model)
 
     cases = [d for d in sorted(args.slices_root.iterdir()) if d.is_dir()]
