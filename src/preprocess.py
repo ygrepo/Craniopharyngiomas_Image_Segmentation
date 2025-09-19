@@ -3,7 +3,7 @@ Craniopharyngioma MRI preprocessing (NRRD -> NIfTI):
 N4 bias correction → resample to isotropic spacing → ROI crop (sellar/suprasellar) → z-score normalization.
 
 Usage (example):
-    python craniopharyngioma_preprocess.py \
+    python preprocess.py \
         --in_dir /path/to/raw_nrrd \
         --out_dir /path/to/preproc \
         --modalities T1w T1wCE T2w FLAIR \

@@ -26,8 +26,8 @@ LOG_DIR="logs"
 LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
-BASE_DATA_DIR="output/data"
-PYTHON="${ENV_PREFIX}/bin/python"
+BASE_DATA_DIR="data"
+PYTHON="${ENV_PREFIX}/bin/python"   
 MAIN="src/preprocess.py"
 
 OUTPUT_DIR="output/preprocessed"
