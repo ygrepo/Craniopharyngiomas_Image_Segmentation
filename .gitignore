@@ -2,3 +2,6 @@
 data/
 doc/
 checkpoints/
+logs/
+output/
+src/__pycache__/
