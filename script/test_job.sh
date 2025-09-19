@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=test_job       # Job name
-#SBATCH --output=test.out     # Standard output log
-#SBATCH --error=test.err      # Standard error log
-#SBATCH --time=00:05:00            # Time limit (hh:mm:ss)
-#SBATCH --partition=cpu       # Partition/queue name
-#SBATCH --ntasks=1                 # Number of tasks (processes)
-#SBATCH --cpus-per-task=1          # Number of CPU cores per task
-#SBATCH --mem=1G                   # Memory per node
-#SBATCH --mail-type=END,FAIL       # Mail events (NONE, BEGIN, END, FAIL, ALL)
-
+#SBATCH --job-name=cp_predict
+#SBATCH --output=logs/predict_%A_%a.out
+#SBATCH --error=logs/predict_%A_%a.err
+#SBATCH --time=04:00:00
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=24G
+#SBATCH --array=1-$(wc -l < case_list.txt)
 
 set -euo pipefail
 
