@@ -64,15 +64,34 @@ def predict_case(
 
     for png_p in sorted(imgs_dir.glob("*.png")):
         z = int(png_p.stem)  # 0000.png → 0
-        img = cv2.imread(str(png_p), cv2.IMREAD_COLOR)  # HxW×3 uint8
+        img = cv2.imread(str(png_p), cv2.IMREAD_COLOR)  # BGR, uint8 in [0,255]
         h0, w0 = img.shape[:2]
-        img01 = img.astype(np.float32) / 255.0
-        inp = cv2.resize(
-            img01, (image_size, image_size), interpolation=cv2.INTER_LINEAR
-        )
+
+        # 1) BGR -> RGB
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        # 2) resize to the model input size (keep uint8 0..255)
+        inp = cv2.resize(img, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
+
+        # 3) to tensor and normalize with the model's pixel mean/std
         xt = (
-            torch.from_numpy(inp.transpose(2, 0, 1)).unsqueeze(0).to(device)
-        )  # 1,3,1024,1024
+            torch.from_numpy(inp.transpose(2, 0, 1))
+            .unsqueeze(0)
+            .to(device, dtype=torch.float32)
+        )  # (1,3,H,W)
+
+        pixel_mean = torch.tensor(
+            getattr(model, "pixel_mean", [123.675, 116.28, 103.53]),
+            dtype=torch.float32,
+            device=device,
+        ).view(1, 3, 1, 1)
+        pixel_std = torch.tensor(
+            getattr(model, "pixel_std", [58.395, 57.12, 57.375]),
+            dtype=torch.float32,
+            device=device,
+        ).view(1, 3, 1, 1)
+
+        xt = (xt - pixel_mean) / pixel_std
 
         # SAM-like forward
         img_emb = model.image_encoder(xt)
