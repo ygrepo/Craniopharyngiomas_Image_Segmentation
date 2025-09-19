@@ -28,13 +28,13 @@ mkdir -p "$LOG_DIR"
 
 BASE_DATA_DIR="output/slices"
 PYTHON="${ENV_PREFIX}/bin/python"
-MAIN="src/mri_core_predict_3d.py"
+MAIN="src/mricore_predict_3d.py"
 
 OUTPUT_DIR="output/mri_core_3d"
 mkdir -p "$OUTPUT_DIR"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="${LOG_DIR}/mri_core_predict_3d_${TIMESTAMP}.log"
+LOG_FILE="${LOG_DIR}/mricore_predict_3d_${TIMESTAMP}.log"
 
 
 set +e
