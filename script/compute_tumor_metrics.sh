@@ -3,22 +3,31 @@
 
 set -euo pipefail
 
-# --- Clean environment to avoid ~/.local issues ---
 module purge
 module load anaconda3/2023.09
-
+module load proxy/jh-proxy-1.0
 source $(conda info --base)/etc/profile.d/conda.sh
 
-# --- Activate conda env ---
-conda activate /projects/gbm_modeling/.conda/envs/cp
+# --- Paths (edit if needed) ---
+ENV_PREFIX="/projects/gbm_modeling/.conda/envs/mri"
+PIP_CACHE_DIR="/projects/gbm_modeling/.pip_cache"
+CONDA_PKGS_DIRS="/projects/gbm_modeling/.conda/pkgs"
 
+# --- Keep installs off $HOME and avoid user-site leakage ---
+mkdir -p "${PIP_CACHE_DIR}" "${CONDA_PKGS_DIRS}"
+export PIP_CACHE_DIR="${PIP_CACHE_DIR}"
+export CONDA_PKGS_DIRS="${CONDA_PKGS_DIRS}"
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH || true
+
+conda activate "${ENV_PREFIX}"
 
 LOG_DIR="logs"
 LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
 BASE_DATA_DIR="output/data"
-PYTHON="/projects/gbm_modeling/.conda/envs/cp/bin/python"
+PYTHON="${ENV_PREFIX}/bin/python"
 MAIN="src/compute_tumor_metrics.py"
 
 OUTPUT_DIR="output/metrics"

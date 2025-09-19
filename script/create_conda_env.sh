@@ -3,7 +3,7 @@
 
 module purge
 module load anaconda3/2023.09
-
+module load proxy/jh-proxy-1.0
 source $(conda info --base)/etc/profile.d/conda.sh
 
 # --- Paths (edit if needed) ---
