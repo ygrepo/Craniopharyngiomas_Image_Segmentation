@@ -31,6 +31,7 @@ def _ensure_defaults(ns):
     setdef("if_prompt_adapter", False)
     setdef("if_low_rank_adapter", False)
     setdef("low_rank_rank", 8)  # harmless default
+    setdef("decoder_adapt_depth", [])
     # normalization used by MRI-CORE; 'slice_norm' is their common default
     setdef("normalize_type", "slice_norm")
     # occasionally referenced names in repos derived from finetune-SAM:
