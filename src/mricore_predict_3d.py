@@ -17,6 +17,27 @@ sys.path.append("../mri_foundation")
 from models.sam import sam_model_registry
 
 
+def _ensure_defaults(ns):
+    def setdef(k, v):
+        if not hasattr(ns, k):
+            setattr(ns, k, v)
+
+    # encoder/decoder update & adapters OFF for pretrained inference
+    setdef("if_update_encoder", False)
+    setdef("if_update_decoder", False)
+    setdef("if_encoder_adapter", False)
+    setdef("encoder_adapter_depths", [])  # not used when adapter off
+    setdef("if_mask_decoder_adapter", False)
+    setdef("if_prompt_adapter", False)
+    setdef("if_low_rank_adapter", False)
+    setdef("low_rank_rank", 8)  # harmless default
+    # normalization used by MRI-CORE; 'slice_norm' is their common default
+    setdef("normalize_type", "slice_norm")
+    # occasionally referenced names in repos derived from finetune-SAM:
+    setdef("num_cls", 1)  # binary
+    return ns
+
+
 @torch.no_grad()
 def run_case(
     case_dir: Path, out_dir: Path, model, device: torch.device, image_size: int = 1024
@@ -137,6 +158,8 @@ def main():
     # build model like in README
     cfg = argparse.ArgumentParser()
     margs = cfg.parse_args([])  # empty to get default args object
+    margs = _ensure_defaults(margs)
+
     model = (
         sam_model_registry[args.arch](
             margs,
