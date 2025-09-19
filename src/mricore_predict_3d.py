@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import torch, torch.nn.functional as F
 import cv2, nibabel as nib
+import torch, re
 
 # project logging
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +65,40 @@ def smart_load(model, ckpt_path: str, device: str = "cuda", strict: bool = False
             "Double-check you’re using an MRI-CORE/SAM-compatible checkpoint."
         )
     return msg
+
+
+def load_report(model, sd_path, device):
+    sd = torch.load(
+        sd_path, map_location=torch.device(device if device != "cuda" else "cuda:0")
+    )
+    for k in ("state_dict", "model", "net", "module", "teacher", "student"):
+        if isinstance(sd, dict) and k in sd and isinstance(sd[k], dict):
+            sd = sd[k]
+            break
+
+    model_keys = set(model.state_dict().keys())
+    ckpt_keys = set(sd.keys())
+    inter = model_keys & ckpt_keys
+
+    # coverage
+    loaded_params = sum(model.state_dict()[k].numel() for k in inter)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(
+        f"[coverage] loaded_params={loaded_params:,} / total={total_params:,} "
+        f"({100.0*loaded_params/total_params:.2f}%)"
+    )
+
+    # show a few missing/unexpected prefixes
+    miss = list(model_keys - ckpt_keys)
+    unexp = list(ckpt_keys - model_keys)
+
+    def head(xs):
+        return sorted(xs)[:15]
+
+    logger.info("[missing prefixes]", sorted({m.split(".")[0] for m in miss}))
+    logger.info("[missing sample]", head(miss))
+    logger.info("[unexpected prefixes]", sorted({u.split(".")[0] for u in unexp}))
+    logger.info("[unexpected sample]", head(unexp))
 
 
 def _ensure_defaults(ns, image_size: int = 1024):
@@ -241,6 +276,7 @@ def main():
     smart_load(model, str(args.checkpoint), device=args.device, strict=False)
     model.eval()  # after loading
     sanity(model)
+    load_report(model, str(args.checkpoint), args.device)
 
     cases = [d for d in sorted(args.slices_root.iterdir()) if d.is_dir()]
     for c in cases:
