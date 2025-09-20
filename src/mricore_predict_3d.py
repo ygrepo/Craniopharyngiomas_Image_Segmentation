@@ -160,7 +160,7 @@ def _ensure_defaults(ns, image_size: int = 1024):
     # misc expected fields
     setdef("normalize_type", "slice_norm")
     setdef("image_size", image_size)
-    setdef("num_cls", 4)
+    setdef("num_cls", 3)
     setdef("mask_decoder_type", "default")
     setdef("prompt_type", "none")
     return ns
@@ -349,13 +349,17 @@ def main():
         sam_model_registry[args.arch](
             margs,
             checkpoint=None,
-            num_classes=4,
+            num_classes=3,
             image_size=args.image_size,
             pretrained_sam=False,  # use MRI-CORE weights, not SAM
         )
         .eval()
         .to(args.device)
     )
+    mt = model.mask_decoder.mask_tokens.weight
+    logger.info(f"mask_tokens shape: {tuple(mt.shape)}")
+    assert mt.shape[0] == 4, f"Expected 4 mask tokens, got {mt.shape[0]}"
+
     # ---- 1) Seed prompt/decoder/neck from official SAM ViT-B ----
     sd_sam = torch.load(
         str(args.sam_ckpt),
