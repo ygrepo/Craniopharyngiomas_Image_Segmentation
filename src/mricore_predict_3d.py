@@ -179,21 +179,34 @@ REF_PATTERNS = [
 
 
 def find_ref_nii(case_dir: Path) -> Optional[Path]:
-    # 1) look in case_dir
-    cands = list(case_dir.glob("*.nii.gz"))
-    # 2) also look in a sibling/parent 'output/preprocessed/<case>/' if it exists
-    more = []
-    parent = case_dir.parent
     case_id = case_dir.name
-    for p in [
-        parent / case_id,  # same level
-        parent / "output" / "preprocessed" / case_id,
-        parent / ".." / "output" / "preprocessed" / case_id,
-    ]:
-        p = p.resolve()
-        if p.exists() and p.is_dir():
-            more.extend(p.glob("*.nii.gz"))
-    cands.extend(more)
+    checked = []
+
+    # candidate directories to search (in priority order)
+    cand_dirs = [
+        case_dir,                                               # .../output/slices/<CASE>
+        case_dir.parents[1] / "preprocessed" / case_id,         # .../output/preprocessed/<CASE>   <-- desired
+    ]
+
+    # also walk ancestors to be safe (handles different run roots)
+    for anc in case_dir.parents:
+        cand_dirs.append(anc / "preprocessed" / case_id)
+        cand_dirs.append(anc / "output" / "preprocessed" / case_id)
+
+    # de-dup while preserving order
+    seen = set()
+    dirs = []
+    for d in cand_dirs:
+        d = d.resolve()
+        if d not in seen and d.exists() and d.is_dir():
+            seen.add(d); dirs.append(d)
+
+    # gather candidates
+    cands = []
+    for d in dirs:
+        files = list(d.glob("*.nii.gz"))
+        checked.append((str(d), len(files)))
+        cands.extend(files)
 
     # rank by patterns
     scored = []
@@ -202,16 +215,16 @@ def find_ref_nii(case_dir: Path) -> Optional[Path]:
         score = -1
         for i, pat in enumerate(REF_PATTERNS):
             if re.search(pat, name, flags=re.IGNORECASE):
-                score = max(
-                    score, len(REF_PATTERNS) - i
-                )  # earlier pattern = higher score
+                score = max(score, len(REF_PATTERNS) - i)  # earlier pat = higher
         if score >= 0:
             scored.append((score, f))
-    if not scored:
-        return None
-    scored.sort(reverse=True)  # highest score first
-    return scored[0][1]
 
+    if not scored:
+        logger.debug(f"[find_ref_nii] searched: {checked}")
+        return None
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return scored[0][1]
 
 @torch.no_grad()
 def predict_case(
