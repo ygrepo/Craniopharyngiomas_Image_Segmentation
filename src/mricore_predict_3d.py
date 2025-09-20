@@ -26,20 +26,19 @@ def smart_load(
     image_size: int = 1024,
     vit_patch_size: int = 16,
 ):
-    """
-    Robust loader that:
-      1) unwraps common containers (state_dict/model/net/module/teacher/student),
-      2) tries direct load,
-      3) if coverage is ~0, remaps MAE/DINO/MRI-CORE keys -> SAM names (image_encoder.*),
-      4) handles pos_embed reshape to (1, H, W, C).
-    """
     import torch, numpy as np
+
+    def to_tensor(x):
+        # Always return a CPU float32 tensor; .to(device) happens in the model later
+        if isinstance(x, torch.Tensor):
+            return x.float().cpu()
+        return torch.from_numpy(np.asarray(x)).float().cpu()
 
     sd = torch.load(
         ckpt_path, map_location=torch.device(device if device != "cuda" else "cuda:0")
     )
 
-    # 1) unwrap
+    # unwrap
     for k in ("state_dict", "model", "net", "module", "teacher", "student"):
         if isinstance(sd, dict) and k in sd and isinstance(sd[k], dict):
             sd = sd[k]
@@ -47,100 +46,77 @@ def smart_load(
     if not isinstance(sd, dict):
         raise ValueError(f"[smart_load] Unexpected checkpoint format: {type(sd)}")
 
-    # strip single 'module.' if present
+    # strip single 'module.'
     if any(k.startswith("module.") for k in sd.keys()):
         sd = {k.replace("module.", "", 1): v for k, v in sd.items()}
 
-    # helper: coverage vs model
-    def coverage_keys(sd_keys, model_keys):
-        inter = set(sd_keys) & set(model_keys)
-        return len(inter), inter
-
-    # 2) try direct
+    # try direct
     msg_direct = model.load_state_dict(sd, strict=False)
-    inter_len, _ = coverage_keys(sd.keys(), model.state_dict().keys())
-    if inter_len > 1000:  # good overlap -> done
+    inter = set(sd.keys()) & set(model.state_dict().keys())
+    if len(inter) > 1000:
         logger.info("[smart_load] direct load ok:", msg_direct)
         return msg_direct
 
-    # 3) remap MRI-CORE/MAE/DINO -> SAM encoder
+    # -------- REMAP PATH --------
     new_sd = {}
     token_size = image_size // vit_patch_size
 
-    # detect if pos_embed needs 2D reshape
     def fix_pos_embed(arr):
-        # expect shape (1, L(+cls), C)
+        """
+        SAM expects pos_embed shaped like (1, H, W, C) in its state dict.
+        Many MAE/DINO dumps store (1, L+1, C) with a cls token; we:
+          - drop cls,
+          - reshape to 2D grid,
+          - bilinear-resize to (token_size, token_size),
+          - return torch.Tensor (1, H, W, C).
+        """
+        t = to_tensor(arr)  # ensure torch tensor
         if (
-            arr.ndim == 3
-            and arr.shape[0] == 1
-            and (arr.shape[1] == token_size * token_size + 1)
+            t.ndim == 3
+            and t.shape[0] == 1
+            and t.shape[1] in (token_size * token_size, token_size * token_size + 1)
         ):
-            pe = arr[:, 1:, :]  # drop cls
-            ts = int(np.sqrt(pe.shape[1]))
-            pe = pe.reshape(1, ts, ts, arr.shape[2])  # 1,H,W,C
-            # resize to target token grid
-            pe_t = (
-                torch.from_numpy(pe).permute(0, 3, 1, 2)
-                if isinstance(pe, np.ndarray)
-                else pe.permute(0, 3, 1, 2)
-            )
-            pe_t = torch.nn.functional.interpolate(
-                pe_t,
+            if t.shape[1] == token_size * token_size + 1:
+                t = t[:, 1:, :]  # drop cls
+            curr_tokens = int((t.shape[1]) ** 0.5)
+            if curr_tokens * curr_tokens != t.shape[1]:
+                return t  # can't infer grid safely; return as-is (tensor)
+            t = t.view(1, curr_tokens, curr_tokens, t.shape[2])  # 1, H, W, C
+            tchw = t.permute(0, 3, 1, 2)  # 1, C, H, W
+            tchw = torch.nn.functional.interpolate(
+                tchw,
                 size=(token_size, token_size),
                 mode="bilinear",
                 align_corners=False,
             )
-            pe = pe_t.permute(0, 2, 3, 1)  # back to 1,H,W,C
-            return pe
-        return arr
+            t = tchw.permute(0, 2, 3, 1)  # 1, H, W, C
+            return t
+        return t  # already tensor; return as-is
 
     for k, v in sd.items():
-        if k.startswith("decoder") or k.startswith("mask_decoder"):
-            continue  # ignore task heads
-        nk = k
+        if k.startswith(("decoder", "mask_decoder")):
+            continue  # skip task heads that won't match
 
-        # common renames from MRI-CORE/DINO to SAM
-        nk = nk.replace("backbone.", "image_encoder.")
-        nk = nk.replace("fc", "lin")  # mlp.fc -> mlp.lin
-        nk = nk.replace("patch_embed.proj.", "patch_embed.proj.")
-        nk = nk.replace("norm1", "norm1")
-        nk = nk.replace("norm2", "norm2")
+        nk = k.replace("backbone.", "image_encoder.")
+        nk = nk.replace("fc", "lin")  # mlp.fc -> mlp.lin (SAM naming)
 
-        # some DINOv2 dumps have chunked indices like image_encoder.0.0... collapse those
         parts = nk.split(".")
         if len(parts) > 3 and parts[2].isdigit() and parts[3].isdigit():
             nk = ".".join([p for i, p in enumerate(parts) if i != 2])
 
-        # pos_embed special-case: SAM expects 1,H,W,C (later transposed inside)
-        if "pos_embed" in k and "image_encoder" in nk:
-            v = fix_pos_embed(
-                v.detach().cpu().numpy() if isinstance(v, torch.Tensor) else v
-            )
+        if "pos_embed" in k:
+            v = fix_pos_embed(v)
+        else:
+            v = to_tensor(v)
 
-        # ensure all encoder weights live under image_encoder.*
         if not nk.startswith("image_encoder."):
-            if "pos_embed" in k or "patch_embed" in k or "blocks" in k or "neck" in k:
+            if any(s in k for s in ("pos_embed", "patch_embed", "blocks", "neck")):
                 nk = "image_encoder." + nk
 
         new_sd[nk] = v
 
-    # 4) load remapped
     msg = model.load_state_dict(new_sd, strict=False)
-
-    # report
-    model_keys = set(model.state_dict().keys())
-    inter_len2, _ = coverage_keys(new_sd.keys(), model_keys)
-    total = sum(p.numel() for p in model.parameters())
-    nanp = sum(torch.isnan(p).sum().item() for p in model.parameters())
-    logger.info(
-        f"[smart_load] remap load: intersect={inter_len2}  params={total:,}  NaNs={nanp}"
-    )
-    logger.info(f"[smart_load] msg: {msg}")
-    if inter_len2 < 1000:
-        logger.warning(
-            "[smart_load][warn] Very low overlap after remap — this checkpoint may not match the SAM ViT-B encoder. "
-            "Try the other file (e.g., pretrained_weights/mri_foundation.pth) or confirm this is a SAM/MRI-CORE encoder dump."
-        )
+    logger.info("[smart_load] remap load:", msg)
     return msg
 
 
