@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse, json, sys
 from pathlib import Path
+from typing import Optional
 import numpy as np
 import torch, torch.nn.functional as F
 import cv2, nibabel as nib
@@ -167,7 +168,12 @@ def _ensure_defaults(ns, image_size: int = 1024):
 
 @torch.no_grad()
 def predict_case(
-    case_dir: Path, out_dir: Path, model, device: torch.device, image_size: int = 1024
+    case_dir: Path,
+    out_dir: Path,
+    model,
+    device: torch.device,
+    image_size: int = 1024,
+    ref_nii: Optional[Path] = None,
 ):
     imgs_dir = case_dir / "images"
     meta_p = case_dir / "meta.json"
@@ -221,14 +227,15 @@ def predict_case(
         sparse_emb, dense_emb = model.prompt_encoder(
             points=None, boxes=None, masks=None
         )
-        logits, _ = model.mask_decoder(
+        logits, iou_pred = model.mask_decoder(
             image_embeddings=img_emb,
             image_pe=model.prompt_encoder.get_dense_pe(),
             sparse_prompt_embeddings=sparse_emb,
             dense_prompt_embeddings=dense_emb,
-            multimask_output=False,
+            multimask_output=True,
         )
-        logit = logits[:, 0:1]
+        idx = int(torch.argmax(iou_pred))
+        logit = logits[:, idx : idx + 1]
         if logit.shape[-1] != image_size:
             logit = F.interpolate(
                 logit,
@@ -240,6 +247,8 @@ def predict_case(
         #     f"logit mean/std: {float(logit.mean()):.4f} / {float(logit.std()):.4f}"
         # )
         prob = torch.sigmoid(logit)[0, 0].cpu().numpy()
+        m, s = float(prob.mean()), float(prob.std())
+        logger.debug(f"[slice {z:04d}] prob mean={m:.4f} std={s:.4f}")
 
         mask_1024 = (prob > 0.35).astype(np.uint8)
         mask_hw = cv2.resize(mask_1024, (w0, h0), interpolation=cv2.INTER_NEAREST)
@@ -248,10 +257,27 @@ def predict_case(
         if (w0, h0) != (X, Y):
             mask_hw = cv2.resize(mask_hw, (X, Y), interpolation=cv2.INTER_NEAREST)
         mask_vol[..., z] = mask_hw
+        # after stacking all slices, just before saving
+        frac_on = float(mask_vol.mean())
+        if frac_on > 0.50:
+            logger.error(
+                f"[{case_dir.name}] mask is {frac_on:.1%} ON — likely invalid; not saving."
+            )
+            return
 
     # save with original affine (no transpose)
-    out_nii = nib.Nifti1Image(mask_vol, affine)
-    nib.save(out_nii, str(out_dir / "pred_mask.nii.gz"))
+    if ref_nii:
+        ref_img = nib.load(str(args.ref_nii))
+        mask_img = nib.Nifti1Image(
+            mask_vol.astype(np.uint8), ref_img.affine, ref_img.header.copy()
+        )
+        mask_img.set_data_dtype(np.uint8)
+        mask_img.set_qform(ref_img.affine, code=1)
+        mask_img.set_sform(ref_img.affine, code=1)
+        nib.save(mask_img, str(out_dir / "pred_mask.nii.gz"))
+    else:
+        nib.save(nib.Nifti1Image(mask_vol, affine), str(out_dir / "pred_mask.nii.gz"))
+
     logger.info(f"[ok] {case_dir.name} → {out_dir/'pred_mask.nii.gz'}")
 
 
@@ -284,6 +310,12 @@ def main():
         help="MRI-CORE checkpoint, e.g. pretrained_weights/MRI_CORE_vit_b.pth",
     )
     ap.add_argument(
+        "--sam_ckpt",
+        type=Path,
+        required=True,  # required because we need the heads
+        help="Official SAM ViT-B checkpoint to seed prompt/decoder/neck (e.g., sam_vit_b.pth)",
+    )
+    ap.add_argument(
         "--arch", type=str, default="vit_b", choices=["vit_b", "vit_t", "vit_h"]
     )
     ap.add_argument("--image_size", type=int, default=1024)
@@ -294,6 +326,12 @@ def main():
         "--log_level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default="INFO",
+    )
+    ap.add_argument(
+        "--ref_nii",
+        type=Path,
+        required=False,
+        help="Reference NIfTI to copy header/affine from",
     )
     ap.add_argument("--log_file", type=Path, default=None)
     args = ap.parse_args()
@@ -318,6 +356,22 @@ def main():
         .eval()
         .to(args.device)
     )
+    # ---- 1) Seed prompt/decoder/neck from official SAM ViT-B ----
+    sd_sam = torch.load(
+        str(args.sam_ckpt),
+        map_location=torch.device(args.device if args.device != "cuda" else "cuda:0"),
+    )
+
+    # unwrap common containers
+    for k in ("state_dict", "model", "net", "module", "teacher", "student"):
+        if isinstance(sd_sam, dict) and k in sd_sam and isinstance(sd_sam[k], dict):
+            sd_sam = sd_sam[k]
+            break
+
+    # load (non-strict: SAM ckpts sometimes miss tiny buffers)
+    msg_sam = model.load_state_dict(sd_sam, strict=False)
+    logger.info("[sam seed] loaded SAM heads: %s", msg_sam)
+
     msg, used_sd = smart_load(
         model,
         str(args.checkpoint),
