@@ -28,17 +28,16 @@ def smart_load(
 ):
     import torch, numpy as np
 
+    def devobj(d):
+        return torch.device(d if d != "cuda" else "cuda:0")
+
     def to_tensor(x):
-        # Always return a CPU float32 tensor; .to(device) happens in the model later
         if isinstance(x, torch.Tensor):
             return x.float().cpu()
         return torch.from_numpy(np.asarray(x)).float().cpu()
 
-    sd = torch.load(
-        ckpt_path, map_location=torch.device(device if device != "cuda" else "cuda:0")
-    )
-
-    # unwrap
+    sd = torch.load(ckpt_path, map_location=devobj(device))
+    # unwrap once
     for k in ("state_dict", "model", "net", "module", "teacher", "student"):
         if isinstance(sd, dict) and k in sd and isinstance(sd[k], dict):
             sd = sd[k]
@@ -46,120 +45,100 @@ def smart_load(
     if not isinstance(sd, dict):
         raise ValueError(f"[smart_load] Unexpected checkpoint format: {type(sd)}")
 
-    # strip single 'module.'
-    if any(k.startswith("module.") for k in sd.keys()):
-        sd = {k.replace("module.", "", 1): v for k, v in sd.items()}
-
-    # try direct
+    # try direct load first (in case it’s already SAM-style)
     msg_direct = model.load_state_dict(sd, strict=False)
-    inter = set(sd.keys()) & set(model.state_dict().keys())
-    if len(inter) > 1000:
-        logger.info("[smart_load] direct load ok:", msg_direct)
-        return msg_direct
+    inter_direct = set(sd.keys()) & set(model.state_dict().keys())
+    if len(inter_direct) > 1000:
+        logger.info(f"[smart_load] direct load ok: {msg_direct}")
+        return msg_direct, sd  # <-- RETURN THE SD WE USED
 
-    # -------- REMAP PATH --------
-    new_sd = {}
+    # ---- remap path (MAE/DINO → SAM) ----
     target_tokens = image_size // vit_patch_size
 
-    def fix_pos_embed(arr, target_tokens: int):
-        """
-        Convert pos_embed from (1, L[+1], C) to (1, H, W, C), resizing H×W to target_tokens.
-        Works for any square L (e.g., 14×14, 16×16, 32×32 ...).
-        """
-        t = to_tensor(arr)  # torch.float32 on CPU
+    def fix_pos_embed(arr):
+        """(1, L[+1], C) → (1, H, W, C), resized to (target_tokens, target_tokens)."""
+        t = to_tensor(arr)
         if t.ndim != 3 or t.shape[0] != 1:
             return t
-
-        # Remove CLS token if present
-        L = t.shape[1]
-        C = t.shape[2]
-        if L <= 1:
+        L, C = t.shape[1], t.shape[2]
+        if L <= 1:  # degenerate
             return t
-        has_cls = False
-        # try L-1 as grid first
+        # prefer L-1 as square (drop CLS), else try L
         g = int((L - 1) ** 0.5)
         if g * g == (L - 1):
-            has_cls = True
             t = t[:, 1:, :]  # drop CLS
             L = L - 1
         else:
             g = int(L**0.5)
             if g * g != L:
-                # Not a flat grid — return as-is
-                return t
-
-        # reshape to 2D grid 1,H,W,C
-        t = t.view(1, g, g, C)  # 1, H, W, C
-        tchw = t.permute(0, 3, 1, 2)  # 1, C, H, W
-        # resize to target grid
+                return t  # not a flat grid
+        t = t.view(1, g, g, C)  # 1,H,W,C
+        tchw = t.permute(0, 3, 1, 2)  # 1,C,H,W
         tchw = torch.nn.functional.interpolate(
             tchw,
             size=(target_tokens, target_tokens),
             mode="bilinear",
             align_corners=False,
         )
-        t = tchw.permute(0, 2, 3, 1)  # 1, H, W, C
+        t = tchw.permute(0, 2, 3, 1)  # 1,H,W,C
         return t
 
+    new_sd = {}
+    drop_prefixes = ("decoder", "mask_decoder", "dino_head")  # heads not used
+
     for k, v in sd.items():
-        if k.startswith(("decoder", "mask_decoder")):
+        if k.startswith(drop_prefixes):
             continue
 
+        # backbone.* → image_encoder.*
         nk = k.replace("backbone.", "image_encoder.")
-        nk = nk.replace("fc", "lin")
-
+        # mlp.fc1/fc2 → mlp.lin1/lin2
+        nk = nk.replace(".mlp.fc1.", ".mlp.lin1.")
+        nk = nk.replace(".mlp.fc2.", ".mlp.lin2.")
+        # collapse double numeric: blocks.0.0.* → blocks.0.*
         parts = nk.split(".")
         if len(parts) > 3 and parts[2].isdigit() and parts[3].isdigit():
             nk = ".".join([p for i, p in enumerate(parts) if i != 2])
 
+        # pos_embed special case
         if "pos_embed" in k:
-            v = fix_pos_embed(v, target_tokens)
+            v = fix_pos_embed(v)
         else:
             v = to_tensor(v)
 
-        if not nk.startswith("image_encoder."):
-            if any(s in k for s in ("pos_embed", "patch_embed", "blocks", "neck")):
-                nk = "image_encoder." + nk
+        # ensure encoder prefix if obviously encoder-like
+        if not nk.startswith("image_encoder.") and any(
+            s in nk for s in ("pos_embed", "patch_embed", "blocks", "neck")
+        ):
+            nk = "image_encoder." + nk
 
         new_sd[nk] = v
 
     msg = model.load_state_dict(new_sd, strict=False)
-    logger.info("[smart_load] remap load:", msg)
-    return msg
+    logger.info(f"[smart_load] remap load: {msg}")
+    return msg, new_sd  # <-- RETURN THE SD WE USED
 
 
-def load_report(model, sd_path, device):
-    sd = torch.load(
-        sd_path, map_location=torch.device(device if device != "cuda" else "cuda:0")
-    )
-    for k in ("state_dict", "model", "net", "module", "teacher", "student"):
-        if isinstance(sd, dict) and k in sd and isinstance(sd[k], dict):
-            sd = sd[k]
-            break
-
-    model_keys = set(model.state_dict().keys())
-    ckpt_keys = set(sd.keys())
-    inter = model_keys & ckpt_keys
-
-    # coverage
+def load_report(model, used_sd: dict):
+    """Report overlap/coverage against the *actual* SD used to load."""
+    mkeys = set(model.state_dict().keys())
+    ckeys = set(used_sd.keys())
+    inter = mkeys & ckeys
     loaded_params = sum(model.state_dict()[k].numel() for k in inter)
     total_params = sum(p.numel() for p in model.parameters())
-    logger.info(
-        f"[coverage] loaded_params={loaded_params:,} / total={total_params:,} "
-        f"({100.0*loaded_params/total_params:.2f}%)"
+    miss = sorted(list(mkeys - ckeys))[:20]
+    unexp = sorted(list(ckeys - mkeys))[:20]
+    print(
+        f"[coverage] loaded_params={loaded_params:,} / total={total_params:,} ({100.0*loaded_params/total_params:.2f}%)"
     )
-
-    # show a few missing/unexpected prefixes
-    miss = list(model_keys - ckpt_keys)
-    unexp = list(ckpt_keys - model_keys)
-
-    def head(xs):
-        return sorted(xs)[:15]
-
-    logger.info(f"[missing prefixes] {sorted({m.split('.')[0] for m in miss})}")
-    logger.info(f"[missing sample] {head(miss)}")
-    logger.info(f"[unexpected prefixes] {sorted({u.split('.')[0] for u in unexp})}")
-    logger.info(f"[unexpected sample] {head(unexp)}")
+    logger.info(
+        f"[missing prefixes]", sorted({m.split(".")[0] for m in (mkeys - ckeys)})
+    )
+    logger.info(f"[missing sample]", miss)
+    logger.info(
+        f"[unexpected prefixes]", sorted({u.split(".")[0] for u in (ckeys - mkeys)})
+    )
+    logger.info(f"[unexpected sample]", unexp)
 
 
 def _ensure_defaults(ns, image_size: int = 1024):
@@ -257,9 +236,9 @@ def predict_case(
                 mode="bilinear",
                 align_corners=False,
             )
-        logger.info(
-            f"logit mean/std: {float(logit.mean()):.4f} / {float(logit.std()):.4f}"
-        )
+        # logger.info(
+        #     f"logit mean/std: {float(logit.mean()):.4f} / {float(logit.std()):.4f}"
+        # )
         prob = torch.sigmoid(logit)[0, 0].cpu().numpy()
 
         mask_1024 = (prob > 0.35).astype(np.uint8)
@@ -339,7 +318,7 @@ def main():
         .eval()
         .to(args.device)
     )
-    smart_load(
+   msg, used_sd = smart_load(
         model,
         str(args.checkpoint),
         device=args.device,
@@ -349,7 +328,7 @@ def main():
     )
     model.eval()
     sanity(model)
-    load_report(model, str(args.checkpoint), args.device)
+    load_report(model, used_sd)
 
     # Inspect checkpoint keys (after unwrapping)
     import torch
