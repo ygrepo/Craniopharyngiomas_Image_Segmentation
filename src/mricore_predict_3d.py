@@ -318,7 +318,7 @@ def main():
         .eval()
         .to(args.device)
     )
-   msg, used_sd = smart_load(
+    msg, used_sd = smart_load(
         model,
         str(args.checkpoint),
         device=args.device,
