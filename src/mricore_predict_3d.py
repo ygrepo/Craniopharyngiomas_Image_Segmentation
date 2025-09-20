@@ -144,7 +144,7 @@ def load_report(model, sd_path, device):
     # coverage
     loaded_params = sum(model.state_dict()[k].numel() for k in inter)
     total_params = sum(p.numel() for p in model.parameters())
-    print(
+    logger.info(
         f"[coverage] loaded_params={loaded_params:,} / total={total_params:,} "
         f"({100.0*loaded_params/total_params:.2f}%)"
     )
@@ -156,10 +156,10 @@ def load_report(model, sd_path, device):
     def head(xs):
         return sorted(xs)[:15]
 
-    logger.info("[missing prefixes]", sorted({m.split(".")[0] for m in miss}))
-    logger.info("[missing sample]", head(miss))
-    logger.info("[unexpected prefixes]", sorted({u.split(".")[0] for u in unexp}))
-    logger.info("[unexpected sample]", head(unexp))
+    logger.info(f"[missing prefixes] {sorted({m.split('.')[0] for m in miss})}")
+    logger.info(f"[missing sample] {head(miss)}")
+    logger.info(f"[unexpected prefixes] {sorted({u.split('.')[0] for u in unexp})}")
+    logger.info(f"[unexpected sample] {head(unexp)}")
 
 
 def _ensure_defaults(ns, image_size: int = 1024):
