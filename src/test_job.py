@@ -1,6 +1,13 @@
-import nibabel as nib
+import nibabel as nib, numpy as np
 
-img = nib.load("output/preprocessed/71899681/71899681_T1_CE_3D_AX_ALIGNED.nii.gz")
-print("Shape:", img.shape)
-print("Voxel spacing:", img.header.get_zooms())
-print("Orientation:", nib.aff2axcodes(img.affine))
+m = nib.load("output/mri_core_3d/71899681/pred_mask.nii.gz")
+a = m.get_fdata()
+print("unique:", np.unique(a), "voxels>0:", int((a > 0.5).sum()))
+print("shape:", a.shape)
+print(
+    "qform set:",
+    m.get_qform()[0] is not None,
+    "sform set:",
+    m.get_sform()[0] is not None,
+)
+print("axcodes:", nib.aff2axcodes(m.affine))
