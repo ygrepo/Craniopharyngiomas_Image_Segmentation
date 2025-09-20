@@ -133,13 +133,13 @@ def load_report(model, used_sd: dict):
         f"[coverage] loaded_params={loaded_params:,} / total={total_params:,} ({100.0*loaded_params/total_params:.2f}%)"
     )
     logger.info(
-        f"[missing prefixes]", sorted({m.split(".")[0] for m in (mkeys - ckeys)})
+        f"[missing prefixes]:{sorted({m.split('.')[0] for m in (mkeys - ckeys)})}"
     )
-    logger.info(f"[missing sample]", miss)
+    logger.info(f"[missing sample]:{miss}")
     logger.info(
-        f"[unexpected prefixes]", sorted({u.split(".")[0] for u in (ckeys - mkeys)})
+        f"[unexpected prefixes]:{sorted({u.split('.')[0] for u in (ckeys - mkeys)})}"
     )
-    logger.info(f"[unexpected sample]", unexp)
+    logger.info(f"[unexpected sample]:{unexp}")
 
 
 def _ensure_defaults(ns, image_size: int = 1024):
