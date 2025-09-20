@@ -50,7 +50,7 @@ set +e
 $PYTHON "$MAIN" \
     --slices_root "$BASE_DATA_DIR" \
     --predict_root "$OUTPUT_DIR" \
-    --checkpoint "pretrained_weights/MRI_CORE_vit_b.pth" \
+    --checkpoint "pretrained_weights/mri_foundation.pth" \
     --sam_ckpt "pretrained_weights/sam_vit_b_01ec64.pth" \
     --arch "vit_b" \
     --image_size 1024 \
