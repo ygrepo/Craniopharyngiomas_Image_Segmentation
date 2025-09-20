@@ -59,53 +59,61 @@ def smart_load(
 
     # -------- REMAP PATH --------
     new_sd = {}
-    token_size = image_size // vit_patch_size
+    target_tokens = image_size // vit_patch_size
 
-    def fix_pos_embed(arr):
+    def fix_pos_embed(arr, target_tokens: int):
         """
-        SAM expects pos_embed shaped like (1, H, W, C) in its state dict.
-        Many MAE/DINO dumps store (1, L+1, C) with a cls token; we:
-          - drop cls,
-          - reshape to 2D grid,
-          - bilinear-resize to (token_size, token_size),
-          - return torch.Tensor (1, H, W, C).
+        Convert pos_embed from (1, L[+1], C) to (1, H, W, C), resizing H×W to target_tokens.
+        Works for any square L (e.g., 14×14, 16×16, 32×32 ...).
         """
-        t = to_tensor(arr)  # ensure torch tensor
-        if (
-            t.ndim == 3
-            and t.shape[0] == 1
-            and t.shape[1] in (token_size * token_size, token_size * token_size + 1)
-        ):
-            if t.shape[1] == token_size * token_size + 1:
-                t = t[:, 1:, :]  # drop cls
-            curr_tokens = int((t.shape[1]) ** 0.5)
-            if curr_tokens * curr_tokens != t.shape[1]:
-                return t  # can't infer grid safely; return as-is (tensor)
-            t = t.view(1, curr_tokens, curr_tokens, t.shape[2])  # 1, H, W, C
-            tchw = t.permute(0, 3, 1, 2)  # 1, C, H, W
-            tchw = torch.nn.functional.interpolate(
-                tchw,
-                size=(token_size, token_size),
-                mode="bilinear",
-                align_corners=False,
-            )
-            t = tchw.permute(0, 2, 3, 1)  # 1, H, W, C
+        t = to_tensor(arr)  # torch.float32 on CPU
+        if t.ndim != 3 or t.shape[0] != 1:
             return t
-        return t  # already tensor; return as-is
+
+        # Remove CLS token if present
+        L = t.shape[1]
+        C = t.shape[2]
+        if L <= 1:
+            return t
+        has_cls = False
+        # try L-1 as grid first
+        g = int((L - 1) ** 0.5)
+        if g * g == (L - 1):
+            has_cls = True
+            t = t[:, 1:, :]  # drop CLS
+            L = L - 1
+        else:
+            g = int(L**0.5)
+            if g * g != L:
+                # Not a flat grid — return as-is
+                return t
+
+        # reshape to 2D grid 1,H,W,C
+        t = t.view(1, g, g, C)  # 1, H, W, C
+        tchw = t.permute(0, 3, 1, 2)  # 1, C, H, W
+        # resize to target grid
+        tchw = torch.nn.functional.interpolate(
+            tchw,
+            size=(target_tokens, target_tokens),
+            mode="bilinear",
+            align_corners=False,
+        )
+        t = tchw.permute(0, 2, 3, 1)  # 1, H, W, C
+        return t
 
     for k, v in sd.items():
         if k.startswith(("decoder", "mask_decoder")):
-            continue  # skip task heads that won't match
+            continue
 
         nk = k.replace("backbone.", "image_encoder.")
-        nk = nk.replace("fc", "lin")  # mlp.fc -> mlp.lin (SAM naming)
+        nk = nk.replace("fc", "lin")
 
         parts = nk.split(".")
         if len(parts) > 3 and parts[2].isdigit() and parts[3].isdigit():
             nk = ".".join([p for i, p in enumerate(parts) if i != 2])
 
         if "pos_embed" in k:
-            v = fix_pos_embed(v)
+            v = fix_pos_embed(v, target_tokens)
         else:
             v = to_tensor(v)
 
