@@ -7,6 +7,10 @@ import torch, torch.nn.functional as F
 import cv2, nibabel as nib
 import torch
 
+from typing import Optional
+import re
+from nibabel.processing import resample_from_to
+
 # project logging
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -166,6 +170,49 @@ def _ensure_defaults(ns, image_size: int = 1024):
     return ns
 
 
+REF_PATTERNS = [
+    r".*_ALIGNED\.nii\.gz$",
+    r".*T1.*(ALIGNED|RAS|coreg).*\.nii\.gz$",
+    r".*T1_CE.*\.nii\.gz$",
+    r".*T1.*\.nii\.gz$",
+]
+
+
+def find_ref_nii(case_dir: Path) -> Optional[Path]:
+    # 1) look in case_dir
+    cands = list(case_dir.glob("*.nii.gz"))
+    # 2) also look in a sibling/parent 'output/preprocessed/<case>/' if it exists
+    more = []
+    parent = case_dir.parent
+    case_id = case_dir.name
+    for p in [
+        parent / case_id,  # same level
+        parent / "output" / "preprocessed" / case_id,
+        parent / ".." / "output" / "preprocessed" / case_id,
+    ]:
+        p = p.resolve()
+        if p.exists() and p.is_dir():
+            more.extend(p.glob("*.nii.gz"))
+    cands.extend(more)
+
+    # rank by patterns
+    scored = []
+    for f in cands:
+        name = f.name
+        score = -1
+        for i, pat in enumerate(REF_PATTERNS):
+            if re.search(pat, name, flags=re.IGNORECASE):
+                score = max(
+                    score, len(REF_PATTERNS) - i
+                )  # earlier pattern = higher score
+        if score >= 0:
+            scored.append((score, f))
+    if not scored:
+        return None
+    scored.sort(reverse=True)  # highest score first
+    return scored[0][1]
+
+
 @torch.no_grad()
 def predict_case(
     case_dir: Path,
@@ -173,8 +220,9 @@ def predict_case(
     model,
     device: torch.device,
     image_size: int = 1024,
-    ref_nii: Optional[Path] = None,
 ):
+    from nibabel.processing import resample_from_to
+
     imgs_dir = case_dir / "images"
     meta_p = case_dir / "meta.json"
     if not imgs_dir.exists() or not meta_p.exists():
@@ -183,12 +231,21 @@ def predict_case(
 
     meta = json.loads(meta_p.read_text())
     X, Y, Z = meta["shape_xyz"]
-    affine = np.array(meta["affine"], dtype=np.float32)
+    src_affine = np.array(meta["affine"], dtype=np.float32)
     export_axis = int(meta.get("export_axis", 2))
     assert export_axis == 2, "This script assumes axial export along axis=2."
 
     out_dir.mkdir(parents=True, exist_ok=True)
     mask_vol = np.zeros((X, Y, Z), dtype=np.uint8)
+
+    # find per-case reference
+    ref_p = find_ref_nii(case_dir)
+    if ref_p is None:
+        logger.error(
+            f"{case_dir.name}: no reference NIfTI found (expected an *ALIGNED*.nii.gz); not saving."
+        )
+        return
+    ref_img = nib.load(str(ref_p))
 
     # model normalization (SAM-style) expects RGB 0..255 then (x-mean)/std
     pixel_mean = torch.tensor(
@@ -210,7 +267,7 @@ def predict_case(
             continue
         h0, w0 = img.shape[:2]
 
-        # BGR -> RGB, resize
+        # BGR -> RGB, resize to encoder size
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         inp = cv2.resize(img, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
 
@@ -222,7 +279,7 @@ def predict_case(
         )
         xt = (xt - pixel_mean) / pixel_std
 
-        # SAM-like forward
+        # SAM-like forward (multimask + IoU selection)
         img_emb = model.image_encoder(xt)
         sparse_emb, dense_emb = model.prompt_encoder(
             points=None, boxes=None, masks=None
@@ -243,13 +300,12 @@ def predict_case(
                 mode="bilinear",
                 align_corners=False,
             )
-        # logger.info(
-        #     f"logit mean/std: {float(logit.mean()):.4f} / {float(logit.std()):.4f}"
-        # )
-        prob = torch.sigmoid(logit)[0, 0].cpu().numpy()
+
+        prob = torch.sigmoid(logit)[0, 0].detach().cpu().numpy()
         m, s = float(prob.mean()), float(prob.std())
         logger.debug(f"[slice {z:04d}] prob mean={m:.4f} std={s:.4f}")
 
+        # threshold at native resolution, then back to original slice size
         mask_1024 = (prob > 0.35).astype(np.uint8)
         mask_hw = cv2.resize(mask_1024, (w0, h0), interpolation=cv2.INTER_NEAREST)
 
@@ -257,28 +313,40 @@ def predict_case(
         if (w0, h0) != (X, Y):
             mask_hw = cv2.resize(mask_hw, (X, Y), interpolation=cv2.INTER_NEAREST)
         mask_vol[..., z] = mask_hw
-        # after stacking all slices, just before saving
-        frac_on = float(mask_vol.mean())
-        if frac_on > 0.50:
-            logger.error(
-                f"[{case_dir.name}] mask is {frac_on:.1%} ON — likely invalid; not saving."
-            )
-            return
 
-    # save with original affine (no transpose)
-    if ref_nii:
-        ref_img = nib.load(str(args.ref_nii))
-        mask_img = nib.Nifti1Image(
-            mask_vol.astype(np.uint8), ref_img.affine, ref_img.header.copy()
+    # ---- post-loop: sanity & save ----
+    frac_on = float(mask_vol.mean())
+    logger.info(f"[{case_dir.name}] mask fraction ON = {frac_on:.2%}")
+    if frac_on > 0.50:
+        logger.error(
+            f"[{case_dir.name}] mask is {frac_on:.1%} ON — likely invalid; not saving."
         )
-        mask_img.set_data_dtype(np.uint8)
-        mask_img.set_qform(ref_img.affine, code=1)
-        mask_img.set_sform(ref_img.affine, code=1)
-        nib.save(mask_img, str(out_dir / "pred_mask.nii.gz"))
-    else:
-        nib.save(nib.Nifti1Image(mask_vol, affine), str(out_dir / "pred_mask.nii.gz"))
+        return
 
-    logger.info(f"[ok] {case_dir.name} → {out_dir/'pred_mask.nii.gz'}")
+    # If shape differs from reference, resample to ref grid (NN)
+    src_img = nib.Nifti1Image(
+        mask_vol.astype(np.uint8), src_affine
+    )  # use meta affine as source
+    if src_img.shape != ref_img.shape or not np.allclose(
+        src_img.affine, ref_img.affine
+    ):
+        logger.info(
+            f"{case_dir.name}: resampling mask {src_img.shape} -> {ref_img.shape}"
+        )
+        target = (ref_img.shape, ref_img.affine)
+        src_img = resample_from_to(src_img, target, order=0)  # NN preserves labels
+
+    # Save with ref header/affine; labelmap + q/sforms
+    out_img = nib.Nifti1Image(
+        src_img.get_fdata().astype(np.uint8), ref_img.affine, ref_img.header.copy()
+    )
+    out_img.set_data_dtype(np.uint8)
+    out_img.set_qform(ref_img.affine, code=1)
+    out_img.set_sform(ref_img.affine, code=1)
+    nib.save(out_img, str(out_dir / "pred_mask.nii.gz"))
+    logger.info(
+        f"[ok] {case_dir.name} → {out_dir/'pred_mask.nii.gz'} (ref={ref_p.name})"
+    )
 
 
 def sanity(model):
@@ -326,12 +394,6 @@ def main():
         "--log_level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default="INFO",
-    )
-    ap.add_argument(
-        "--ref_nii",
-        type=Path,
-        required=False,
-        help="Reference NIfTI to copy header/affine from",
     )
     ap.add_argument("--log_file", type=Path, default=None)
     args = ap.parse_args()
