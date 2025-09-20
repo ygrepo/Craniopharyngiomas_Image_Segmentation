@@ -129,7 +129,7 @@ def load_report(model, used_sd: dict):
     total_params = sum(p.numel() for p in model.parameters())
     miss = sorted(list(mkeys - ckeys))[:20]
     unexp = sorted(list(ckeys - mkeys))[:20]
-    print(
+    logger.info(
         f"[coverage] loaded_params={loaded_params:,} / total={total_params:,} ({100.0*loaded_params/total_params:.2f}%)"
     )
     logger.info(
@@ -160,7 +160,7 @@ def _ensure_defaults(ns, image_size: int = 1024):
     # misc expected fields
     setdef("normalize_type", "slice_norm")
     setdef("image_size", image_size)
-    setdef("num_cls", 1)
+    setdef("num_cls", 4)
     setdef("mask_decoder_type", "default")
     setdef("prompt_type", "none")
     return ns
@@ -349,7 +349,7 @@ def main():
         sam_model_registry[args.arch](
             margs,
             checkpoint=None,
-            num_classes=1,
+            num_classes=4,
             image_size=args.image_size,
             pretrained_sam=False,  # use MRI-CORE weights, not SAM
         )
