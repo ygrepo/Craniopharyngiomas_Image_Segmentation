@@ -62,6 +62,7 @@ def shape_metrics(mask_u8: sitk.Image) -> dict:
 
     return {
         "surface_area_cm2": surface_area_cm2,
+        "volume_cm3": volume_mm3 / 1000.0,
         "sphericity": sphericity,
         "compactness": compactness,
         "elongation": elongation,
@@ -131,18 +132,18 @@ def label_stats(mask_u8: sitk.Image, label: int = 1) -> Dict[str, Any]:
     out["bbox_index_start_xyz"] = tuple(int(v) for v in bb_index[:3])
     out["bbox_index_size_xyz"] = tuple(int(v) for v in bb_index[3:6])
 
-    try:
-        out["elongation"] = float(lss.GetElongation(lbl))
-    except Exception:
-        out["elongation"] = np.nan
-    try:
-        out["max_diameter_mm"] = compute_feret_diameter(mask_u8)  # renamed
-    except Exception:
-        out["max_diameter_mm"] = np.nan
-    try:
-        out["principal_moments"] = tuple(map(float, lss.GetPrincipalMoments(lbl)))
-    except Exception:
-        out["principal_moments"] = (np.nan, np.nan, np.nan)
+    # try:
+    #     out["elongation"] = float(lss.GetElongation(lbl))
+    # except Exception:
+    #     out["elongation"] = np.nan
+    # try:
+    #     out["max_diameter_mm"] = compute_feret_diameter(mask_u8)  # renamed
+    # except Exception:
+    #     out["max_diameter_mm"] = np.nan
+    # try:
+    #     out["principal_moments"] = tuple(map(float, lss.GetPrincipalMoments(lbl)))
+    # except Exception:
+    #     out["principal_moments"] = (np.nan, np.nan, np.nan)
 
     out.update(shape_metrics(mask_u8))
     return out
@@ -294,7 +295,7 @@ def compute_location_heuristics(
     if flags["is_suprasellar_like"]:
         label.append("Suprasellar")
     if flags["is_midline_like"]:
-        label.append("Stalk/Duct-like")
+        label.append("Midline")
     if not label:
         label.append("Indeterminate")
 
@@ -387,10 +388,6 @@ def case_stats(
     vol = read_vol(vol_p)
     mask = read_vol(mask_p)
     mask = sitk.Cast(mask > 0, sitk.sitkUInt8)
-
-    spacing = np.array(vol.GetSpacing(), float)  # (x,y,z)
-    voxel_mm3 = float(np.prod(spacing))
-
     # primary stats via SITK
     logger.info(f"Computing label stats for {case_id}")
     s = label_stats(mask, label=1)
@@ -434,7 +431,7 @@ def case_stats(
     elif disp_ap > ap_thresh_mm:
         ap_position = "posterior"
     else:
-        ap_position = "indeterminate"
+        ap_position = "near_midline"
 
     # Max transverse slice location (inferior/superior/indeterminate)
     max_transv_loc, _ = max_transverse_slice_location(
@@ -485,14 +482,16 @@ def case_stats(
         # "vol_mm3": vol_mm3,
         # "vol_cm3": vol_cm3,  # explicit cm^3
         "surface_area_cm2": s.get("surface_area_cm2", np.nan),
+        "volume_cm3": s.get("volume_cm3", np.nan),
         # shape descriptors
+        "elongation": s.get("elongation", np.nan),
         "sphericity": s.get("sphericity", np.nan),
         "compactness": s.get("compactness", np.nan),
         # diameters & aspect ratio
         "height_cm": si_diam_cm,  # SI
         "depth_cm": ap_diam_cm,  # AP
-        "aspect_ratio_ap_over_si": aspect_ratio,
-        "aspect_ratio_gt_1_1": aspect_ratio_gt_1p1,
+        "aspect_ratio": aspect_ratio,
+        # "aspect_ratio_gt_1_1": aspect_ratio_gt_1p1,
         # centroid (world, mm)
         # "centroid_mm_x": centroid_world[0],
         # "centroid_mm_y": centroid_world[1],
@@ -512,31 +511,30 @@ def case_stats(
         # "extent_mm_y": geo["extent_mm_size_xyz"][1],
         # "extent_mm_z": geo["extent_mm_size_xyz"][2],
         # # additional shape
-        "max_diameter_mm": s.get("max_diameter_mm", np.nan),  # Feret (renamed)
-        "elongation": s.get("elongation", np.nan),
+        # "max_diameter_mm": s.get("max_diameter_mm", np.nan),  # Feret (renamed)
         # "pm1": (s.get("principal_moments") or (np.nan, np.nan, np.nan))[0],
         # "pm2": (s.get("principal_moments") or (np.nan, np.nan, np.nan))[1],
         # "pm3": (s.get("principal_moments") or (np.nan, np.nan, np.nan))[2],
         # SI/midline heuristics
+        "ap_offset_mm": disp_ap,
+        "ap_position": ap_position,  # anterior/posterior/near-midline
         "vertical_offset_mm": loc["si_disp_mm"],
         "midline_offset_mm": loc["midline_offset_mm"],  # renamed from midline_offset_mm
-        "sellar_like": loc["is_sellar_like"],
-        "suprasellar_like": loc["is_suprasellar_like"],
-        "midline_like": loc["is_midline_like"],
+        # "sellar_like": loc["is_sellar_like"],
+        # "suprasellar_like": loc["is_suprasellar_like"],
+        #        "midline_like": loc["is_midline_like"],
         "region_heuristic": loc["heuristic_region_label"],
         # AP heuristics
-        "ap_offset_mm": disp_ap,  # renamed from ap_disp_mm
-        "ap_position": ap_position,  # anterior/posterior/indeterminate
-        "max_area_slice_loc": max_transv_loc,  # inferior/superior/indeterminate
+        # "max_area_slice_loc": max_transv_loc,  # inferior/superior/indeterminate
         # Q/S/T partial points
-        "Q_pts": Q_pts,
-        "S_pts": S_pts,
-        "T_pts": T_pts,
+        # "Q_pts": Q_pts,
+        # "S_pts": S_pts,
+        # "T_pts": T_pts,
         # inputs echoed back
-        "ventricles_dilated": ventricles_dilated,
-        "pituitary_seen": pituitary_seen,
-        "pit_fossa_cm3": pit_fossa_vol_cm3,
-        "front_tub_sellae_cm3": front_tub_sellae_vol_cm3,
+        # "ventricles_dilated": ventricles_dilated,
+        # "pituitary_seen": pituitary_seen,
+        # "pit_fossa_cm3": pit_fossa_vol_cm3,
+        # "front_tub_sellae_cm3": front_tub_sellae_vol_cm3,
     }
     return row
 
