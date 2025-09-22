@@ -1,0 +1,76 @@
+\documentclass[fleqn]{article} % <-- fleqn makes equations left-aligned
+\usepackage{amsmath}
+\usepackage{amsmath,amssymb}  % amssymb (or amsfonts) provides \mathbb
+
+\begin{document}
+
+The elongation is computed as:
+
+\begin{equation*}
+\text{Elongation} = \sqrt{\dfrac{\lambda_{\max}}{\lambda_{\min}}}
+\end{equation*}
+
+\begin{itemize}
+  \item If the tumor  is roughly spherical, $\lambda_{\max} \approx \lambda_{\min}$, so elongation $\approx 1$.
+  \item If the tumor  is stretched along one axis, $\lambda_{\max} \gg \lambda_{\min}$, so elongation becomes large.
+\end{itemize}
+
+\begin{equation*}
+\text{Sphericity} = \dfrac{\pi^{1/3} \, (6V)^{2/3}}{A}
+\end{equation*}
+
+\begin{itemize}
+  \item $\text{Sphericity} \approx 1$ for a perfect sphere.
+  \item Values decrease below $1$ as the tumor  becomes less spherical (e.g., irregular or elongated shapes).
+\end{itemize}
+
+\begin{equation*}
+\text{Compactness} = \dfrac{V^2}{A^3}
+\end{equation*}
+
+\begin{itemize}
+  \item $\text{Compactness}$ is highest for sphere-like tumors.
+  \item Values decrease toward $0$ for shapes with large surface area relative to their volume (thin, elongated, or highly irregular tumor).
+\end{itemize}
+
+\begin{itemize}
+  \item $V$: tumor volume
+  \item $A$: surface area of the tumor
+\end{itemize}
+
+\begin{equation*}
+\text{Aspect Ratio} = \frac{\text{AP}}{\text{SI}}
+\end{equation*}
+
+\begin{itemize}
+ \item If $\approx$ 1, the tumor is about as tall (SI) as it is deep (AP).
+ \item If $\text{Aspect Ratio} > 1.1$, the tumor is elongated front–back compared to top–bottom.
+\end{itemize}
+
+
+\begin{equation*}
+d_{\text{midline}} = \bigl|\, c_x - c_{0x} \,\bigr|
+\end{equation*}
+
+
+\begin{itemize}
+  \item $c_x$: x–coordinate of the centroid (world coordinates).
+  \item $c_{0x}$: x–coordinate of the image center (world coordinates).
+\end{itemize}
+
+\begin{equation*}
+d_{\text{AP}} = \|\mathbf{c} - \mathbf{c}_0\| \, \cos\!\bigl(\theta_{\text{AP}}\bigr) \cdot s_{\text{AP}}
+\end{equation*}
+
+
+\begin{itemize}
+  \item $d_{\text{AP}}$: signed displacement along the anteroposterior (AP) axis.
+  \item $\mathbf{c}$: tumor centroid in world coordinates.
+  \item $\mathbf{c}_0$: image center in world coordinates.
+  \item $\theta_{\text{AP}}$: angle between displacement vector $(\mathbf{c} - \mathbf{c}_0)$ and the AP axis unit vector $\mathbf{u}_{\text{AP}}$.
+  \item $s_{\text{AP}}$: sign factor ($+1$ posterior, $-1$ anterior).
+\end{itemize}
+
+Similarly, $d_{\text{SI}}$: signed displacement along the superior-inferior (SI) axis.
+
+\end{document}

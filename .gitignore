@@ -1,6 +1,8 @@
 .DS_Store
 data/
-doc/
+doc/literature
+doc/HPC
+doc/Meetings
 checkpoints/
 logs/
 output/
