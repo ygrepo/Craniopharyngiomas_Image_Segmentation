@@ -29,72 +29,16 @@ import SimpleITK as sitk
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
-from src.util import get_logger, setup_logging
+from src.util import (
+    get_logger,
+    setup_logging,
+    find_case_files,
+    find_mask_file,
+    read_image,
+    write_image,
+)
 
 logger = get_logger(__name__)
-
-# ---------- I/O ----------
-
-
-def read_image(path: Path) -> sitk.Image:
-    return sitk.ReadImage(str(path))  # NRRD/NHDR/NIfTI auto-detected
-
-
-def write_image(img: sitk.Image, path: Path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    sitk.WriteImage(img, str(path), useCompression=True)
-
-
-def find_case_files(case_dir: Path, modalities: List[str]) -> List[Path]:
-    """
-    Find one file per modality inside `case_dir`.
-    Priority order per modality: NRRD/NHDR (including gz) first, then NIfTI.
-    """
-    out = []
-    for m in modalities:
-        patterns = [
-            # NRRD/NHDR (common + gz)
-            f"*{m}.nrrd",
-            f"*{m}.nhdr",
-            f"*{m}.nrrd.gz",
-            f"*{m}.nhdr.gz",
-            f"*{m.lower()}.nrrd",
-            f"*{m.lower()}.nhdr",
-            f"*{m.lower()}.nrrd.gz",
-            f"*{m.lower()}.nhdr.gz",
-            # NIfTI (fallback / mixed sets)
-            f"*{m}.nii.gz",
-            f"*{m}.nii",
-            f"*{m.lower()}.nii.gz",
-            f"*{m.lower()}.nii",
-        ]
-        found = None
-        for p in patterns:
-            cand = list(case_dir.glob(p))
-            if cand:
-                # if multiple matches, take the first in sorted order for determinism
-                found = sorted(cand)[0]
-                break
-        if found is None:
-            raise FileNotFoundError(f"Missing modality {m} in {case_dir}")
-        out.append(found)
-    return out
-
-
-def find_mask_file(case_dir: Path, mask_tag: str) -> Optional[Path]:
-    """
-    Look for a provided tumor/lesion segmentation (labelmap).
-    Example mask_tag: 'Tumor.seg' matches '*Tumor.seg.nrrd', '*Tumor.seg.nhdr', etc.
-    """
-    stems = [mask_tag, mask_tag.lower()]
-    exts = [".nrrd", ".nhdr", ".nrrd.gz", ".nhdr.gz", ".nii.gz", ".nii"]
-    for s in stems:
-        for e in exts:
-            cand = sorted(case_dir.glob(f"*{s}{e}"))
-            if cand:
-                return cand[0]
-    return None
-
 
 # ---------- PROCESSING ----------
 
