@@ -99,7 +99,8 @@ def convert_to_nifti(
                 sitk.sitkUInt8,
             )
         mask_out = out_case / f"{case_id}_mask.nii.gz"
-        write_image(provided_mask, mask_out, dtype=sitk.sitkUInt8)
+        provided_mask = sitk.Cast(provided_mask, sitk.sitkUInt8)
+        write_image(provided_mask, mask_out)
         logger.info(
             f"[ok] {case_id}: wrote mask {mask_out.name} "
             f"(T1-CE ref: {t1ce_written_path.name if t1ce_written_path else 'n/a'})"
