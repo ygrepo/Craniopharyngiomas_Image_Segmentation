@@ -184,8 +184,10 @@ def find_ref_nii(case_dir: Path) -> Optional[Path]:
 
     # candidate directories to search (in priority order)
     cand_dirs = [
-        case_dir,                                               # .../output/slices/<CASE>
-        case_dir.parents[1] / "preprocessed" / case_id,         # .../output/preprocessed/<CASE>   <-- desired
+        case_dir,  # .../output/slices/<CASE>
+        case_dir.parents[1]
+        / "preprocessed"
+        / case_id,  # .../output/preprocessed/<CASE>   <-- desired
     ]
 
     # also walk ancestors to be safe (handles different run roots)
@@ -199,7 +201,8 @@ def find_ref_nii(case_dir: Path) -> Optional[Path]:
     for d in cand_dirs:
         d = d.resolve()
         if d not in seen and d.exists() and d.is_dir():
-            seen.add(d); dirs.append(d)
+            seen.add(d)
+            dirs.append(d)
 
     # gather candidates
     cands = []
@@ -225,6 +228,7 @@ def find_ref_nii(case_dir: Path) -> Optional[Path]:
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return scored[0][1]
+
 
 @torch.no_grad()
 def predict_case(
@@ -272,6 +276,8 @@ def predict_case(
         device=device,
     ).view(1, 3, 1, 1)
 
+    prob_vol = np.zeros((X, Y, Z), dtype=np.float32)
+
     for png_p in sorted(imgs_dir.glob("*.png")):
         z = int(png_p.stem)  # 0000.png → 0
         img = cv2.imread(str(png_p), cv2.IMREAD_COLOR)  # BGR uint8 [0,255]
@@ -282,7 +288,14 @@ def predict_case(
 
         # BGR -> RGB, resize to encoder size
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        inp = cv2.resize(img, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
+        # BGR -> RGB
+        g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        lo, hi = np.percentile(g, [2, 98])
+        g = np.clip((g - lo) / (hi - lo + 1e-6), 0, 1) * 255.0
+        inp = np.stack([g, g, g], axis=-1).astype(np.uint8)  # shape (H,W,3)
+        inp = cv2.resize(inp, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
+
+        #        inp = cv2.resize(img, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
 
         # to tensor, normalize
         xt = (
@@ -315,11 +328,16 @@ def predict_case(
             )
 
         prob = torch.sigmoid(logit)[0, 0].detach().cpu().numpy()
+        prob_hw = cv2.resize(prob, (w0, h0), interpolation=cv2.INTER_LINEAR)
+        if (w0, h0) != (X, Y):
+            prob_hw = cv2.resize(prob_hw, (X, Y), interpolation=cv2.INTER_LINEAR)
+        prob_vol[..., z] = prob_hw
+
         m, s = float(prob.mean()), float(prob.std())
         logger.debug(f"[slice {z:04d}] prob mean={m:.4f} std={s:.4f}")
 
         # threshold at native resolution, then back to original slice size
-        mask_1024 = (prob > 0.35).astype(np.uint8)
+        mask_1024 = (prob >= 0.2).astype(np.uint8)
         mask_hw = cv2.resize(mask_1024, (w0, h0), interpolation=cv2.INTER_NEAREST)
 
         # place into (X,Y,Z) as axial slice z
@@ -348,6 +366,21 @@ def predict_case(
         )
         target = (ref_img.shape, ref_img.affine)
         src_img = resample_from_to(src_img, target, order=0)  # NN preserves labels
+
+    prob_src = nib.Nifti1Image(prob_vol.astype(np.float32), src_affine)
+    if prob_src.shape != ref_img.shape or not np.allclose(
+        prob_src.affine, ref_img.affine
+    ):
+        prob_src = resample_from_to(
+            prob_src, (ref_img.shape, ref_img.affine), order=1
+        )  # bilinear for probs
+    prob_img = nib.Nifti1Image(
+        prob_src.get_fdata().astype(np.float32), ref_img.affine, ref_img.header.copy()
+    )
+    prob_img.set_data_dtype(np.float32)
+    prob_img.set_qform(ref_img.affine, code=1)
+    prob_img.set_sform(ref_img.affine, code=1)
+    nib.save(prob_img, str(out_dir / "pred_prob.nii.gz"))
 
     # Save with ref header/affine; labelmap + q/sforms
     out_img = nib.Nifti1Image(

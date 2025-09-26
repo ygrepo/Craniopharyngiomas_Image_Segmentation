@@ -99,8 +99,11 @@ def save_mask_like(ref_img: tio.ScalarImage, mask_zyx: np.ndarray, out_path: Pat
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
     affine = ref_img.affine
-    # TorchIO uses channels-first (C,Z,Y,X) internally; here we already have Z,Y,X
-    nii = nib.Nifti1Image(mask_zyx.astype(np.uint8), affine)
+    mask_xyz = np.transpose(mask_zyx.astype(np.uint8), (2, 1, 0))  # Z,Y,X -> X,Y,Z
+    nii = nib.Nifti1Image(mask_xyz, affine, nib.Nifti1Header(ref_img.header.copy()))
+    nii.set_data_dtype(np.uint8)
+    nii.set_qform(affine, code=1)
+    nii.set_sform(affine, code=1)
     nib.save(nii, str(out_path))
 
 
@@ -175,102 +178,173 @@ def keep_largest_component_3d(mask_zyx: np.ndarray) -> np.ndarray:
 @torch.no_grad()
 def predict_volume(
     sam,
-    vol: tio.ScalarImage,
+    vol: tio.ScalarImage,  # TorchIO image: (C,Z,Y,X), C=1
     device: torch.device,
-    normalize_type: str,
+    normalize_type: str = "robust",  # "robust" or "clahe" or "none"
     flip_R: bool = True,
     apply_lcc: bool = True,
-) -> np.ndarray:
-    """
-    Slice-by-slice inference:
-      - Normalize and resize each slice to 1024x1024
-      - Replicate to 3 channels
-      - Forward SAM in prompt-free mode
-      - Argmax over mask logits (binary)
-      - Upsample back to original HxW
-      - Stack to Z,Y,X volume
-    """
-    # TorchIO data tensor: (C,Z,Y,X), here C=1
-    vol_tensor = vol.data  # torch.Tensor
-    assert (
-        vol_tensor.ndim == 4 and vol_tensor.shape[0] == 1
-    ), "Expect single-channel volumes."
+    return_prob: bool = True,
+    threshold: float = 0.35,
+    use_tta: bool = False,  # simple H/V flip TTA
+):
+    import torch.nn.functional as F
+    import numpy as np
+    import cv2
+    from scipy import ndimage as ndi
 
-    C, Z, H, W = vol_tensor.shape
-    vol_np = vol_tensor[0].numpy().astype(np.float32)  # Z,H,W
+    # ---- helpers ----
+    def _sam_pixel_stats(sam):
+        pm = getattr(sam, "pixel_mean", [123.675, 116.28, 103.53])
+        ps = getattr(sam, "pixel_std", [58.395, 57.12, 57.375])
+        pm = torch.tensor(pm, dtype=torch.float32, device=device).view(1, 3, 1, 1)
+        ps = torch.tensor(ps, dtype=torch.float32, device=device).view(1, 3, 1, 1)
+        return pm, ps
 
-    # optional LR flip for 'R' orientation for consistent handedness
-    if flip_R:
-        vol_np = maybe_flip_lr_for_R_orientation(vol, vol_np)
+    def _normalize_slice_uint8(gray: np.ndarray, how: str) -> np.ndarray:
+        """Return uint8 in [0,255]."""
+        if how == "clahe":
+            g = gray.astype(np.uint8)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            g = clahe.apply(g)
+            return g
+        elif how == "robust":
+            g = gray.astype(np.float32)
+            lo, hi = np.percentile(g, [2, 98])
+            g = np.clip((g - lo) / (hi - lo + 1e-6), 0, 1) * 255.0
+            return g.astype(np.uint8)
+        else:
+            # assume already roughly 0..255
+            g = gray
+            if g.dtype != np.uint8:
+                g = np.clip(g, 0, 255).astype(np.uint8)
+            return g
 
-    masks_zyx = np.zeros_like(vol_np, dtype=np.uint8)
+    def _resize_to_1024(img_uint8_hw: np.ndarray) -> np.ndarray:
+        return cv2.resize(img_uint8_hw, (1024, 1024), interpolation=cv2.INTER_LINEAR)
 
-    # Some SAM wrappers split to (image_encoder, prompt_encoder, mask_decoder).
-    # We'll try a generic forward signature similar to the notebook:
-    #   - get image embedding for the 1024 image
-    #   - feed prompt=None and get masks
-    # Adjust if your model exposes a different API.
+    def _upsample_mask(mask_1024: np.ndarray, H: int, W: int) -> np.ndarray:
+        return cv2.resize(
+            mask_1024.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST
+        )
 
+    def _sam_logits_best(sam, xt: torch.Tensor) -> torch.Tensor:
+        """
+        Run SAM with multimask_output=True and select the mask with highest IoU prediction.
+        xt: [1,3,1024,1024] float32, already (x - mean)/std
+        Returns logits [1,1,1024,1024].
+        """
+        img_emb = sam.image_encoder(xt)
+        sparse, dense = sam.prompt_encoder(points=None, boxes=None, masks=None)
+        logits, iou_pred = sam.mask_decoder(
+            image_embeddings=img_emb,
+            image_pe=sam.prompt_encoder.get_dense_pe(),
+            sparse_prompt_embeddings=sparse,
+            dense_prompt_embeddings=dense,
+            multimask_output=True,
+        )
+        idx = int(torch.argmax(iou_pred))
+        logit = logits[:, idx : idx + 1]
+        if logit.shape[-1] != 1024:  # some impls output 256
+            logit = F.interpolate(
+                logit, size=(1024, 1024), mode="bilinear", align_corners=False
+            )
+        return logit
+
+    def _sam_logits_best_tta(sam, xt: torch.Tensor) -> torch.Tensor:
+        """Simple TTA over H/V flips; average logits back in original orientation."""
+        lgts = []
+        for tf in ("none", "flip_h", "flip_v", "flip_hv"):
+            x = xt
+            if tf == "flip_h":
+                x = torch.flip(x, dims=[3])
+            if tf == "flip_v":
+                x = torch.flip(x, dims=[2])
+            if tf == "flip_hv":
+                x = torch.flip(x, dims=[2, 3])
+            l = _sam_logits_best(sam, x)
+            if tf == "flip_h":
+                l = torch.flip(l, dims=[3])
+            if tf == "flip_v":
+                l = torch.flip(l, dims=[2])
+            if tf == "flip_hv":
+                l = torch.flip(l, dims=[2, 3])
+            lgts.append(l)
+        return torch.mean(torch.stack(lgts, dim=0), dim=0)
+
+    def _largest_component_3d(mask_zyx: np.ndarray) -> np.ndarray:
+        lbl, nlab = ndi.label(mask_zyx > 0)
+        if nlab <= 1:
+            return (mask_zyx > 0).astype(np.uint8)
+        sizes = ndi.sum(mask_zyx, lbl, index=np.arange(1, nlab + 1))
+        keep = 1 + int(np.argmax(sizes))
+        return (lbl == keep).astype(np.uint8)
+
+    def _maybe_flip_R(vol_tio: tio.ScalarImage, vol_np_zyx: np.ndarray) -> np.ndarray:
+        return (
+            maybe_flip_lr_for_R_orientation(vol_tio, vol_np_zyx)
+            if flip_R
+            else vol_np_zyx
+        )
+
+    # ---- load volume ----
+    vol_tensor = vol.data
+    assert vol_tensor.ndim == 4 and vol_tensor.shape[0] == 1, "Expect (C=1, Z, Y, X)."
+    _, Z, H, W = vol_tensor.shape
+    vol_np = vol_tensor[0].cpu().numpy().astype(np.float32)  # Z,H,W
+    vol_np = _maybe_flip_R(vol, vol_np)
+
+    masks_zyx = np.zeros((Z, H, W), dtype=np.uint8)
+    prob_zyx = np.zeros((Z, H, W), dtype=np.float32)
+
+    pixel_mean, pixel_std = _sam_pixel_stats(sam)
+
+    # ---- per-slice inference ----
     for z in range(Z):
-        slice_f = vol_np[z]  # HxW
-        slice_n = normalize_slice_uint8_to_model(slice_f, normalize_type)
-        inp_1024 = resize_to_1024(slice_n)  # 1024x1024 float
+        # 1) grayscale slice -> robust/CLAHE -> 1024
+        sl = vol_np[z]  # HxW float32
+        sl_u8 = _normalize_slice_uint8(sl, normalize_type)
+        sl_1024 = _resize_to_1024(sl_u8)  # 1024x1024 uint8
 
-        # 3-channel replicate
-        img_3ch = np.stack([inp_1024, inp_1024, inp_1024], axis=0)  # 3,1024,1024
-        img_t = (
+        # 2) replicate to 3ch and apply SAM pixel normalization
+        img_3ch = np.stack([sl_1024, sl_1024, sl_1024], axis=0).astype(
+            np.float32
+        )  # 3,1024,1024
+        xt = (
             torch.from_numpy(img_3ch)
             .unsqueeze(0)
             .to(device=device, dtype=torch.float32)
+        )  # 1,3,1024,1024
+        xt = (xt - pixel_mean) / pixel_std
+
+        # 3) logits via multimask + IoU best (with optional TTA)
+        if use_tta:
+            logit = _sam_logits_best_tta(sam, xt)
+        else:
+            logit = _sam_logits_best(sam, xt)
+
+        prob = torch.sigmoid(logit)[0, 0].detach().cpu().numpy()  # 1024x1024 float
+        # simple diagnostics (optional):
+        # print(f"[z={z:03d}] mean={prob.mean():.4f} std={prob.std():.4f}")
+
+        # 4) threshold to binary at 1024, then resize back to native HxW
+        mask_1024 = (prob >= threshold).astype(np.uint8)
+        mask_hw = _upsample_mask(mask_1024, H, W)
+        prob_hw = cv2.resize(prob, (W, H), interpolation=cv2.INTER_LINEAR)
+
+        masks_zyx[z] = mask_hw
+        prob_zyx[z] = prob_hw
+
+    # ---- light post-processing ----
+    if apply_lcc:
+        masks_zyx = _largest_component_3d(masks_zyx)
+        # small 3D closing to fill tiny holes
+        masks_zyx = ndi.binary_closing(masks_zyx, structure=np.ones((3, 3, 3))).astype(
+            np.uint8
         )
 
-        # ----- SAM forward (prompt-free) -----
-        # The exact API may vary. Two common patterns:
-
-        # Pattern A: single-call predict function (pseudo)
-        # masks, scores, logits = sam.predict(img_t)   # <- edit to your repo
-
-        # Pattern B: explicit encoder/decoder calls
-        try:
-            # Try SAM-like API used in many forks:
-            # 1) encode image
-            img_embed = sam.image_encoder(img_t)
-            # 2) no prompts
-            sparse_embeds, dense_embeds = None, None
-            # 3) decode masks (some apis expect h/w or orig size; adjust if needed)
-            mask_logits, _ = sam.mask_decoder(
-                image_embeddings=img_embed,
-                image_pe=sam.prompt_encoder.get_dense_pe(),  # positional enc
-                sparse_prompt_embeddings=sparse_embeds,
-                dense_prompt_embeddings=dense_embeds,
-                multimask_output=False,
-            )
-        except Exception:
-            # Fallback: if your repo has a convenience method, replace here:
-            raise RuntimeError(
-                "Adjust the forward pass to your fine-tuned SAM API (image_encoder/prompt_encoder/mask_decoder or predict())."
-            )
-
-        # mask_logits: [B,1,256,256] or [B,1,1024,1024], depends on impl
-        logit = mask_logits.squeeze(0).squeeze(0)  # HxW (downsampled or 1024)
-        # Some decoders output 256x256; upsample to 1024 for consistent path
-        if logit.shape[-1] != 1024:
-            logit = F.interpolate(
-                logit[None, None],
-                size=(1024, 1024),
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze()
-
-        prob = torch.sigmoid(logit)
-        mask_1024 = (prob > 0.5).float().cpu().numpy()
-        mask_hw = upsample_mask_to_hw(mask_1024, H, W)  # back to native size
-        masks_zyx[z] = mask_hw.astype(np.uint8)
-
-    if apply_lcc:
-        masks_zyx = keep_largest_component_3d(masks_zyx)
-
-    return masks_zyx  # Z,Y,X uint8
+    if return_prob:
+        return masks_zyx, prob_zyx
+    return masks_zyx
 
 
 # -----------------------------
@@ -358,17 +432,19 @@ def main():
         print(f"[case] {case_id}  image={img_path.name}")
         vol = read_volume_tio(img_path)
 
-        mask_zyx = predict_volume(
-            sam,
-            vol,
+        masks, probs = predict_volume(
+            sam=sam,
+            vol=vol,  # TorchIO ScalarImage
             device=device,
-            normalize_type=normalize_type,
-            flip_R=(not args.no_flip_R),
-            apply_lcc=(not args.no_lcc),
+            normalize_type="robust",
+            flip_R=True,
+            apply_lcc=True,
+            return_prob=True,
+            threshold=0.35,
+            use_tta=False,
         )
-
         # save with same affine/orientation as input
-        save_mask_like(vol, mask_zyx, out_mask)
+        save_mask_like(vol, masks, out_mask)
         print(f"[ok] wrote {out_mask}")
 
     print("[done] All cases processed.")
