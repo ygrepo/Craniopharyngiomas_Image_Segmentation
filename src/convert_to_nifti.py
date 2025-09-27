@@ -62,7 +62,7 @@ def convert_to_nifti(
             p.stem + ".nii.gz" if not p.name.endswith(".nii.gz") else p.name
         )
         write_image(img, out_img_path)
-
+        t1ce_native_path = None
         # remember T1-CE (by filename heuristic or by user intent if only one)
         if is_t1ce_name(p.name) or (len(img_paths) == 1 and user_wants_t1ce):
             t1ce_img = img
@@ -70,6 +70,7 @@ def convert_to_nifti(
             t1ce_alias = out_case / f"{case_id}_0002.nii.gz"
             write_image(img, t1ce_alias)
             t1ce_written_path = t1ce_alias
+            t1ce_native_path = out_img_path
 
     # Fallback: if we still did not identify T1-CE, use the first modality as reference
     if t1ce_img is None and imgs:
@@ -84,7 +85,9 @@ def convert_to_nifti(
     # Also write a Slicer-friendly alias for T1-CE (for your downstream tools)
     if t1ce_img is not None:
         slicer_alias = out_case / f"{case_id}_T1_CE_3D_AX_ALIGNED.nii.gz"
-        write_image(t1ce_img, slicer_alias)
+        if t1ce_native_path is None or slicer_alias != t1ce_native_path:
+
+            write_image(t1ce_img, slicer_alias)
 
     # --- save mask aligned to T1-CE geometry (if provided) ---
     if provided_mask is not None and t1ce_img is not None:
