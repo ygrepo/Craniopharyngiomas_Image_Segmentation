@@ -41,7 +41,9 @@ $PYTHON "$MAIN" \
     --src_root "$DATA_DIR" \
     --dst_root "$OUTPUT_DIR" \
     --log_level "$LOG_LEVEL" \
-    --log_file "$LOG_FILE"
+    --log_file "$LOG_FILE" \
+    --mode copy \
+    --overwrite
 exit_code=$?
 set -e
 
