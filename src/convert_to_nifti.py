@@ -86,7 +86,6 @@ def convert_to_nifti(
     if t1ce_img is not None:
         slicer_alias = out_case / f"{case_id}_T1_CE_3D_AX_ALIGNED.nii.gz"
         if t1ce_native_path is None or slicer_alias != t1ce_native_path:
-
             write_image(t1ce_img, slicer_alias)
 
     # --- save mask aligned to T1-CE geometry (if provided) ---
