@@ -1,59 +1,56 @@
-#!/usr/bin/env bash
+#!/bin/bash
+#   unet_predict.sh    —  Predict 3D mask using nnU-Net.
+#SBATCH --job-name=unet_predict
+#SBATCH --output=logs/unet_predict_%A_%a.out
+#SBATCH --error=logs/unet_predict_%A_%a.err
+#SBATCH --time=04:00:00
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=32G
+
 set -euo pipefail
 
-# --------- CONFIG (edit the top 4 lines as needed) ---------
-RESULTS_DIR="${RESULTS_DIR:-$PWD/nnUNet_results}"  # where models live
-ZIP_PATH="${1:-}"                                  # optional: /path/to/Dataset002_BraTS2021_3d_fullres.zip
-DATASET_ID="${DATASET_ID:-002}"                    # BraTS21 is commonly 002
-IN_DIR="${IN_DIR:-output/nnunet_input}"            # your prepared inputs (per-case _0000.._0003)
-OUT_DIR="${OUT_DIR:-output/nnunet_pred}"           # predictions go here
-FOLDS="${FOLDS:-all}"
-CONFIG="${CONFIG:-3d_fullres}"
-TRAINER="${TRAINER:-nnUNetTrainer}"
-EXTRA_PRED_ARGS="${EXTRA_PRED_ARGS:---save_probabilities --disable_tta}"  # tweak as you like
-# ----------------------------------------------------------
+module purge
+module load anaconda3/2023.09
+module load proxy/jh-proxy-1.0
+source $(conda info --base)/etc/profile.d/conda.sh
 
-echo "[1/4] Ensuring nnUNet env"
-mkdir -p "$RESULTS_DIR" "$OUT_DIR"
-export nnUNet_results="$RESULTS_DIR"
-echo "  nnUNet_results=$nnUNet_results"
+# --- Paths (edit if needed) ---
+ENV_PREFIX="/projects/gbm_modeling/.conda/envs/mri"
+PIP_CACHE_DIR="/projects/gbm_modeling/.pip_cache"
+CONDA_PKGS_DIRS="/projects/gbm_modeling/.conda/pkgs"
 
-if [[ -n "$ZIP_PATH" ]]; then
-  echo "[2/4] Installing pretrained model from ZIP: $ZIP_PATH"
-  if ! command -v nnUNetv2_install_pretrained_model_from_zip >/dev/null 2>&1; then
-    echo "  ERROR: nnUNetv2_install_pretrained_model_from_zip not found. Activate the nnUNet v2 env." >&2
-    exit 2
-  fi
-  nnUNetv2_install_pretrained_model_from_zip "$ZIP_PATH"
-else
-  echo "[2/4] No ZIP provided, skipping install (assuming model already installed)."
-fi
+# --- Keep installs off $HOME and avoid user-site leakage ---
+mkdir -p "${PIP_CACHE_DIR}" "${CONDA_PKGS_DIRS}"
+export PIP_CACHE_DIR="${PIP_CACHE_DIR}"
+export CONDA_PKGS_DIRS="${CONDA_PKGS_DIRS}"
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH || true
 
-echo "[info] Models under \$nnUNet_results:"
-ls -1 "$nnUNet_results" || true
+conda activate "${ENV_PREFIX}"
 
-echo "[3/4] Materializing symlinks in $IN_DIR (cp -L → real files)"
-if [[ ! -d "$IN_DIR" ]]; then
-  echo "  ERROR: Input dir '$IN_DIR' not found." >&2
-  exit 3
-fi
-# Replace any symlinked channel file with a real file (follows the link)
-find "$IN_DIR" -type l -name "*_000[0-3].nii.gz" | while read -r L; do
-  TMP="${L}.tmp"
-  cp -L "$L" "$TMP"
-  mv -f "$TMP" "$L"
-done
+LOG_DIR="logs"
+LOG_LEVEL="DEBUG"
+mkdir -p "$LOG_DIR"
 
-echo "[4/4] Running nnUNetv2_predict"
-set -x
+# make a flat folder and copy (follow symlinks) all channels into it
+mkdir -p output/nnunet_input_flat
+# find output/nnunet_input -type f -name "*_000[0-3].nii.gz" -exec cp -L {} output/nnunet_input_flat/ \;
+
+# ls -1 output/nnunet_input_flat | wc -l
+# ls -1 output/nnunet_input_flat/*_0000.nii.gz
+
+# export nnUNet_results="$PWD/nnUNet_results"
+# ls -R nnUNet_results/Dataset002_BRATS19/nnUNetTrainer__nnUNetPlans__3d_fullres
+
 nnUNetv2_predict \
-  -d "$DATASET_ID" \
-  -i "$IN_DIR" \
-  -o "$OUT_DIR" \
-  -f "$FOLDS" \
-  -c "$CONFIG" \
-  -tr "$TRAINER" \
-  $EXTRA_PRED_ARGS
-set +x
-
-echo "[done] Predictions → $OUT_DIR"
+  -d 002 \
+  -i output/nnunet_input_flat \
+  -o output/nnunet_pred \
+  -f 0 1 2 3 4 \
+  -c 3d_fullres \
+  -tr nnUNetTrainer \
+  --save_probabilities \
+  --disable_tta
