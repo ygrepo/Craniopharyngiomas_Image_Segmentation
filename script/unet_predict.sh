@@ -45,6 +45,11 @@ mkdir -p output/nnunet_input_flat
 # export nnUNet_results="$PWD/nnUNet_results"
 # ls -R nnUNet_results/Dataset002_BRATS19/nnUNetTrainer__nnUNetPlans__3d_fullres
 
+export nnUNet_raw="$PWD/nnUNet_raw"
+export nnUNet_preprocessed="$PWD/nnUNet_preprocessed"
+mkdir -p "$nnUNet_raw" "$nnUNet_preprocessed"
+
+
 nnUNetv2_predict \
   -d 002 \
   -i output/nnunet_input_flat \
