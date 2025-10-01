@@ -1,0 +1,37 @@
+\documentclass{article}
+
+% ---- Packages ----
+\usepackage{array}        % for p{width} columns
+\usepackage{geometry}     % adjust margins
+\usepackage{caption}      % better control of captions
+\usepackage{booktabs}     % optional: nicer rules
+\usepackage{longtable}    % optional: multipage tables
+\usepackage{graphicx}     % in case you want to add diagrams
+
+\geometry{margin=1in}
+
+\begin{document}
+\begin{table}[htbp]
+\centering
+\small % or \scriptsize for even smaller
+\setlength{\tabcolsep}{4pt} % reduce horizontal padding
+\renewcommand{\arraystretch}{1.1} % reduce vertical spacing
+\caption{Comparison of Lesion Analysis and Mapping Tools}
+\begin{tabular}{|p{2.8cm}|p{2.8cm}|p{2.8cm}|p{2.8cm}|p{2.8cm}|}
+\hline
+\textbf{Tool} & \textbf{Input} & \textbf{Output} & \textbf{Pros} & \textbf{Cons} \\
+\hline
+VLSM & Lesion masks + behavioral scores & Lesion–symptom localization & Well-established; anatomy–behavior link & Needs large number of scans; sensitive to registration \\
+\hline
+LQT (MATLAB) & MRI lesion masks; atlas & Estimates region-level grey matter damage and white matter disconnection & Publicly available & Atlas accuracy  \\
+\hline
+SVR-LSM & Lesion masks + behavior & ML model & Flexible; handles high-dimensional data & Needs behavioral data \\
+\hline
+DSM & Lesion masks + tract atlas & White matter disconnection maps & Highlights network disruptions & Requires diffusion atlas  \\
+\hline
+CLSM & Lesion masks + connectome & Network lesion mapping & Network-level insight; connectomics & Needs high-quality connectome \\
+\hline
+\end{tabular}
+\end{table}
+
+\end{document}

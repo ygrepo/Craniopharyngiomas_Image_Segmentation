@@ -9,11 +9,16 @@ import logging
 
 import SimpleITK as sitk
 from tqdm import tqdm
+import sys
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+from src.util import (
+    get_logger,
+    setup_logging,
 )
-logger = logging.getLogger(__name__)
+
+logger = get_logger(__name__)
 
 
 # ---------- Optional N4 ----------
@@ -28,9 +33,9 @@ def n4_bias_correct_np(x: np.ndarray, shrink: int = 2, n_iters: int = 50) -> np.
 
 
 # ---------- Remap BraTS {0,1,2,4} -> {0,1,2,3} ----------
-def remap_labels(arr: np.ndarray) -> np.ndarray:
+def remap_labels(arr):
     arr = arr.astype(np.uint8)
-    if 4 in np.unique(arr):
+    if (arr == 4).any():
         arr[arr == 4] = 3
     return arr
 
@@ -167,11 +172,18 @@ def convert_braTS_to_nnUNet(
     channel_names = {str(i): modality_human.get(m, m) for i, m in enumerate(modalities)}
     modality_map = {str(i): "MRI" for i, _ in enumerate(modalities)}
 
-    labels_name_to_int = {
-        "background": 0,
-        "necrotic/non-enhancing": 1,
-        "edema": 2,
-        "enhancing": 3,
+    # labels_name_to_int = {
+    #     "background": 0,
+    #     "necrotic/non-enhancing": 1,
+    #     "edema": 2,
+    #     "enhancing": 3,
+    # }
+
+    labels_int_to_name = {
+        "0": "background",
+        "1": "necrotic/non-enhancing",
+        "2": "edema",
+        "3": "enhancing",
     }
 
     ds = {
@@ -184,14 +196,17 @@ def convert_braTS_to_nnUNet(
         "file_ending": ".nii.gz",
         "channel_names": channel_names,
         "modality": modality_map,
-        "labels": labels_name_to_int,
+        "labels": labels_int_to_name,
         "numTraining": len(kept_train_sorted),
         "numTest": len(kept_test_sorted),
         "training": [
-            {"image": f"./imagesTr/{cid}.nii.gz", "label": f"./labelsTr/{cid}.nii.gz"}
+            {
+                "image": f"./imagesTr/{cid}_0000.nii.gz",
+                "label": f"./labelsTr/{cid}.nii.gz",
+            }
             for cid in kept_train_sorted
         ],
-        "test": [f"./imagesTs/{cid}.nii.gz" for cid in kept_test_sorted],
+        "test": [f"./imagesTs/{cid}_0000.nii.gz" for cid in kept_test_sorted],
     }
     (out_dir / "dataset.json").write_text(json.dumps(ds, indent=2) + "\n")
 
