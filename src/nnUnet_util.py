@@ -297,3 +297,7 @@ def main():
         seed=42,
         do_n4=False,
     )
+
+
+if __name__ == "__main__":
+    main()
