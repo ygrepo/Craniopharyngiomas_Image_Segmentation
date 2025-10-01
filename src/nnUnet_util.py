@@ -53,15 +53,51 @@ def _case_and_modality(path: Path) -> tuple[str, str | None]:
     return (m.group(1), m.group(2).lower())
 
 
+def _sitk_to_nib(img_sitk: sitk.Image) -> nib.Nifti1Image:
+    arr = sitk.GetArrayFromImage(img_sitk)  # z,y,x
+    arr = arr.astype(np.float32, copy=False)
+    # Build affine from SITK spacing/direction/origin
+    spacing = np.array(list(img_sitk.GetSpacing()))[::-1]  # x,y,z -> z,y,x
+    direction = np.array(list(img_sitk.GetDirection()))
+    direction = direction.reshape(3, 3)  # x,y,z basis
+    direction = direction[::-1, ::-1]  # reorder to z,y,x
+    origin = np.array(list(img_sitk.GetOrigin()))[::-1]
+    affine = np.eye(4, dtype=np.float32)
+    affine[:3, :3] = direction * spacing
+    affine[:3, 3] = origin
+    return nib.Nifti1Image(arr, affine)
+
+
+def _safe_load_nifti(path_in: Path, dtype=np.float32) -> nib.Nifti1Image:
+    """Try nibabel; if header/IO error, fall back to SimpleITK."""
+    try:
+        nii = nib.load(str(path_in))
+        # Force read to catch IO errors early
+        _ = nii.get_fdata(dtype=dtype)
+        return nii
+    except Exception as e:
+        warnings.warn(
+            f"[safe_load] nibabel failed on {path_in.name}: {e}. Trying SimpleITK…"
+        )
+        try:
+            img = sitk.ReadImage(str(path_in))
+            return _sitk_to_nib(img)
+        except Exception as e2:
+            raise RuntimeError(
+                f"Failed to load {path_in} with nibabel and SimpleITK: {e2}"
+            ) from e
+
+
 def _save_image_to(
     path_in: Path, out_path: Path, run_n4: bool, n4_shrink: int, n4_iters: int
 ):
-    nii = nib.load(str(path_in))
-    data = nii.get_fdata().astype(np.float32)
+    nii = _safe_load_nifti(path_in)
+    data = nii.get_fdata().astype(np.float32, copy=False)
     if run_n4:
         data = n4_bias_correct_np(data, shrink=n4_shrink, n_iters=n4_iters)
     out = nib.Nifti1Image(data, nii.affine, nii.header)
     out.set_data_dtype(np.float32)
+    logger.info(f"Saving to {out_path}")
     nib.save(out, str(out_path))
 
 
@@ -71,40 +107,41 @@ def convert_braTS_to_nnUNet(
     *,
     dataset_id: int = 501,
     dataset_name: str = "BraTS2017_4ch",
-    # Channel order for nnU-Net output
     modalities: tuple[str, ...] = ("flair", "t1", "t1ce", "t2"),
     split_ratio: tuple = (
         0.8,
         0.2,
-    ),  # (train, test)  or provide (train, val, test) to merge val into train
+    ),  # (train, test) or (train, val, test -> val merged into train)
     seed: int = 42,
     do_n4: bool = False,
     n4_shrink: int = 2,
     n4_iters: int = 50,
+    on_error: str = "skip_case",  # "skip_case" | "skip_modality" | "raise"
 ) -> Path:
     """
     Convert BraTS2017-style files to nnU-Net v2 raw structure.
 
-    Input (any nested tree under src_root):
+    Input under src_root (any nesting):
       <case>_flair.nii(.gz)
       <case>_t1.nii(.gz)
       <case>_t1ce.nii(.gz)
       <case>_t2.nii(.gz)
       <case>_seg.nii(.gz)
 
-    Output:
-      nnUNet_raw/Dataset<id>_<name>/{imagesTr,labelsTr,imagesTs}/
-      dataset.json  (labels: {"0": "...", "1": "...", "2": "...", "3": "..."})
+    Output under nnUNet_raw/Dataset{dataset_id}_{dataset_name}/:
+      imagesTr/, labelsTr/, imagesTs/ (optional), dataset.json, summary.txt, skipped_cases.json
     """
     logger.info("Starting BraTS→nnU-Net conversion")
 
-    # Validate split
+    assert on_error in ("skip_case", "skip_modality", "raise")
+
+    # ---- validate split ----
     if len(split_ratio) not in (2, 3):
         raise ValueError("split_ratio must be (train, test) or (train, val, test).")
     if abs(sum(split_ratio) - 1.0) > 1e-6:
         raise ValueError(f"split_ratio must sum to 1.0, got {split_ratio}")
     if len(split_ratio) == 3:
-        train_frac = split_ratio[0] + split_ratio[1]  # merge val into train
+        train_frac = split_ratio[0] + split_ratio[1]
         test_frac = split_ratio[2]
         split_ratio = (train_frac, test_frac)
         logger.info(
@@ -114,13 +151,13 @@ def convert_braTS_to_nnUNet(
     # ---- scan & group files by case_id ----
     all_files = list(src_root.rglob("*.nii")) + list(src_root.rglob("*.nii.gz"))
     groups: dict[str, dict[str, Path]] = defaultdict(dict)
-    unknown = []
+    unknown: list[Path] = []
     for p in all_files:
-        cid, tag = _case_and_modality(p)
+        cid, tag = _case_and_modality(p)  # expects <case>_(flair|t1|t1ce|t2|seg)
         if tag is None:
             unknown.append(p)
             continue
-        groups[cid][tag] = p
+        groups[cid][tag.lower()] = p
 
     case_ids = sorted(groups.keys())
     random.seed(seed)
@@ -140,40 +177,109 @@ def convert_braTS_to_nnUNet(
     for d in (imgTr, labTr, imgTs):
         d.mkdir(parents=True, exist_ok=True)
 
+    # ---- containers for bookkeeping ----
+    kept_train: list[str] = []
+    kept_test: list[str] = []
+    skipped_train: list[tuple[str, str, list[str]]] = []
+    skipped_test: list[tuple[str, str, list[str]]] = []
+    broken_train: list[tuple[str, str]] = []
+    broken_test: list[tuple[str, str]] = []
+
     # ---- write training cases (require all modalities + seg) ----
-    kept_train, skipped_train = [], []
     for cid in tqdm(train_ids, desc="Writing training cases", unit="case"):
-        have = {k.lower(): v for k, v in groups[cid].items()}
-        if not all(m in have for m in modalities) or "seg" not in have:
-            skipped_train.append((cid, sorted(have.keys())))
+        have = groups[cid]
+        missing = [m for m in modalities if m not in have] + (
+            ["seg"] if "seg" not in have else []
+        )
+        if missing:
+            logger.warning(f"Skipping {cid} (train): missing {missing}")
+            skipped_train.append((cid, f"missing={missing}", sorted(have.keys())))
             continue
-        # channels in the requested order
+
+        case_failed = False
+        # images in fixed channel order
         for ch, m in enumerate(modalities):
-            _save_image_to(
-                have[m], imgTr / f"{cid}_{ch:04d}.nii.gz", do_n4, n4_shrink, n4_iters
-            )
-        # labels (remap 4->3)
-        seg_nii = nib.load(str(have["seg"]))
-        seg = remap_labels_to_0123(seg_nii.get_fdata()).astype(np.uint8)
-        out_lbl = nib.Nifti1Image(seg, seg_nii.affine, seg_nii.header)
-        out_lbl.set_data_dtype(np.uint8)
-        nib.save(out_lbl, str(labTr / f"{cid}.nii.gz"))
+            try:
+                _save_image_to(
+                    have[m],
+                    imgTr / f"{cid}_{ch:04d}.nii.gz",
+                    do_n4,
+                    n4_shrink,
+                    n4_iters,
+                )
+            except Exception as e:
+                msg = f"{cid}:{m} -> {type(e).__name__}: {e}"
+                if on_error == "skip_modality":
+                    logger.warning(f"Skipping modality {msg}")
+                    case_failed = (
+                        True  # nnU-Net needs all channels, so mark case failed
+                    )
+                    break
+                elif on_error == "skip_case":
+                    logger.error(f"Skipping case due to error {msg}")
+                    case_failed = True
+                    break
+                else:
+                    raise
+
+        if case_failed:
+            broken_train.append((cid, "image_write_error"))
+            # clean partial outputs
+            for ch in range(len(modalities)):
+                p = imgTr / f"{cid}_{ch:04d}.nii.gz"
+                if p.exists():
+                    logger.info(f"Deleting partial output: {p}")
+                    p.unlink(missing_ok=True)
+            (labTr / f"{cid}.nii.gz").unlink(missing_ok=True)
+            continue
+
+        # labels
+        try:
+            seg_nii = _safe_load_nifti(have["seg"], dtype=np.float32)
+            seg = remap_labels_to_0123(seg_nii.get_fdata()).astype(np.uint8, copy=False)
+            out_lbl = nib.Nifti1Image(seg, seg_nii.affine, seg_nii.header)
+            out_lbl.set_data_dtype(np.uint8)
+            nib.save(out_lbl, str(labTr / f"{cid}.nii.gz"))
+        except Exception as e:
+            msg = f"{cid}:seg -> {type(e).__name__}: {e}"
+            if on_error == "skip_case":
+                logger.error(f"Skipping case due to label error {msg}")
+                for ch in range(len(modalities)):
+                    (imgTr / f"{cid}_{ch:04d}.nii.gz").unlink(missing_ok=True)
+                broken_train.append((cid, "label_write_error"))
+                continue
+            else:
+                raise
+
         kept_train.append(cid)
 
     # ---- write test cases (require all modalities; no labels) ----
-    kept_test, skipped_test = [], []
     for cid in tqdm(test_ids, desc="Writing test cases", unit="case"):
-        have = {k.lower(): v for k, v in groups[cid].items()}
-        if not all(m in have for m in modalities):
-            skipped_test.append((cid, sorted(have.keys())))
+        have = groups[cid]
+        missing = [m for m in modalities if m not in have]
+        if missing:
+            logger.warning(f"Skipping {cid} (test): missing {missing}")
+            skipped_test.append((cid, f"missing={missing}", sorted(have.keys())))
             continue
-        for ch, m in enumerate(modalities):
-            _save_image_to(
-                have[m], imgTs / f"{cid}_{ch:04d}.nii.gz", do_n4, n4_shrink, n4_iters
-            )
-        kept_test.append(cid)
+        try:
+            for ch, m in enumerate(modalities):
+                _save_image_to(
+                    have[m],
+                    imgTs / f"{cid}_{ch:04d}.nii.gz",
+                    do_n4,
+                    n4_shrink,
+                    n4_iters,
+                )
+            kept_test.append(cid)
+        except Exception as e:
+            logger.error(f"Skipping test case {cid}: {e}")
+            for ch in range(len(modalities)):
+                (imgTs / f"{cid}_{ch:04d}.nii.gz").unlink(missing_ok=True)
+            broken_test.append((cid, "image_write_error"))
+            continue
+    logger.info(f"Kept {len(kept_test)} test cases")
 
-    # ---- dataset.json (v2-friendly) ----
+    # ---- dataset.json (nnU-Net v2 friendly) ----
     kept_train_sorted = sorted(kept_train)
     kept_test_sorted = sorted(kept_test)
 
@@ -193,7 +299,7 @@ def convert_braTS_to_nnUNet(
 
     ds = {
         "name": dataset_name,
-        "description": f"BraTS2017-style; channels={list(modalities)}",
+        "description": f"BraTS2017; channels={list(modalities)}",
         "reference": "Local",
         "licence": "Research",
         "release": "1.0",
@@ -201,7 +307,7 @@ def convert_braTS_to_nnUNet(
         "file_ending": ".nii.gz",
         "channel_names": channel_names,
         "modality": modality_map,
-        "labels": labels_int_to_name,
+        "labels": labels_int_to_name,  # int-string -> human name
         "numTraining": len(kept_train_sorted),
         "numTest": len(kept_test_sorted),
         "training": [
@@ -226,21 +332,53 @@ def convert_braTS_to_nnUNet(
     ]
     if skipped_train:
         summary_lines.append(
-            f"Skipped train (incomplete): {len(skipped_train)} e.g. {skipped_train[0]}"
+            f"Skipped train (incomplete): {len(skipped_train)}  e.g. {skipped_train[0]}"
         )
     if skipped_test:
         summary_lines.append(
-            f"Skipped test (incomplete): {len(skipped_test)} e.g. {skipped_test[0]}"
+            f"Skipped test  (incomplete): {len(skipped_test)}  e.g. {skipped_test[0]}"
         )
+    if broken_train:
+        summary_lines.append(f"Broken train (IO/errors): {len(broken_train)}")
+    if broken_test:
+        summary_lines.append(f"Broken test  (IO/errors): {len(broken_test)}")
+    if unknown:
+        summary_lines.append(
+            f"Unknown-named files ignored: {len(unknown)} (see skipped_cases.json)"
+        )
+
     summary_lines.append("\n-- TRAIN CASE IDS --")
     summary_lines.extend(kept_train_sorted)
     summary_lines.append("\n-- TEST CASE IDS --")
     summary_lines.extend(kept_test_sorted)
     (out_dir / "summary.txt").write_text("\n".join(summary_lines) + "\n")
 
-    logger.info(
-        f"✅ Wrote {len(kept_train_sorted)} train and {len(kept_test_sorted)} test cases to {out_dir}"
+    # ---- persist skipped/broken/unknown details ----
+    skipped_info = {
+        "skipped_train": [
+            {"case": cid, "reason": reason, "have": have}
+            for (cid, reason, have) in skipped_train
+        ],
+        "broken_train": [
+            {"case": cid, "reason": reason} for (cid, reason) in broken_train
+        ],
+        "skipped_test": [
+            {"case": cid, "reason": reason, "have": have}
+            for (cid, reason, have) in skipped_test
+        ],
+        "broken_test": [
+            {"case": cid, "reason": reason} for (cid, reason) in broken_test
+        ],
+        "unknown_files": [str(p) for p in unknown],
+    }
+    (out_dir / "skipped_cases.json").write_text(
+        json.dumps(skipped_info, indent=2) + "\n"
     )
+
+    logger.info(
+        f"Wrote {len(kept_train_sorted)} train and {len(kept_test_sorted)} test cases to {out_dir}"
+    )
+    logger.info("summary.txt and skipped_cases.json written.")
     return out_dir
 
 
