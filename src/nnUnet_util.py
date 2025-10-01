@@ -5,7 +5,7 @@ import json
 import re
 import random
 from collections import defaultdict
-import logging
+import argparse
 
 import SimpleITK as sitk
 from tqdm import tqdm
@@ -16,24 +16,14 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.util import (
     get_logger,
     setup_logging,
+    n4_bias_correct_np,
 )
 
 logger = get_logger(__name__)
 
 
-# ---------- Optional N4 ----------
-def n4_bias_correct_np(x: np.ndarray, shrink: int = 2, n_iters: int = 50) -> np.ndarray:
-    img = sitk.GetImageFromArray(x.astype(np.float32))
-    mask = sitk.OtsuThreshold(img, 0, 1, 200)
-    n4 = sitk.N4BiasFieldCorrectionImageFilter()
-    n4.SetShrinkFactor(shrink)
-    n4.SetMaximumNumberOfIterations([n_iters])
-    out = n4.Execute(img, mask)
-    return sitk.GetArrayFromImage(out).astype(np.float32)
-
-
-# ---------- Remap BraTS {0,1,2,4} -> {0,1,2,3} ----------
-def remap_labels(arr):
+# ---------- BraTS {0,1,2,4} -> {0,1,2,3} ----------
+def remap_labels_to_0123(arr: np.ndarray) -> np.ndarray:
     arr = arr.astype(np.uint8)
     if (arr == 4).any():
         arr[arr == 4] = 3
@@ -50,23 +40,29 @@ def _strip_ext(p: Path) -> str:
 
 
 def _case_and_modality(path: Path) -> tuple[str, str | None]:
+    """
+    Parse BraTS-like base names:
+      <case>_(flair|t1|t1ce|t2|seg)
+    Returns (case_id, tag or None)
+    """
     base = _strip_ext(path)
-    m = re.match(r"^(.*)-(t2f|t1c|t2w|t1n|seg)$", base)
+    m = re.match(r"^(.*)_(flair|t1|t1ce|t2|seg)$", base, flags=re.IGNORECASE)
     if not m:
         return (base, None)
-    return (m.group(1), m.group(2))
+    # normalize tag to lowercase
+    return (m.group(1), m.group(2).lower())
 
 
 def _save_image_to(
     path_in: Path, out_path: Path, run_n4: bool, n4_shrink: int, n4_iters: int
 ):
-    nii = nib.load(path_in)
+    nii = nib.load(str(path_in))
     data = nii.get_fdata().astype(np.float32)
     if run_n4:
         data = n4_bias_correct_np(data, shrink=n4_shrink, n_iters=n4_iters)
     out = nib.Nifti1Image(data, nii.affine, nii.header)
     out.set_data_dtype(np.float32)
-    nib.save(out, out_path)
+    nib.save(out, str(out_path))
 
 
 def convert_braTS_to_nnUNet(
@@ -74,34 +70,45 @@ def convert_braTS_to_nnUNet(
     dst_root: Path,
     *,
     dataset_id: int = 501,
-    dataset_name: str = "BraTS3M",
-    modalities: tuple[str, ...] = ("t2f", "t1c", "t2w"),
-    split_ratio: tuple = (0.8, 0.2),  # (train, test)
+    dataset_name: str = "BraTS2017_4ch",
+    # Channel order for nnU-Net output
+    modalities: tuple[str, ...] = ("flair", "t1", "t1ce", "t2"),
+    split_ratio: tuple = (
+        0.8,
+        0.2,
+    ),  # (train, test)  or provide (train, val, test) to merge val into train
     seed: int = 42,
     do_n4: bool = False,
     n4_shrink: int = 2,
     n4_iters: int = 50,
-    log_level: str = "INFO",
 ) -> Path:
     """
-    Train/test-only converter for nnU-Net v2:
-      - imagesTr/, labelsTr/ for training (nnU-Net will handle validation folds)
-      - imagesTs/ for test (no labels)
-      - dataset.json ("training", "test" only) + summary.txt
-    """
-    logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+    Convert BraTS2017-style files to nnU-Net v2 raw structure.
 
-    # allow 2- or 3-tuple; merge val into train if 3 given
+    Input (any nested tree under src_root):
+      <case>_flair.nii(.gz)
+      <case>_t1.nii(.gz)
+      <case>_t1ce.nii(.gz)
+      <case>_t2.nii(.gz)
+      <case>_seg.nii(.gz)
+
+    Output:
+      nnUNet_raw/Dataset<id>_<name>/{imagesTr,labelsTr,imagesTs}/
+      dataset.json  (labels: {"0": "...", "1": "...", "2": "...", "3": "..."})
+    """
+    logger.info("Starting BraTS→nnU-Net conversion")
+
+    # Validate split
     if len(split_ratio) not in (2, 3):
         raise ValueError("split_ratio must be (train, test) or (train, val, test).")
     if abs(sum(split_ratio) - 1.0) > 1e-6:
         raise ValueError(f"split_ratio must sum to 1.0, got {split_ratio}")
     if len(split_ratio) == 3:
-        train_frac = split_ratio[0] + split_ratio[1]
+        train_frac = split_ratio[0] + split_ratio[1]  # merge val into train
         test_frac = split_ratio[2]
         split_ratio = (train_frac, test_frac)
         logger.info(
-            f"Merging validation into training: using (train={train_frac:.3f}, test={test_frac:.3f})"
+            f"Merging validation into training: train={train_frac:.3f}, test={test_frac:.3f}"
         )
 
     # ---- scan & group files by case_id ----
@@ -136,25 +143,27 @@ def convert_braTS_to_nnUNet(
     # ---- write training cases (require all modalities + seg) ----
     kept_train, skipped_train = [], []
     for cid in tqdm(train_ids, desc="Writing training cases", unit="case"):
-        have = groups[cid]
+        have = {k.lower(): v for k, v in groups[cid].items()}
         if not all(m in have for m in modalities) or "seg" not in have:
             skipped_train.append((cid, sorted(have.keys())))
             continue
+        # channels in the requested order
         for ch, m in enumerate(modalities):
             _save_image_to(
                 have[m], imgTr / f"{cid}_{ch:04d}.nii.gz", do_n4, n4_shrink, n4_iters
             )
-        seg_nii = nib.load(have["seg"])
-        seg = remap_labels(seg_nii.get_fdata()).astype(np.uint8)
+        # labels (remap 4->3)
+        seg_nii = nib.load(str(have["seg"]))
+        seg = remap_labels_to_0123(seg_nii.get_fdata()).astype(np.uint8)
         out_lbl = nib.Nifti1Image(seg, seg_nii.affine, seg_nii.header)
         out_lbl.set_data_dtype(np.uint8)
-        nib.save(out_lbl, labTr / f"{cid}.nii.gz")
+        nib.save(out_lbl, str(labTr / f"{cid}.nii.gz"))
         kept_train.append(cid)
 
     # ---- write test cases (require all modalities; no labels) ----
     kept_test, skipped_test = [], []
     for cid in tqdm(test_ids, desc="Writing test cases", unit="case"):
-        have = groups[cid]
+        have = {k.lower(): v for k, v in groups[cid].items()}
         if not all(m in have for m in modalities):
             skipped_test.append((cid, sorted(have.keys())))
             continue
@@ -168,17 +177,13 @@ def convert_braTS_to_nnUNet(
     kept_train_sorted = sorted(kept_train)
     kept_test_sorted = sorted(kept_test)
 
-    modality_human = {"t2f": "FLAIR", "t1c": "T1CE", "t2w": "T2", "t1n": "T1"}
-    channel_names = {str(i): modality_human.get(m, m) for i, m in enumerate(modalities)}
-    modality_map = {str(i): "MRI" for i, _ in enumerate(modalities)}
-
-    # labels_name_to_int = {
-    #     "background": 0,
-    #     "necrotic/non-enhancing": 1,
-    #     "edema": 2,
-    #     "enhancing": 3,
-    # }
-
+    channel_names = {
+        "0": "FLAIR",
+        "1": "T1",
+        "2": "T1CE",
+        "3": "T2",
+    }
+    modality_map = {str(i): "MRI" for i in range(len(modalities))}
     labels_int_to_name = {
         "0": "background",
         "1": "necrotic/non-enhancing",
@@ -188,7 +193,7 @@ def convert_braTS_to_nnUNet(
 
     ds = {
         "name": dataset_name,
-        "description": f"BraTS-like with {len(modalities)} modalities {list(modalities)}",
+        "description": f"BraTS2017-style; channels={list(modalities)}",
         "reference": "Local",
         "licence": "Research",
         "release": "1.0",
@@ -213,7 +218,7 @@ def convert_braTS_to_nnUNet(
     # ---- summary.txt ----
     summary_lines = [
         f"Dataset: Dataset{dataset_id}_{dataset_name}",
-        f"Modalities: {list(modalities)}",
+        f"Modalities (order): {list(modalities)}  -> channels 0000..{len(modalities)-1:04d}",
         f"N4: {do_n4} (shrink={n4_shrink}, iters={n4_iters})",
         f"Requested split: train={split_ratio[0]:.3f}, test={split_ratio[1]:.3f}",
         f"Found cases: {n_cases}",
@@ -236,25 +241,58 @@ def convert_braTS_to_nnUNet(
     logger.info(
         f"✅ Wrote {len(kept_train_sorted)} train and {len(kept_test_sorted)} test cases to {out_dir}"
     )
-    if skipped_train or skipped_test:
-        logger.warning(
-            f"⚠️ Skipped {len(skipped_train)} train and {len(skipped_test)} test cases due to missing modalities/labels."
-        )
-    if unknown:
-        logger.warning(
-            f"⚠️ Ignored {len(unknown)} files with unrecognized names. Example: {unknown[0]}"
-        )
-    logger.info(f"summary.txt and dataset.json written in: {out_dir}")
     return out_dir
 
 
-if __name__ == "__main__":
+def main():
+    ap = argparse.ArgumentParser(
+        description="Build nnU-Net v2 inputs (duplicate T1-CE into missing channels) and optionally run prediction."
+    )
+    ap.add_argument(
+        "--src_root",
+        type=Path,
+        required=True,
+        help="Folder with per-case subdirs that contain <CASEID>_0002.nii.gz (your current output/nifti).",
+    )
+    ap.add_argument(
+        "--dst_root",
+        type=Path,
+        required=True,
+        help="Where to write nnU-Net input cases (<CASEID>_0000..0003.nii.gz).",
+    )
+    ap.add_argument(
+        "--dataset_id",
+        "-d",
+        type=str,
+        default="002",
+        help="Dataset ID of the installed BraTS-21 model (logger.infoed by installer; often 002).",
+    )
+    ap.add_argument(
+        "--log_level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Logging level.",
+    )
+    ap.add_argument(
+        "--log_file",
+        type=Path,
+        default=None,
+        help="Log file path (in addition to console).",
+    )
+    args = ap.parse_args()
+
+    setup_logging(Path(args.log_file), args.log_level)
+    logger.info(f"Args: {args}")
+
+    src_root = Path(args.src_root).resolve()
+    dst_root = Path(args.dst_root).resolve()
+
     convert_braTS_to_nnUNet(
-        Path("data/BraTS2023-Glioma"),
-        Path("data/nnUNet_raw"),
+        src_root=src_root,
+        dst_root=dst_root,
         dataset_id=501,
-        dataset_name="BraTS3M",
-        modalities=("t2f", "t1c", "t2w"),
+        dataset_name="BraTS2017_4ch",
+        modalities=("flair", "t1", "t1ce", "t2"),
         split_ratio=(0.8, 0.2),
         seed=42,
         do_n4=False,

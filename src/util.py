@@ -124,3 +124,23 @@ def find_mask_file(case_dir: Path, mask_tag: str) -> Optional[Path]:
             if cand:
                 return cand[0]
     return None
+
+
+# ---------- Optional N4 ----------
+def n4_bias_correct_np(x: np.ndarray, shrink: int = 2, n_iters: int = 50) -> np.ndarray:
+    img = sitk.GetImageFromArray(x.astype(np.float32))
+    mask = sitk.OtsuThreshold(img, 0, 1, 200)
+    n4 = sitk.N4BiasFieldCorrectionImageFilter()
+    n4.SetShrinkFactor(shrink)
+    n4.SetMaximumNumberOfIterations([n_iters])
+    out = n4.Execute(img, mask)
+    return sitk.GetArrayFromImage(out).astype(np.float32)
+
+
+def strip_ext(p: Path) -> str:
+    s = p.name
+    if s.endswith(".nii.gz"):
+        return s[:-7]
+    if s.endswith(".nii"):
+        return s[:-4]
+    return s
