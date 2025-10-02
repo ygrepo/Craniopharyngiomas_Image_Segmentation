@@ -35,7 +35,7 @@ LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
 DATA_DIR="data/BraTS2017"
-OUTPUT_DIR="data/nnUNet_raw/BraTS2017"
+OUTPUT_DIR="nnUNet_raw"
 mkdir -p "$OUTPUT_DIR"
 
 PYTHON="${ENV_PREFIX}/bin/python"
