@@ -41,7 +41,8 @@ source script/set_unet_path.sh
 #export CUDA_VISIBLE_DEVICES=0
 
 # Train all 5 folds:
-nnUNetv2_train 501 3d_fullres 0 -num_gpus 2 -p nnUNetResEncUNetMPlans
+nnUNetv2_train 501 3d_fullres 0 -num_gpus 2
+#nnUNetv2_train 501 3d_fullres 0 -num_gpus 2 -p nnUNetResEncUNetMPlans
 
 # nnUNetv2_train 501 3d_fullres 1
 # nnUNetv2_train 501 3d_fullres 2
