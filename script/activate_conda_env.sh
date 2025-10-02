@@ -7,7 +7,7 @@ module load proxy/jh-proxy-1.0
 source $(conda info --base)/etc/profile.d/conda.sh
 
 # --- Paths (edit if needed) ---
-ENV_PREFIX="/projects/gbm_modeling/.conda/envs/mri"
+ENV_PREFIX="/projects/gbm_modeling/.conda/envs/nnunetv2"
 PIP_CACHE_DIR="/projects/gbm_modeling/.pip_cache"
 CONDA_PKGS_DIRS="/projects/gbm_modeling/.conda/pkgs"
 
