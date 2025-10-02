@@ -38,7 +38,7 @@ mkdir -p "$LOG_DIR"
 source script/set_unet_path.sh
 
 # Choose a GPU id if needed:
-export CUDA_VISIBLE_DEVICES=0
+#export CUDA_VISIBLE_DEVICES=0
 
 # Train all 5 folds:
 nnUNetv2_train 501 3d_fullres 0 -num_gpus 2 -p nnUNetResEncUNetMPlans
