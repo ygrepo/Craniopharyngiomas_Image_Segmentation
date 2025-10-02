@@ -97,7 +97,7 @@ def _save_image_to(
         data = n4_bias_correct_np(data, shrink=n4_shrink, n_iters=n4_iters)
     out = nib.Nifti1Image(data, nii.affine, nii.header)
     out.set_data_dtype(np.float32)
-    logger.info(f"Saving to {out_path}")
+    # logger.info(f"Saving to {out_path}")
     nib.save(out, str(out_path))
 
 
