@@ -1,11 +1,11 @@
 #!/bin/bash
-#   unet_predict.sh    —  Predict 3D mask using nnU-Net.
-#SBATCH --job-name=unet_predict
-#SBATCH --output=logs/unet_predict_%A_%a.out
-#SBATCH --error=logs/unet_predict_%A_%a.err
+#   unet_brats2017_train.sh    —  Train 3D mask using nnU-Net v2.
+#SBATCH --job-name=unet_brats2017_train
+#SBATCH --output=logs/unet_brats2017_train_%A_%a.out
+#SBATCH --error=logs/unet_brats2017_train_%A_%a.err
 #SBATCH --time=04:00:00
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=128G
@@ -41,7 +41,7 @@ source script/set_unet_path.sh
 export CUDA_VISIBLE_DEVICES=0
 
 # Train all 5 folds:
-nnUNetv2_train 501 3d_fullres 0
+nnUNetv2_train 501 3d_fullres 0 -num_gpus 2 -p nnUNetResEncUNetMPlans
 
 # nnUNetv2_train 501 3d_fullres 1
 # nnUNetv2_train 501 3d_fullres 2
