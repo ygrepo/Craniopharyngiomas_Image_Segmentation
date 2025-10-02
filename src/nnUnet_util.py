@@ -290,13 +290,12 @@ def convert_braTS_to_nnUNet(
         "3": "T2",
     }
     modality_map = {str(i): "MRI" for i in range(len(modalities))}
-    labels_int_to_name = {
-        "0": "background",
-        "1": "necrotic/non-enhancing",
-        "2": "edema",
-        "3": "enhancing",
+    labels_name_to_int = {
+        "background": 0,
+        "necrotic/non-enhancing": 1,
+        "edema": 2,
+        "enhancing": 3,
     }
-
     ds = {
         "name": dataset_name,
         "description": f"BraTS2017; channels={list(modalities)}",
@@ -307,7 +306,7 @@ def convert_braTS_to_nnUNet(
         "file_ending": ".nii.gz",
         "channel_names": channel_names,
         "modality": modality_map,
-        "labels": labels_int_to_name,  # int-string -> human name
+        "labels": labels_name_to_int,
         "numTraining": len(kept_train_sorted),
         "numTest": len(kept_test_sorted),
         "training": [
