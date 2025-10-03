@@ -3,7 +3,7 @@
 #SBATCH --job-name=unet_brats2017_train
 #SBATCH --output=logs/unet_brats2017_train_%A_%a.out
 #SBATCH --error=logs/unet_brats2017_train_%A_%a.err
-#SBATCH --time=04:00:00
+#SBATCH --time=72:00:00
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:2
 #SBATCH --ntasks=1
