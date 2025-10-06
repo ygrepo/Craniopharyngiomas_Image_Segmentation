@@ -42,9 +42,8 @@ source script/set_unet_path.sh
 
 # Evaluate Single fold (e.g., fold 0)
 nnUNetv2_evaluate_folder \
-  -ref /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_raw/Dataset501_BraTS2017_4ch/labelsTs \
-  -pred /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/predictions/fold_0 \
   -djfile /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_raw/Dataset501_BraTS2017_4ch/dataset.json \
   -pfile  /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/plans.json \
-  -json   /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/plans.json
-  
+  -o      /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/predictions/fold_0/results.json \
+  /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_raw/Dataset501_BraTS2017_4ch/labelsTs \
+  /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/predictions/fold_0  
