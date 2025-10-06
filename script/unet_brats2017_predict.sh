@@ -47,5 +47,5 @@ nnUNetv2_predict \
   -d 501 \
   -c 3d_fullres \
   -f 0 \
-  -chk checkpoint_final.pth \
+  -chk checkpoint_best.pth \
   -device cuda
