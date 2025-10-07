@@ -21,3 +21,29 @@ val_ids = sorted(set(splits[0]["val"]))
 open("val_ids_fold0.txt","w").write("\n".join(val_ids))
 print(f"Wrote {len(val_ids)} IDs to val_ids_fold0.txt")
 PY
+
+VALI=$PWD/tmp_val/images     ; mkdir -p "$VALI"
+VALL=$PWD/tmp_val/labelsTr   ; mkdir -p "$VALL"
+
+while read ID; do
+  for ch in 0000 0001 0002 0003; do
+    ln -sf "${RAW}/imagesTr/${ID}_${ch}.nii.gz" "${VALI}/${ID}_${ch}.nii.gz"
+  done
+  ln -sf "${RAW}/labelsTr/${ID}.nii.gz" "${VALL}/${ID}.nii.gz"
+done < val_ids_fold0.txt
+
+RES=nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/
+OUTP=${RES}/predictions/val_fold0
+mkdir -p "$OUTP"
+
+nnUNetv2_predict \
+  -i "$VALI" \
+  -o "$OUTP" \
+  -d 501 -c 3d_fullres -f 0 \
+  -chk ${RES}/fold_0/checkpoint_best.pth \
+  -device cuda
+
+OUT=${RES}/predictions/val_fold0_results.json
+nnUNetv2_evaluate_folder -djfile "$DJ" -pfile "$PL" -o "$OUT" \
+  "$VALL" "$OUTP"
+echo "Wrote metrics to: $OUT"
