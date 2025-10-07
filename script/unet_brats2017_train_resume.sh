@@ -41,8 +41,9 @@ NUM_GPUS=2
 # (Optional) pin GPU IDs
 # export CUDA_VISIBLE_DEVICES=0,1
 
+
 # Results dir where fold_0 lives (this is nnU-Net’s default layout)
-RESULTS_DIR="${NNUNet_results}/Dataset${DATASET_ID}_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__${CONFIG}"
+RESULTS_DIR="${nnUNet_results}/Dataset${DATASET_ID}_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__${CONFIG}"
 CHK_LATEST="${RESULTS_DIR}/fold_${FOLD}/checkpoint_latest.pth"
 CHK_BEST="${RESULTS_DIR}/fold_${FOLD}/checkpoint_best.pth"
 
