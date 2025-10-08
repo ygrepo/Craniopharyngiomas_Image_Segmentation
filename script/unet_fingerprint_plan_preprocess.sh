@@ -1,5 +1,5 @@
 #!/bin/bash
-# Predict 3D masks with Fingerprint and PAN nnU-Net v2 data
+# Predict 3D masks with Fingerprint and Plan nnU-Net v2 data
 #
 set -euo pipefail
 
@@ -15,8 +15,8 @@ conda activate "${ENV_PREFIX}"
 mkdir -p logs
 source script/set_unet_path.sh
 
-nnUNetv2_extract_fingerprint -d 501
-nnUNetv2_plan_and_preprocess -d 501 --verify_dataset_integrity
+nnUNetv2_extract_fingerprint -d 502
+nnUNetv2_plan_and_preprocess -d 502 --verify_dataset_integrity
 
 
 echo "[ok]"
