@@ -227,7 +227,7 @@ def main():
             r = rows[ep]
             w.writerow({k: r.get(k, "") for k in fieldnames})
 
-    logger.info(f"[ok] wrote {out_csv} with {len(rows)} epochs.")
+    logger.info(f"Wrote {out_csv} with {len(rows)} epochs.")
 
 
 if __name__ == "__main__":
