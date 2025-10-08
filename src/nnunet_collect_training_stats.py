@@ -110,19 +110,21 @@ def parse_one_file(path: str, rows: Dict[int, Dict[str, Any]]):
                 if m:
                     epoch = int(m.group("epoch"))
                     ts = m.groupdict().get("ts") if "ts" in m.groupdict() else ""
+
                     r = rows.setdefault(
                         epoch,
                         {
                             "epoch": epoch,
+                            "ts_first": ts or "",
+                            "ts_last": ts or "",
                             "lr": "",
                             "train_loss": "",
                             "val_loss": "",
-                            "DICE_1": "",
-                            "DICE_2": "",
-                            "DICE_3": "",
                             "epoch_time_sec": "",
-                            "ts_first": ts or "",
-                            "ts_last": ts or "",
+                            "Necrotic_Dice": "",
+                            "Edema_Dice": "",
+                            "Enhancing_Dice": "",
+                            "EMA_DICE": "",
                             "src_file": os.path.basename(path),
                         },
                     )
@@ -168,9 +170,9 @@ def parse_one_file(path: str, rows: Dict[int, Dict[str, Any]]):
                     body = m.group("body")
                     d1, d2, d3 = _extract_dices(body)
                     ep = max(rows.keys())
-                    rows[ep]["DICE_1"] = d1
-                    rows[ep]["DICE_2"] = d2
-                    rows[ep]["DICE_3"] = d3
+                    rows[ep]["Necrotic_Dice"] = d1
+                    rows[ep]["Edema_Dice"] = d2
+                    rows[ep]["Enhancing_Dice"] = d3
                     ts = m.groupdict().get("ts") if "ts" in m.groupdict() else ""
                     if ts:
                         rows[ep]["ts_last"] = ts
@@ -191,8 +193,6 @@ def parse_one_file(path: str, rows: Dict[int, Dict[str, Any]]):
                 m = re_ema.search(line) or re_ema_nt.search(s)
                 # If multiple EMA lines appear for the same epoch,
                 # the last one wins (overwrites previous).
-                # If you ever encounter an EMA line before any Epoch N header (rare),
-                #  the rows check prevents misassignment.
                 if m and rows:
                     ts = m.groupdict().get("ts") or ""
                     ep = max(rows.keys())
@@ -247,16 +247,16 @@ def main():
 
     fieldnames = [
         "epoch",
+        "epoch_time_sec",
         "ts_first",
         "ts_last",
         "lr",
         "train_loss",
         "val_loss",
-        "DICE (Necrotic/Non-Enhancing)",
-        "DICE (Edema)",
-        "DICE (Enhancing)",
+        "Necrotic_Dice",
+        "Edema_Dice",
+        "Enhancing_Dice",
         "EMA_DICE",
-        "epoch_time_sec",
         "src_file",
     ]
 

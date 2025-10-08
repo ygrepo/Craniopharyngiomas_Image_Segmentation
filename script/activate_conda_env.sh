@@ -13,7 +13,7 @@ PIP_CACHE_DIR="/projects/gbm_modeling/.pip_cache"
 CONDA_PKGS_DIRS="/projects/gbm_modeling/.conda/pkgs"
 
 # --- Keep installs off $HOME and avoid user-site leakage ---
-mkdir -p "${PIP_CACHE_DIR}" "${CONDA_PKGS_DIRS}"
+#mkdir -p "${PIP_CACHE_DIR}" "${CONDA_PKGS_DIRS}"
 export PIP_CACHE_DIR="${PIP_CACHE_DIR}"
 export CONDA_PKGS_DIRS="${CONDA_PKGS_DIRS}"
 export PYTHONNOUSERSITE=1
