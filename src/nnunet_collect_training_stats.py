@@ -69,6 +69,15 @@ re_dice_line_nt = re.compile(
 re_epoch_time_nt = re.compile(
     r"^\s*Epoch\s+time:\s*(?P<sec>" + NUM + r")\s*s\b", re.IGNORECASE
 )
+# EMA pseudo Dice (handles "Yayy! New best EMA pseudo Dice: 0.64" or just "EMA pseudo Dice: 0.64")
+re_ema = re.compile(
+    TS_PREFIX + r"(?:.*\b)?EMA\s+pseudo\s+Dice:\s*(?P<ema>" + NUM + r")\b.*$",
+    re.IGNORECASE,
+)
+re_ema_nt = re.compile(
+    r"^\s*(?:.*\b)?EMA\s+pseudo\s+Dice:\s*(?P<ema>" + NUM + r")\b.*$", re.IGNORECASE
+)
+
 
 re_any_num = re.compile(NUM)
 
@@ -177,6 +186,21 @@ def parse_one_file(path: str, rows: Dict[int, Dict[str, Any]]):
                         rows[ep]["ts_last"] = ts
                         rows[ep]["src_file"] = os.path.basename(path)
                     continue
+
+                # EMA pseudo Dice
+                m = re_ema.search(line) or re_ema_nt.search(s)
+                # If multiple EMA lines appear for the same epoch,
+                # the last one wins (overwrites previous).
+                # If you ever encounter an EMA line before any Epoch N header (rare),
+                #  the rows check prevents misassignment.
+                if m and rows:
+                    ts = m.groupdict().get("ts") or ""
+                    ep = max(rows.keys())
+                    rows[ep]["EMA_DICE"] = m.group("ema")
+                    if ts:
+                        rows[ep]["ts_last"] = ts
+                        rows[ep]["src_file"] = os.path.basename(path)
+                    continue
     except FileNotFoundError:
         logger.warning(f"[warn] not found: {path}", file=sys.stderr)
 
@@ -223,17 +247,19 @@ def main():
 
     fieldnames = [
         "epoch",
+        "ts_first",
+        "ts_last",
         "lr",
         "train_loss",
         "val_loss",
-        "DICE_1",
-        "DICE_2",
-        "DICE_3",
+        "DICE (Necrotic/Non-Enhancing)",
+        "DICE (Edema)",
+        "DICE (Enhancing)",
+        "EMA_DICE",
         "epoch_time_sec",
-        "ts_first",
-        "ts_last",
         "src_file",
     ]
+
     with open(out_csv, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
