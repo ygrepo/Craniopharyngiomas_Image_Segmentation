@@ -15,8 +15,8 @@ conda activate "${ENV_PREFIX}"
 mkdir -p logs
 source script/set_unet_path.sh
 
-nnUNetv2_extract_fingerprint -d 502
-nnUNetv2_plan_and_preprocess -d 502 --verify_dataset_integrity
+nnUNetv2_extract_fingerprint -d 502 --clean
+nnUNetv2_plan_and_preprocess -d 502 --verify_dataset_integrity --clean
 
 
 echo "[ok]"
