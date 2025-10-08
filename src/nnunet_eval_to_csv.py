@@ -3,8 +3,16 @@ import argparse
 import csv
 import json
 import os
+import sys
+from pathlib import Path
 import statistics as stats
 from typing import Any, Dict, List
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+from src.util import get_logger, setup_logging
+
+logger = get_logger(__name__)
 
 COUNT_KEYS = {"tp", "tn", "fp", "fn", "n_pred", "n_ref"}
 
@@ -151,6 +159,8 @@ def main():
     )
     args = ap.parse_args()
 
+    setup_logging(None, "INFO")
+
     base = os.path.splitext(args.input)[0]
     out_cases = args.out_cases or (base + "_cases.csv")
     out_summary = args.out_summary or (base + "_summary.csv")
@@ -163,9 +173,9 @@ def main():
     metric_cols = write_cases_csv(rows, out_cases)
     write_summary_csv(rows, metric_cols, out_summary)
 
-    print("[ok] wrote:")
-    print(" ", out_cases)
-    print(" ", out_summary)
+    logger.info("[ok] wrote:")
+    logger.info(" ", out_cases)
+    logger.info(" ", out_summary)
 
 
 if __name__ == "__main__":
