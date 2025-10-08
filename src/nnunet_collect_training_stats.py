@@ -11,7 +11,6 @@ Collected per-epoch fields:
 - val_loss
 - DICE_1, DICE_2, DICE_3
 - epoch_time_sec (if present)
-- ts_first, ts_last (timestamps of first/last line seen for that epoch)
 - src_file (log file that last updated the epoch)
 
 Usage:
@@ -72,6 +71,24 @@ re_epoch_time_nt = re.compile(
 )
 
 re_any_num = re.compile(NUM)
+
+# Strict extractor: numbers inside dtype wrappers, e.g. np.float32(0.3501)
+re_dtype_num = re.compile(r"np\.\w+\(\s*" + NUM + r"\s*\)", re.IGNORECASE)
+
+# Safe fallback extractor: numbers NOT immediately preceded by a letter
+# (so it won't catch the "32" in "float32")
+re_num_noleftletter = re.compile(r"(?<![A-Za-z])" + NUM)
+
+
+def _extract_dices(body: str):
+    # First try: pick numbers inside wrappers like np.float32(...)
+    vals = [m.group(1) for m in re_dtype_num.finditer(body)]
+    # If not enough, fallback to generic numbers excluding ones glued to letters (float32)
+    if len(vals) < 3:
+        vals = [m.group(1) for m in re_num_noleftletter.finditer(body)]
+    # Keep only the first three numeric strings
+    vals = vals[:3] + ["", "", ""]
+    return vals[0], vals[1], vals[2]
 
 
 def parse_one_file(path: str, rows: Dict[int, Dict[str, Any]]):
@@ -140,10 +157,7 @@ def parse_one_file(path: str, rows: Dict[int, Dict[str, Any]]):
                 m = re_dice_line.search(line) or re_dice_line_nt.search(s)
                 if m and rows:
                     body = m.group("body")
-                    nums = re_any_num.findall(body)
-                    d1 = nums[0] if len(nums) >= 1 else ""
-                    d2 = nums[1] if len(nums) >= 2 else ""
-                    d3 = nums[2] if len(nums) >= 3 else ""
+                    d1, d2, d3 = _extract_dices(body)
                     ep = max(rows.keys())
                     rows[ep]["DICE_1"] = d1
                     rows[ep]["DICE_2"] = d2
