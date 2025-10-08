@@ -4,8 +4,9 @@ import numpy as np
 import json
 import re
 import random
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 import argparse
+import warnings
 
 import SimpleITK as sitk
 from tqdm import tqdm
@@ -282,43 +283,58 @@ def convert_braTS_to_nnUNet(
     # ---- dataset.json (nnU-Net v2 friendly) ----
     kept_train_sorted = sorted(kept_train)
     kept_test_sorted = sorted(kept_test)
-
-    channel_names = {
-        "0": "FLAIR",
-        "1": "T1",
-        "2": "T1CE",
-        "3": "T2",
-    }
-    modality_map = {str(i): "MRI" for i in range(len(modalities))}
-    labels_name_to_int = {
-        "background": 0,
-        "necrotic/non-enhancing": 1,
-        "edema": 2,
-        "enhancing": 3,
-    }
-    ds = {
-        "name": dataset_name,
-        "description": f"BraTS2017; channels={list(modalities)}",
-        "reference": "Local",
-        "licence": "Research",
-        "release": "1.0",
-        "tensorImageSize": "3D",
-        "file_ending": ".nii.gz",
-        "channel_names": channel_names,
-        "modality": modality_map,
-        "labels": labels_name_to_int,
-        "numTraining": len(kept_train_sorted),
-        "numTest": len(kept_test_sorted),
-        "training": [
-            {
-                "image": f"./imagesTr/{cid}_0000.nii.gz",
-                "label": f"./labelsTr/{cid}.nii.gz",
-            }
-            for cid in kept_train_sorted
-        ],
-        "test": [f"./imagesTs/{cid}_0000.nii.gz" for cid in kept_test_sorted],
-    }
-    (out_dir / "dataset.json").write_text(json.dumps(ds, indent=2) + "\n")
+    # Generate channel_names from the actual modalities argument (order-locked)
+    channel_names = OrderedDict((str(i), m.upper()) for i, m in enumerate(modalities))
+    logger.info(f"Channel names: {channel_names}")
+    modality_map = OrderedDict((str(i), "MRI") for i in range(len(modalities)))
+    logger.info(f"Modality map: {modality_map}")
+    # channel_names = {
+    #     "0": "FLAIR",
+    #     "1": "T1",
+    #     "2": "T1CE",
+    #     "3": "T2",
+    # }
+    labels = OrderedDict(
+        [
+            ("background", 0),
+            ("whole_tumor", [1, 2, 3]),
+            ("tumor_core", [2, 3]),
+            ("enhancing_tumor", 3),
+        ]
+    )
+    logger.info(f"Labels: {labels}")
+    regions_class_order = [1, 2, 3]
+    ds = OrderedDict(
+        [
+            ("name", dataset_name),
+            ("description", f"BraTS2017; channels={list(modalities)}"),
+            ("reference", "Local"),
+            ("licence", "Research"),
+            ("release", "1.0"),
+            ("tensorImageSize", "3D"),
+            ("file_ending", ".nii.gz"),
+            ("channel_names", channel_names),
+            ("modality", modality_map),
+            ("labels", labels),
+            ("regions_class_order", regions_class_order),
+            ("numTraining", len(kept_train_sorted)),
+            ("numTest", len(kept_test_sorted)),
+            (
+                "training",
+                [
+                    {
+                        "image": f"./imagesTr/{cid}_0000.nii.gz",
+                        "label": f"./labelsTr/{cid}.nii.gz",
+                    }
+                    for cid in kept_train_sorted
+                ],
+            ),
+            ("test", [f"./imagesTs/{cid}_0000.nii.gz" for cid in kept_test_sorted]),
+        ]
+    )
+    (out_dir / "dataset.json").write_text(
+        json.dumps(ds, indent=2, sort_keys=False) + "\n"
+    )
 
     # ---- summary.txt ----
     summary_lines = [
@@ -400,8 +416,8 @@ def main():
     ap.add_argument(
         "--dataset_id",
         "-d",
-        type=str,
-        default="002",
+        type=int,
+        default=501,
         help="Dataset ID of the installed BraTS-21 model (logger.infoed by installer; often 002).",
     )
     ap.add_argument(
@@ -427,7 +443,7 @@ def main():
     convert_braTS_to_nnUNet(
         src_root=src_root,
         dst_root=dst_root,
-        dataset_id=501,
+        dataset_id=args.dataset_id,
         dataset_name="BraTS2017_4ch",
         modalities=("flair", "t1", "t1ce", "t2"),
         split_ratio=(0.8, 0.2),

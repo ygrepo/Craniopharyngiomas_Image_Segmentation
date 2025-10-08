@@ -1,8 +1,8 @@
 #!/bin/bash
-#   prepare_nnunet_brats2017_data.sh    —  Prepare nnU-Net data for BraTS2017.
-#SBATCH --job-name=prepare_nnunet_brats2017_data
-#SBATCH --output=logs/prepare_nnunet_brats2017_data_%A_%a.out
-#SBATCH --error=logs/prepare_nnunet_brats2017_data_%A_%a.err
+#   nnunet_convert_Brats2017_data.sh    —  Convert BraTS2017 to nnU-Net format.
+#SBATCH --job-name=nnunet_convert_Brats2017_data
+#SBATCH --output=logs/nnunet_convert_Brats2017_data_%A_%a.out
+#SBATCH --error=logs/nnunet_convert_Brats2017_data_%A_%a.err
 #SBATCH --time=04:00:00
 #SBATCH --partition=cpu
 #SBATCH --ntasks=1
@@ -39,10 +39,10 @@ OUTPUT_DIR="nnUNet_raw"
 mkdir -p "$OUTPUT_DIR"
 
 PYTHON="${ENV_PREFIX}/bin/python"
-MAIN="src/nnUnet_util.py"
+MAIN="src/nnUnet_convert_BraTS2017.py"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="${LOG_DIR}/nnunet_util_${TIMESTAMP}.log"
+LOG_FILE="${LOG_DIR}/nnunet_convert_BraTS2017_${TIMESTAMP}.log"
 
 set +e
 $PYTHON "$MAIN" \
