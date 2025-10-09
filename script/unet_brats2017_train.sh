@@ -39,7 +39,7 @@ source script/set_unet_path.sh
 
 # Choose a GPU id if needed:
 #export CUDA_VISIBLE_DEVICES=0
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7     # or however many GPUs you have
+#export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7     # or however many GPUs you have
 
 export NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG=WARN          # or INFO when debugging comms
