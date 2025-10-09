@@ -5,7 +5,7 @@
 #SBATCH --error=logs/unet_brats2017_train_%A_%a.err
 #SBATCH --time=72:00:00
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:8
+#SBATCH --gres=gpu:4
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
@@ -43,7 +43,7 @@ source script/set_unet_path.sh
 
 export NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG=WARN          # or INFO when debugging comms
-export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
 
 echo "SLURM_JOB_GPUS=${SLURM_JOB_GPUS}"
 echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
