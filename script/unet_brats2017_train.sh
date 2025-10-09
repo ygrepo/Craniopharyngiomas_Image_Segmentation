@@ -41,7 +41,7 @@ source script/set_unet_path.sh
 #export CUDA_VISIBLE_DEVICES=0
 #export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7     # or however many GPUs you have
 
-export NCCL_ASYNC_ERROR_HANDLING=1
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG=WARN          # or INFO when debugging comms
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
 
@@ -53,7 +53,7 @@ print("PyTorch sees", torch.cuda.device_count(), "GPUs")
 PY
 
 # Train all 5 folds:
-export nnUNet_compile=0     # or set in your shell rc
+export nnUNet_compile=1     # or set in your shell rc
 nnUNetv2_train 502 3d_fullres 0 -tr nnUNetTrainer -num_gpus 4 -p nnUNetResEncUNetMPlans --npz
 #nnUNetv2_train 502 3d_fullres 0 -num_gpus 4 -p nnUNetResEncUNetMPlans --npz
 #nnUNetv2_train 501 3d_fullres 0 -num_gpus 2 -p nnUNetResEncUNetMPlans
