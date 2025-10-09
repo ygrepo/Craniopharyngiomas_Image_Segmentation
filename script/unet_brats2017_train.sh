@@ -5,9 +5,9 @@
 #SBATCH --error=logs/unet_brats2017_train_%A_%a.err
 #SBATCH --time=72:00:00
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:8
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
 
 set -euo pipefail
@@ -41,7 +41,8 @@ source script/set_unet_path.sh
 #export CUDA_VISIBLE_DEVICES=0
 
 # Train all 5 folds:
-nnUNetv2_train 501 3d_fullres 0 -num_gpus 2
+export nnUNet_compile=0     # or set in your shell rc
+nnUNetv2_train 502 3d_fullres 0 -num_gpus 8 -p nnUNetResEncUNetMPlans --npz
 #nnUNetv2_train 501 3d_fullres 0 -num_gpus 2 -p nnUNetResEncUNetMPlans
 
 # nnUNetv2_train 501 3d_fullres 1
