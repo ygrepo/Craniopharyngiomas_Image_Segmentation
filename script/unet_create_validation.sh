@@ -122,18 +122,18 @@ export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
 
 echo "[info] Running prediction into: $OUTP"
 # IMPORTANT: pass checkpoint NAME only (nnUNet constructs the path)
-nnUNetv2_predict \
-  -i "$VALI" \
-  -o "$OUTP" \
-  -d "$DATASET_ID" \
-  -p "$PLANS_ID" \
-  -tr "$TR" \
-  -c "$CFG" \
-  -f "$FOLD" \
-  -chk checkpoint_best.pth \
-  --disable_tta \
-  -device cuda \
-  --disable_progress_bar
+# nnUNetv2_predict \
+#   -i "$VALI" \
+#   -o "$OUTP" \
+#   -d "$DATASET_ID" \
+#   -p "$PLANS_ID" \
+#   -tr "$TR" \
+#   -c "$CFG" \
+#   -f "$FOLD" \
+#   -chk checkpoint_best.pth \
+#   --disable_tta \
+#   -device cuda \
+#   --disable_progress_bar
 
 # verify predictions were created
 n_preds=$(ls -1 "$OUTP"/*.nii.gz 2>/dev/null | wc -l | awk '{print $1}')
@@ -147,12 +147,12 @@ fi
 #OUT_JSON="${OUTP}/val_fold${FOLD}_results.json"
 OUT_JSON="${OUTP}/summary.json"
 echo "[info] Evaluating to: $OUT_JSON"
-nnUNetv2_evaluate_folder \
-  -djfile "$DJ" \
-  -pfile  "$PL" \
-  -o      "$OUT_JSON" \
-  "$VALL" \
-  "$OUTP"
+# nnUNetv2_evaluate_folder \
+#   -djfile "$DJ" \
+#   -pfile  "$PL" \
+#   -o      "$OUT_JSON" \
+#   "$VALL" \
+#   "$OUTP"
 echo "[ok] Wrote metrics to: $OUT_JSON"
 
 # --- add HD95 per class to the JSON (writes summary_with_hd95.json) ---
@@ -161,7 +161,7 @@ OUT_JSON_HD95="${OUTP}/summary_with_hd95.json"
 
 echo "[info] Adding HD95 to: ${OUT_JSON}"
 # Option A: specify exactly which classes to compute (BraTS: 1,2,3)
-python "${ADD_HD95_PY}" \
+"${PYTHON}" "${ADD_HD95_PY}" \
   -i "${OUT_JSON}" \
   -o "${OUT_JSON_HD95}" \
   --classes 1,2,3
