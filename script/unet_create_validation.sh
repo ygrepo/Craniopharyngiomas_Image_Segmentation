@@ -163,8 +163,9 @@ echo "[info] Adding HD95 to: ${OUT_JSON}"
 # Option A: specify exactly which classes to compute (BraTS: 1,2,3)
 "${PYTHON}" "${ADD_HD95_PY}" \
   -i "${OUT_JSON}" \
-  -o "${OUT_JSON_HD95}" \
-  --classes 1,2,3
+  -o "${OUT_JSON_HD95}" 
+  # \
+  # --classes 1,2,3
 
 # Option B: let the script auto-detect present non-zero classes
 # python "${ADD_HD95_PY}" -i "${OUT_JSON}" -o "${OUT_JSON_HD95}"
