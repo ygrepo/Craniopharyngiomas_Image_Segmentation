@@ -13,7 +13,23 @@ PREP=nnUNet_preprocessed/Dataset501_BraTS2017_4ch
 # fi
 export PREP
 
-python - <<'PY' "$PREP"
+
+module purge
+module load anaconda3/2023.09
+module load proxy/jh-proxy-1.0
+source "$(conda info --base)/etc/profile.d/conda.sh"
+
+ENV_PREFIX="/projects/gbm_modeling/.conda/envs/mri"
+conda activate "${ENV_PREFIX}"
+PYTHON="${ENV_PREFIX}/bin/python"
+
+LOG_DIR="logs"
+LOG_LEVEL="DEBUG"
+mkdir -p "$LOG_DIR"
+source script/set_unet_path.sh
+
+
+$PYTHON - <<'PY' "$PREP"
 import json, os, sys
 prep = sys.argv[1]
 with open(os.path.join(prep, "splits_final.json")) as f:
