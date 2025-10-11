@@ -137,6 +137,7 @@ def write_summary_csv(
         + [f"{c}_std" for c in score_cols]
         + [f"{c}_sum" for c in count_cols]
     )
+    logger.info(f"Save summary to: {out_path}")
     with open(out_path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=header)
         w.writeheader()
@@ -178,8 +179,8 @@ def main():
     write_summary_csv(rows, metric_cols, out_summary)
 
     logger.info("[ok] wrote:")
-    logger.info(" ", out_cases)
-    logger.info(" ", out_summary)
+    logger.info(f" {out_cases}")
+    logger.info(f" {out_summary}")
 
 
 if __name__ == "__main__":
