@@ -12,10 +12,18 @@ Requires: SimpleITK
 import argparse
 import json
 import os
+import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import SimpleITK as sitk
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+from src.util import get_logger, setup_logging  # noqa: E402
+
+logger = get_logger(__name__)
 
 
 def load_items(data: Any) -> List[Dict[str, Any]]:
@@ -152,6 +160,11 @@ def main():
         help="Comma-separated class IDs to compute (default: all non-zero classes present in metrics).",
     )
     args = ap.parse_args()
+    setup_logging(None, "INFO")
+
+    logger.info(f"Input: {args.input}")
+    logger.info(f"Output: {args.output}")
+    logger.info(f"Classes: {args.classes}")
 
     out_path = args.output or (os.path.splitext(args.input)[0] + "_with_hd95.json")
     class_ids = None
@@ -188,7 +201,7 @@ def main():
     with open(out_path, "w") as f:
         json.dump(new_data, f, indent=2)
 
-    print(f"[ok] wrote {out_path}")
+    logger.info(f"[ok] wrote {out_path}")
 
 
 if __name__ == "__main__":

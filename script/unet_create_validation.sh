@@ -25,7 +25,10 @@ module purge
 module load anaconda3/2023.09
 module load proxy/jh-proxy-1.0
 source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "/projects/gbm_modeling/.conda/envs/mri"
+
+ENV_PREFIX="/projects/gbm_modeling/.conda/envs/mri"
+conda activate "${ENV_PREFIX}"
+PYTHON="${ENV_PREFIX}/bin/python"
 
 # Set nnUNet paths (this defines $nnUNet_raw, $nnUNet_preprocessed, $nnUNet_results)
 source script/set_unet_path.sh
@@ -160,9 +163,8 @@ echo "[info] Adding HD95 to: ${OUT_JSON}"
 # Option A: specify exactly which classes to compute (BraTS: 1,2,3)
 python "${ADD_HD95_PY}" \
   -i "${OUT_JSON}" \
-  -o "${OUT_JSON_HD95}" 
-  # \
-  # --classes 1,2,3
+  -o "${OUT_JSON_HD95}" \
+  --classes 1,2,3
 
 # Option B: let the script auto-detect present non-zero classes
 # python "${ADD_HD95_PY}" -i "${OUT_JSON}" -o "${OUT_JSON_HD95}"
