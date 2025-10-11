@@ -1,72 +1,115 @@
 #!/bin/bash
+# Usage: ./unet_create_validation.sh [OPTIONAL_PREP_DIR]
+# If PREP dir is not passed, it will be derived from envs set by script/set_unet_path.sh
+
 set -euo pipefail
 
-# === Config you may edit ===
+# --------- Config (edit if needed) ----------
 DATASET_ID=501
 DATASET_NAME=BraTS2017_4ch
 FOLD=0
 CFG=3d_fullres
 TR=nnUNetTrainer
 PLANS_ID=nnUNetPlans
-# ==========================
+# -------------------------------------------
 
+# --- env setup ---
 module purge
 module load anaconda3/2023.09
 module load proxy/jh-proxy-1.0
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "/projects/gbm_modeling/.conda/envs/mri"
 
-# Bring back your nnU-Net env paths
+# Set nnUNet paths (this defines $nnUNet_raw, $nnUNet_preprocessed, $nnUNet_results)
 source script/set_unet_path.sh
 
-# Resolve paths from envs set above
+# --- derive paths from envs ---
 RAW="${nnUNet_raw}/Dataset${DATASET_ID}_${DATASET_NAME}"
-PREP="${nnUNet_preprocessed}/Dataset${DATASET_ID}_${DATASET_NAME}"
 RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
+
+# PREP: CLI arg wins; else use env-based default
+if [[ $# -ge 1 ]]; then
+  PREP="$1"
+else
+  PREP="${nnUNet_preprocessed}/Dataset${DATASET_ID}_${DATASET_NAME}"
+fi
 
 DJ="${RAW}/dataset.json"
 PL="${RES}/plans.json"
 
 # --- sanity checks ---
-[[ -d "${nnUNet_raw:-}" ]] || { echo "nnUNet_raw not set by set_unet_path.sh"; exit 1; }
-[[ -d "${nnUNet_preprocessed:-}" ]] || { echo "nnUNet_preprocessed not set by set_unet_path.sh"; exit 1; }
-[[ -d "${nnUNet_results:-}" ]] || { echo "nnUNet_results not set by set_unet_path.sh"; exit 1; }
+[[ -d "${nnUNet_raw:-}" ]] || { echo "ERROR: nnUNet_raw not set"; exit 1; }
+[[ -d "${nnUNet_preprocessed:-}" ]] || { echo "ERROR: nnUNet_preprocessed not set"; exit 1; }
+[[ -d "${nnUNet_results:-}" ]] || { echo "ERROR: nnUNet_results not set"; exit 1; }
 
-[[ -f "$DJ" ]] || { echo "Missing dataset.json at $DJ"; exit 1; }
-[[ -f "$PL" ]] || { echo "Missing plans.json at $PL"; exit 1; }
-[[ -d "$PREP" ]] || { echo "Missing preprocessed dir $PREP"; exit 1; }
-[[ -d "${RAW}/imagesTr" && -d "${RAW}/labelsTr" ]] || { echo "RAW imagesTr/labelsTr missing under $RAW"; exit 1; }
-[[ -f "${RES}/fold_${FOLD}/checkpoint_best.pth" ]] || { echo "Missing checkpoint_best.pth under ${RES}/fold_${FOLD}"; exit 1; }
+[[ -d "$RAW" ]] || { echo "ERROR: RAW dataset dir missing: $RAW"; exit 1; }
+[[ -f "$DJ"  ]] || { echo "ERROR: dataset.json missing: $DJ"; exit 1; }
+[[ -d "$PREP" ]] || { echo "ERROR: PREP dir missing: $PREP"; exit 1; }
 
-# --- extract fold-0 validation IDs from splits_final.json ---
+[[ -f "$PL" ]] || { echo "ERROR: plans.json missing: $PL"; exit 1; }
+[[ -d "$RAW/imagesTr" && -d "$RAW/labelsTr" ]] || { echo "ERROR: imagesTr/labelsTr missing under $RAW"; exit 1; }
+[[ -f "${RES}/fold_${FOLD}/checkpoint_best.pth" ]] || { echo "ERROR: checkpoint_best.pth missing under ${RES}/fold_${FOLD}"; exit 1; }
+
+echo "[info] RAW=$RAW"
+echo "[info] PREP=$PREP"
+echo "[info] RES =$RES"
+echo "[info] DJ  =$DJ"
+echo "[info] PL  =$PL"
+
+# --- extract fold-0 validation IDs ---
 python - <<'PY' "$PREP"
 import json, os, sys
 prep = sys.argv[1]
-with open(os.path.join(prep, "splits_final.json")) as f:
+spl = os.path.join(prep, "splits_final.json")
+with open(spl) as f:
     splits = json.load(f)
 val_ids = sorted(set(splits[0]["val"]))
 with open("val_ids_fold0.txt","w") as g:
     g.write("\n".join(val_ids))
-print(f"Wrote {len(val_ids)} IDs to val_ids_fold0.txt")
+print(f"[ok] Wrote {len(val_ids)} IDs to val_ids_fold0.txt")
 PY
 
-# --- build subset folders with symlinks (validation images & labels) ---
+# --- build subset (symlinks) ---
 VAL_ROOT="$PWD/tmp_val"
 VALI="${VAL_ROOT}/imagesTr"; mkdir -p "$VALI"
 VALL="${VAL_ROOT}/labelsTr"; mkdir -p "$VALL"
 
+n_linked=0
 while read -r ID; do
+  # link channels
   for ch in 0000 0001 0002 0003; do
-    ln -sf "${RAW}/imagesTr/${ID}_${ch}.nii.gz" "${VALI}/${ID}_${ch}.nii.gz"
+    src="${RAW}/imagesTr/${ID}_${ch}.nii.gz"
+    dst="${VALI}/${ID}_${ch}.nii.gz"
+    if [[ -f "$src" ]]; then
+      ln -sf "$src" "$dst"
+      ((n_linked++)) || true
+    else
+      echo "[warn] missing image channel: $src"
+    fi
   done
-  ln -sf "${RAW}/labelsTr/${ID}.nii.gz" "${VALL}/${ID}.nii.gz"
+  # link label
+  lab_src="${RAW}/labelsTr/${ID}.nii.gz"
+  lab_dst="${VALL}/${ID}.nii.gz"
+  if [[ -f "$lab_src" ]]; then
+    ln -sf "$lab_src" "$lab_dst"
+  else
+    echo "[warn] missing label: $lab_src"
+  fi
 done < val_ids_fold0.txt
 
-# --- prediction output (under your results tree) ---
+n_cases=$(ls -1 "$VALI"/*_0000.nii.gz 2>/dev/null | wc -l | awk '{print $1}')
+echo "[info] Symlinked $n_cases validation cases (counted by *_0000.nii.gz)."
+if [[ "$n_cases" -eq 0 ]]; then
+  echo "[error] No validation cases were linked. Check splits_final.json IDs and RAW paths."
+  exit 2
+fi
+
+# --- prediction output ---
 OUTP="${RES}/fold_${FOLD}/predictions/validation"
 mkdir -p "$OUTP"
 
-# IMPORTANT: pass the CHECKPOINT *NAME* only, not a path!
+echo "[info] Running prediction into: $OUTP"
+# IMPORTANT: pass checkpoint NAME only (nnUNet constructs the path)
 nnUNetv2_predict \
   -i "$VALI" \
   -o "$OUTP" \
@@ -79,8 +122,17 @@ nnUNetv2_predict \
   --disable_tta \
   --disable_progress_bar
 
-# --- evaluate against matching labels subset ---
+# verify predictions were created
+n_preds=$(ls -1 "$OUTP"/*.nii.gz 2>/dev/null | wc -l | awk '{print $1}')
+echo "[info] Predicted $n_preds files."
+if [[ "$n_preds" -eq 0 ]]; then
+  echo "[error] No predictions written to $OUTP. Check logs above."
+  exit 3
+fi
+
+# --- evaluate ---
 OUT_JSON="${OUTP}/val_fold${FOLD}_results.json"
+echo "[info] Evaluating to: $OUT_JSON"
 nnUNetv2_evaluate_folder \
   -djfile "$DJ" \
   -pfile  "$PL" \
@@ -88,4 +140,4 @@ nnUNetv2_evaluate_folder \
   "$VALL" \
   "$OUTP"
 
-echo "Wrote metrics to: $OUT_JSON"
+echo "[ok] Wrote metrics to: $OUT_JSON"
