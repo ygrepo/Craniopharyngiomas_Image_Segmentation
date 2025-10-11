@@ -18,7 +18,7 @@ mkdir -p "$LOG_DIR"
 source script/set_unet_path.sh
 
 INPUT_DIR="nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/"
-OUTPUT_FN="nUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/training_metrics.csv"
+OUTPUT_FN="nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/training_metrics.csv"
 
 ts=$(date +"%Y%m%d_%H%M%S")
 log_file="${LOG_DIR}/${ts}_unet_collect_training_stats.log"
