@@ -211,19 +211,38 @@ def main():
     )
     ap.add_argument(
         "-i",
-        "--input",
+        "--input_dir",
         required=True,
+        default=None,
         help="Directory (reads training_log*.txt) or single log file.",
     )
-    ap.add_argument("-o", "--output", default=None, help="Output CSV path.")
+    ap.add_argument(
+        "-o",
+        "--output_fn",
+        default=None,
+        help="Output CSV path.",
+    )
+    ap.add_argument(
+        "--log_level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Logging level.",
+    )
+    ap.add_argument(
+        "--log_file",
+        type=Path,
+        default=None,
+        help="Log file path (in addition to console).",
+    )
     ap.add_argument(
         "--pattern", default="training_log*.txt", help="Glob if input is a directory."
     )
     args = ap.parse_args()
 
-    setup_logging(None, "INFO")
+    setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
+
     logger.info(f"Args: {args}")
-    in_path = args.input
+    in_path = args.input_dir
     if os.path.isdir(in_path):
         files = sorted(glob(os.path.join(in_path, args.pattern)))
         default_out = os.path.join(in_path, "training_metrics.csv")
@@ -231,7 +250,7 @@ def main():
         files = [in_path]
         default_out = os.path.splitext(in_path)[0] + "_metrics.csv"
 
-    out_csv = args.output or default_out
+    out_csv = args.output_fn or default_out
     if not files:
         logger.error("[error] no log files found.", file=sys.stderr)
         sys.exit(1)

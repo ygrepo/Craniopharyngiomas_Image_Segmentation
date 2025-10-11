@@ -149,7 +149,11 @@ def main():
         description="Convert nnUNet v2 evaluation JSON to CSV (stdlib only)."
     )
     ap.add_argument(
-        "-i", "--input", required=True, help="Path to valresults.json (or summary JSON)"
+        "-i",
+        "--input",
+        default="nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/validation/summary.json",
+        required=True,
+        help="Path to valresults.json (or summary JSON)",
     )
     ap.add_argument(
         "--out-cases", default=None, help="Output CSV path for per-case/per-class rows"
