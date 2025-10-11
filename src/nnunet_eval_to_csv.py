@@ -151,9 +151,9 @@ def main():
     ap.add_argument(
         "-i",
         "--input",
-        default="nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/validation/summary.json",
-        required=True,
-        help="Path to valresults.json (or summary JSON)",
+        default="nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/predictions/validation/summary.json",
+        required=False,
+        help="Path to summary.json",
     )
     ap.add_argument(
         "--out-cases", default=None, help="Output CSV path for per-case/per-class rows"
