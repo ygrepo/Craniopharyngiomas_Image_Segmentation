@@ -57,7 +57,7 @@ nnUNetv2_predict \
   -i "$VALI" \
   -o "$OUTP" \
   -d 501 -c 3d_fullres -f 0 \
-  -chk ${RES}/checkpoint_best.pth \
+  -chk checkpoint_best.pth \
   -device cuda
 
 OUT=${RES}/predictions/validation/val_fold0_results.json
