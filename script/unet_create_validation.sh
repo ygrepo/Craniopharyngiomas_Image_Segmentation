@@ -151,3 +151,20 @@ nnUNetv2_evaluate_folder \
   "$VALL" \
   "$OUTP"
 echo "[ok] Wrote metrics to: $OUT_JSON"
+
+# --- add HD95 per class to the JSON (writes summary_with_hd95.json) ---
+ADD_HD95_PY="src/add_hd95_to_eval_json.py"   # path to the helper script
+OUT_JSON_HD95="${OUTP}/summary_with_hd95.json"
+
+echo "[info] Adding HD95 to: ${OUT_JSON}"
+# Option A: specify exactly which classes to compute (BraTS: 1,2,3)
+python "${ADD_HD95_PY}" \
+  -i "${OUT_JSON}" \
+  -o "${OUT_JSON_HD95}" 
+  # \
+  # --classes 1,2,3
+
+# Option B: let the script auto-detect present non-zero classes
+# python "${ADD_HD95_PY}" -i "${OUT_JSON}" -o "${OUT_JSON_HD95}"
+
+echo "[ok] Wrote: ${OUT_JSON_HD95}"
