@@ -43,7 +43,7 @@ source script/set_unet_path.sh
 # Predict Single fold (e.g., fold 0)
 nnUNetv2_predict \
   -i /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_raw/Dataset501_BraTS2017_4ch/imagesTs/ \
-  -o /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/predictions/fold_0/test_dataset \
+  -o /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/predictions/fold_0/test \
   -d 501 \
   -c 3d_fullres \
   -f 0 \
