@@ -26,7 +26,7 @@ echo "  log_file : ${log_file}"
 
 set +e
 "${PYTHON}" "${MAIN}" \
-  --log_fn "${log_file}" \
+  --log_file "${log_file}" \
   --log_level "${LOG_LEVEL}" \
   --input_dir "${INPUT_DIR}" \
   --output_fn "${OUTPUT_FN}"
