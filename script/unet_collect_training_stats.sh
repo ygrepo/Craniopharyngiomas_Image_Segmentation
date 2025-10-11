@@ -33,3 +33,9 @@ set +e
 exit_code=$?
 set -e
 
+if [[ ${exit_code} -eq 0 ]]; then
+  echo "OK: ${combo} finished at $(date)" | tee -a "${log_file}"
+else
+  echo "ERROR: ${combo} failed with exit code ${exit_code} at $(date)" | tee -a "${log_file}"
+  exit ${exit_code}
+fi

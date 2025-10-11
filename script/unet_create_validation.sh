@@ -32,8 +32,8 @@ while read ID; do
   ln -sf "${RAW}/labelsTr/${ID}.nii.gz" "${VALL}/${ID}.nii.gz"
 done < val_ids_fold0.txt
 
-RES=nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/
-OUTP=${RES}/predictions/val_fold0
+OUTP=nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0
+OUTP=${RES}/predictions/validation
 mkdir -p "$OUTP"
 
 nnUNetv2_predict \
