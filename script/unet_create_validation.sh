@@ -60,7 +60,7 @@ nnUNetv2_predict \
   -chk ${RES}/checkpoint_best.pth \
   -device cuda
 
-OUT=${RES}/predictions/val_fold0_results.json
+OUT=${RES}/predictions/validation/val_fold0_results.json
 nnUNetv2_evaluate_folder -djfile "$DJ" -pfile "$PL" -o "$OUT" \
   "$VALL" "$OUTP"
 echo "Wrote metrics to: $OUT"
