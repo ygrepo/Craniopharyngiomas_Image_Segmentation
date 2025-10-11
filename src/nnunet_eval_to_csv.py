@@ -253,9 +253,9 @@ def main():
     ap.add_argument(
         "-i",
         "--input",
-        default="nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/predictions/validation/summary.json",
+        default="nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/predictions/validation/summary_with_hd95.json",
         required=False,
-        help="Path to evaluation JSON (e.g., summary.json)",
+        help="Path to evaluation JSON (e.g., summary_with_hd95.json)",
     )
     ap.add_argument(
         "--out-cases", default=None, help="Output CSV path for per-case/per-class rows"
