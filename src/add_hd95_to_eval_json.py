@@ -55,17 +55,25 @@ def hd95_mm_from_binary(pred_bin: sitk.Image, ref_bin: sitk.Image) -> float:
     Symmetric 95% Hausdorff distance in mm between two binary masks (same geometry).
     Uses SimpleITK SignedMaurerDistanceMap with useImageSpacing=True.
     """
-    # Edge cases
-    pred_any = int(sitk.StatisticsImageFilter().Execute(pred_bin) or 0)
-    ref_any = int(sitk.StatisticsImageFilter().Execute(ref_bin) or 0)
+    # --- Edge cases (correct foreground check) ---
+    sf = sitk.StatisticsImageFilter()
+    sf.Execute(pred_bin)
+    pred_any = sf.GetSum() > 0
+    sf.Execute(ref_bin)
+    ref_any = sf.GetSum() > 0
+
     if not pred_any and not ref_any:
         return 0.0
-    if pred_any and not ref_any or ref_any and not pred_any:
+    if (pred_any and not ref_any) or (ref_any and not pred_any):
         return float("inf")
 
     # Surfaces
-    surf_pred = binary_contour(pred_bin)
-    surf_ref = binary_contour(ref_bin)
+    surf_pred = sitk.BinaryContour(
+        pred_bin, fullyConnected=True, backgroundValue=0, foregroundValue=1
+    )
+    surf_ref = sitk.BinaryContour(
+        ref_bin, fullyConnected=True, backgroundValue=0, foregroundValue=1
+    )
 
     # Distance maps (abs, in mm)
     dm_ref = sitk.Abs(
@@ -83,7 +91,6 @@ def hd95_mm_from_binary(pred_bin: sitk.Image, ref_bin: sitk.Image) -> float:
     d_pred_to_ref = sitk.GetArrayFromImage(sitk.Mask(dm_ref, surf_pred))
     d_ref_to_pred = sitk.GetArrayFromImage(sitk.Mask(dm_pred, surf_ref))
 
-    # Collect positive distances
     a = d_pred_to_ref[d_pred_to_ref > 0]
     b = d_ref_to_pred[d_ref_to_pred > 0]
     if a.size == 0 and b.size == 0:
