@@ -1,6 +1,13 @@
 #!/bin/bash
 # Usage: ./unet_create_validation.sh [OPTIONAL_PREP_DIR]
-# If PREP dir is not passed, it will be derived from envs set by script/set_unet_path.sh
+#SBATCH --job-name=unet_create_validation
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=6
+#SBATCH --mem=48G
+#SBATCH --time=04:00:00
+#SBATCH --output=logs/unet_create_validation_%j.out
+#SBATCH --error=logs/unet_create_validation_%j.err
 
 set -euo pipefail
 
@@ -108,6 +115,8 @@ fi
 OUTP="${RES}/fold_${FOLD}/predictions/validation"
 mkdir -p "$OUTP"
 
+export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
+
 echo "[info] Running prediction into: $OUTP"
 # IMPORTANT: pass checkpoint NAME only (nnUNet constructs the path)
 nnUNetv2_predict \
@@ -120,6 +129,7 @@ nnUNetv2_predict \
   -f "$FOLD" \
   -chk checkpoint_best.pth \
   --disable_tta \
+  --device cuda \
   --disable_progress_bar
 
 # verify predictions were created
@@ -131,7 +141,8 @@ if [[ "$n_preds" -eq 0 ]]; then
 fi
 
 # --- evaluate ---
-OUT_JSON="${OUTP}/val_fold${FOLD}_results.json"
+#OUT_JSON="${OUTP}/val_fold${FOLD}_results.json"
+OUT_JSON="${OUTP}/summary.json"
 echo "[info] Evaluating to: $OUT_JSON"
 nnUNetv2_evaluate_folder \
   -djfile "$DJ" \
@@ -139,5 +150,4 @@ nnUNetv2_evaluate_folder \
   -o      "$OUT_JSON" \
   "$VALL" \
   "$OUTP"
-
 echo "[ok] Wrote metrics to: $OUT_JSON"
