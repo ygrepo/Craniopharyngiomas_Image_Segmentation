@@ -129,7 +129,7 @@ nnUNetv2_predict \
   -f "$FOLD" \
   -chk checkpoint_best.pth \
   --disable_tta \
-  --device cuda \
+  -device cuda \
   --disable_progress_bar
 
 # verify predictions were created
