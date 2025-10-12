@@ -261,6 +261,9 @@ def load_model_from_results(
         label_manager.num_segmentation_heads
     )  # equals number of region/label heads
 
+    logger.info(f"num_input_channels: {num_input_channels}")
+    logger.info(f"num_output_channels: {num_output_channels}")
+
     # ----- Rebuild exact network architecture via trainer class -----
     if trainer_name is None:
         # Try to parse from directory name if missing
@@ -271,7 +274,7 @@ def load_model_from_results(
             raise RuntimeError(
                 "Unable to determine trainer_name from checkpoint or directory."
             )
-
+    logger.info(f"Trainer name: {trainer_name}")
     trainer_class = recursive_find_python_class(
         join(nnunetv2.__path__[0], "training", "nnUNetTrainer"),
         trainer_name,
@@ -299,10 +302,12 @@ def load_model_from_results(
     if device_str is None:
         device_str = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device_str)
+    logger.info(f"Device: {device}")
     network = network.to(device).eval()
 
     if compile_network:
         try:
+            logger.info("Compiling network with torch.compile()")
             network = torch.compile(network)  # type: ignore[attr-defined]
         except Exception:
             # don’t hard fail on compile issues
