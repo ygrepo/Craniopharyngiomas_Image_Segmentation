@@ -8,8 +8,11 @@ import numpy as np
 
 from typing import Dict, Any
 import torch
+from torch.serialization import add_safe_globals
 import nnunetv2
 import json
+
+
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 
 from nnunetv2.utilities.label_handling.label_handling import LabelManager
@@ -160,6 +163,37 @@ def strip_ext(p: Path) -> str:
     return s
 
 
+def safe_torch_load(path: str, map_location: torch.device | str = "cpu"):
+    """
+    Robust checkpoint loader across PyTorch>=2.6 (weights_only=True by default)
+    and older checkpoints that pickle numpy scalar types.
+    """
+    # 1) Try weights_only=True with allowlisted numpy scalar
+    try:
+        add_safe_globals([np._core.multiarray.scalar])  # allow old numpy scalar pickles
+    except Exception:
+        # older torch versions may not have add_safe_globals; that's fine
+        pass
+
+    # Try modern safe path first
+    try:
+        return torch.load(path, map_location=map_location, weights_only=True)
+    except TypeError:
+        # torch<2.6: weights_only kw not supported -> fall back to classic load
+        return torch.load(path, map_location=map_location)
+    except Exception as e_safe:
+        # 2) Fallback: explicitly allow full pickle if you trust the source
+        try:
+            return torch.load(path, map_location=map_location, weights_only=False)
+        except TypeError:
+            return torch.load(path, map_location=map_location)
+        except Exception as e_full:
+            raise RuntimeError(
+                f"Failed to load checkpoint '{path}'. "
+                f"weights_only=True error: {e_safe!r} | weights_only=False error: {e_full!r}"
+            )
+
+
 def load_model_from_results(
     model_dir: Path,
     fold: int,
@@ -197,10 +231,13 @@ def load_model_from_results(
 
     # ----- Load checkpoints (and sniff trainer/config on first fold) -----
     list_of_parameters = []
-    checkpoint = torch.load(str(ckpt_file), map_location=torch.device("cpu"))
+    checkpoint = safe_torch_load(str(ckpt_file), map_location=torch.device("cpu"))
     trainer_name = checkpoint.get("trainer_name", trainer or None)
+    logger.info(f"Trainer name: {trainer_name}")
     configuration_name = checkpoint.get("init_args", {}).get("configuration")
+    logger.info(f"Configuration name: {configuration_name}")
     allowed_mirroring_axes = checkpoint.get("inference_allowed_mirroring_axes", None)
+    logger.info(f"Allowed mirroring axes: {allowed_mirroring_axes}")
 
     weights = checkpoint.get(
         "network_weights",
