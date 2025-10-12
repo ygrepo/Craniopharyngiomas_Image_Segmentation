@@ -294,7 +294,7 @@ def write_cases_csv(
             w.writerow({k: row.get(k, "") for k in header})
 
     # metric-like columns (everything except fixed identifiers)
-    return [k for k in header if k not in fixed]
+    return [k for k in header if k not in fixed and k not in ("class_name",)]
 
 
 def write_summary_csv(
@@ -322,7 +322,11 @@ def write_summary_csv(
     # split columns
     score_cols: List[str] = []
     count_cols: List[str] = []
+    skip_cols = {"class_id", "class_name"}
+
     for c in metric_cols:
+        if c in skip_cols:
+            continue
         if c.lower() in COUNT_KEYS:
             count_cols.append(c)
         elif is_numeric_col(c, rows):
