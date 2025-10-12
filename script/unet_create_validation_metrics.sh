@@ -40,22 +40,24 @@ echo "[info] RES =$RES"
 OUTP="${RES}/fold_${FOLD}/predictions/validation"
 mkdir -p "$OUTP"
 IN_JSON_HD95="${OUTP}/summary_with_hd95.json"
-OUT_CSV="summary_with_hd95.json"
-OUT_CASES="summary_with_hd95_cases.csv"
-OUT_CASES="${OUTP}/validation_count_metrics.csv"
+OUT_CASE_FN="${OUTP}/validation_metrics_cases.csv"
+OUT_SUMMARY_FN="${OUTP}/validation_metrics_summary.csv"
+OUT_COUNTS_FN="${OUTP}/validation_metrics_counts.csv"
+
 HD95_QUANTILES="90,95"
 STD_TYPE="sample"
 LABEL_MAP="brats"
-echo "[info] Creating validation metrics with to: ${OUT_CSV}"
 MAIN="src/nnunet_eval_to_csv.py"
 
 "${PYTHON}" "${MAIN}" \
   --in_fn "${IN_JSON_HD95}" \
-  --out_cases_fn "${OUT_CASES}" \
-  --out_summary_fn "${OUT_CSV}" \
+  --out_cases_fn "${OUT_CASE_FN}" \
+  --out_summary_fn "${OUT_SUMMARY_FN}" \
+  --counts_out_fn "${OUT_COUNTS_FN}" \
   --std_type "${STD_TYPE}" \
   --hd95_quantiles "${HD95_QUANTILES}" \
   --label_map "${LABEL_MAP}"
 
-echo "[ok] Wrote: ${OUT_CASES}"
-echo "[ok] Wrote: ${OUT_CSV}"
+echo "[ok] Wrote: ${OUT_SUMMARY_FN}"
+echo "[ok] Wrote: ${OUT_CASE_FN}"
+echo "[ok] Wrote: ${OUT_COUNTS_FN}"

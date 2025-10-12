@@ -222,7 +222,7 @@ def _round_inplace(row: Dict[str, Any], ndigits: Optional[int]) -> None:
 
 def write_cases_csv(
     rows: List[Dict[str, Any]],
-    out_path: str,
+    out_path: Path,
     round_ndigits: Optional[int],
     rename_hd95_mm: bool,
     label_map: Optional[Dict[int, str]] = None,
@@ -285,12 +285,12 @@ def write_cases_csv(
 def write_summary_csv(
     rows: List[Dict[str, Any]],
     metric_cols: List[str],
-    out_path: str,
+    out_path: Path,
     round_ndigits: Optional[int],
     std_type: str = "population",
     hd95_quantiles: Optional[str] = None,
     label_map: Optional[Dict[int, str]] = None,
-    counts_out_fn: Optional[str] = None,
+    counts_out_fn: Optional[Path] = None,
 ):
     """
     Aggregate per class:
@@ -429,13 +429,22 @@ def parse_args():
         help="Path to evaluation JSON (e.g., summary_with_hd95.json or summary.json)",
     )
     ap.add_argument(
-        "--out_cases_fn", default=None, help="Output CSV for per-case/per-class"
+        "--out_cases_fn",
+        type=Path,
+        default=None,
+        help="Output CSV for per-case/per-class",
     )
     ap.add_argument(
-        "--out_summary_fn", default=None, help="Output CSV for per-class aggregates"
+        "--out_summary_fn",
+        type=Path,
+        default=None,
+        help="Output CSV for per-class aggregates",
     )
     ap.add_argument(
-        "--counts_out_fn", default=None, help="Optional separate CSV for counts totals."
+        "--counts_out_fn",
+        type=Path,
+        default=None,
+        help="Optional separate CSV for counts totals.",
     )
     ap.add_argument(
         "--round",
@@ -493,9 +502,8 @@ def main():
     if args.label_map == "brats":
         label_map = {1: "necrotic", 2: "edema", 3: "enhancing"}
 
-    base = os.path.splitext(args.in_fn)[0]
-    out_cases = args.out_cases_fn or (base + "_cases.csv")
-    out_summary = args.out_summary_fn or (base + "_summary.csv")
+    out_cases = args.out_cases_fn.resolve()
+    out_summary = args.out_summary_fn.resolve()
 
     logger.info(f"Input JSON: {args.in_fn}")
     with open(args.in_fn, "r") as f:
@@ -520,7 +528,7 @@ def main():
         std_type=args.std_type,
         hd95_quantiles=args.hd95_quantiles,
         label_map=label_map,
-        counts_out_fn=args.counts_out_fn,
+        counts_out_fn=args.counts_out_fn.resolve() if args.counts_out_fn else None,
     )
 
     logger.info("Wrote:")
