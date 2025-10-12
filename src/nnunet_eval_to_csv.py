@@ -403,6 +403,8 @@ def write_summary_csv(
     if label_map:
         score_headers.append("class_name")
     for c in score_cols:
+        if c.lower() == "iou":
+            continue
         score_headers += [f"{c}_mean", f"{c}_median", f"{c}_std"]
         if c.lower() == "hd95" and q_vals:
             score_headers += [f"HD95_p{int(q)}" for q in q_vals]
