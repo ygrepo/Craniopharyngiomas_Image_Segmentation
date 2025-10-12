@@ -45,7 +45,9 @@ OUT_SUMMARY_FN="${OUTP}/validation_metrics_summary.csv"
 OUT_COUNTS_FN="${OUTP}/validation_metrics_counts.csv"
 
 HD95_QUANTILES="90,95"
-STD_TYPE="sample"
+STD_TYPE="population"
+#STD_TYPE="sample"
+
 LABEL_MAP="brats"
 MAIN="src/nnunet_eval_to_csv.py"
 
