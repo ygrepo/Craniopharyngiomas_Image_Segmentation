@@ -158,6 +158,21 @@ def _std(vals: List[float], which: str) -> float:
     return math.sqrt(var)
 
 
+def to_float(x):
+    try:
+        return float(x)
+    except Exception:
+        return None
+
+
+# Keep only columns that have at least one numeric value across all rows
+def is_numeric_col(col: str, rows: List[Dict[str, Any]]) -> bool:
+    for r in rows:
+        if to_float(r.get(col)) is not None:
+            return True
+    return False
+
+
 def load_items(data: Any) -> List[Dict[str, Any]]:
     """Accept list or dict with common keys and return the list of per-case entries."""
     if isinstance(data, list):
@@ -304,18 +319,14 @@ def write_summary_csv(
     for r in rows:
         by_class.setdefault(str(r["class_id"]), []).append(r)
 
-    def to_float(x):
-        try:
-            return float(x)
-        except Exception:
-            return None
-
     # split columns
     score_cols: List[str] = []
     count_cols: List[str] = []
     for c in metric_cols:
         if c.lower() in COUNT_KEYS:
             count_cols.append(c)
+        elif is_numeric_col(c, rows):
+            score_cols.append(c)
         else:
             score_cols.append(c)
 
