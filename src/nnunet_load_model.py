@@ -2,13 +2,8 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import json
-import math
-import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

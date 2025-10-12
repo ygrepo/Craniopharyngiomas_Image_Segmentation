@@ -37,9 +37,7 @@ RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__
 
 
 [[ -f "${RES}/fold_${FOLD}/checkpoint_best.pth" ]] || { echo "ERROR: checkpoint_best.pth missing under ${RES}/fold_${FOLD}"; exit 1; }
-MODEL_DIR="${RES}/fold_${FOLD}"
 echo "[info] RES =$RES"
-echo "[info] MODEL_DIR=$MODEL_DIR"
 MAIN="src/nnunet_load_model.py"
 
 ts=$(date +"%Y%m%d_%H%M%S")
@@ -50,7 +48,7 @@ set +e
 "${PYTHON}" "${MAIN}" \
   --log_file "${log_file}" \
   --log_level "${LOG_LEVEL}" \
-  --model_dir "${MODEL_DIR}" \
+  --model_dir "${RES}" \
   --fold "${FOLD}"
   exit_code=$?
 set -e
