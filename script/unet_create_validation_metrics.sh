@@ -52,9 +52,10 @@ MAIN="src/nnunet_eval_to_csv.py"
 "${PYTHON}" "${MAIN}" \
   --in_fn "${IN_JSON_HD95}" \
   --out_cases_fn "${OUT_CASES}" \
-  --out_summary_fn "${OUT_CSV"} \
+  --out_summary_fn "${OUT_CSV}" \
   --std_type "${STD_TYPE}" \
   --hd95_quantiles "${HD95_QUANTILES}" \
   --label_map "${LABEL_MAP}"
 
-echo "[ok] Wrote: ${OUT_JSON_HD95}"
+echo "[ok] Wrote: ${OUT_CASES}"
+echo "[ok] Wrote: ${OUT_CSV}"
