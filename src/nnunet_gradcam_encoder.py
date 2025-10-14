@@ -29,9 +29,7 @@ Class index mapping to verify for YOUR checkpoint:
   3 = non-enhancing/necrotic core (NCR/NET)
 """
 
-import os
 import sys
-import re
 import argparse
 from pathlib import Path
 from typing import List, Tuple, Optional
@@ -53,6 +51,9 @@ from src.util import (
     load_model_from_results,
     pick_target_layer,
     load_volume,
+    downsample_multiples,
+    pad_to_multiples,
+    unpad_3d,
 )
 
 logger = get_logger(__name__)
@@ -200,7 +201,7 @@ def parse_args():
     ap.add_argument(
         "--model_dir",
         type=Path,
-        default="nnUNet_results/Dataset502_BraTS2017_4ch/nnUNetTrainer__nnUNetResEncUNetMPlans__3d_fullres/",
+        default="nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetResEncUNetMPlans__3d_fullres/",
         help="Path to model dir (e.g., nnUNet_results/nnUNetTrainer__nnUNetPlans__3d_fullres/501_BraTS2017_4ch)",
     )
     ap.add_argument(
@@ -276,31 +277,23 @@ def main():
     case_stem = args.case  # e.g., 'Brats17_CBICA_AAG_1'
 
     vol_t, props = load_volume(data_dir, case_stem)
-
-    # # Resolve env paths
-    # nnUNet_preprocessed = Path(os.environ["nnUNet_preprocessed"]).resolve()
-
-    # prep_dir = nnUNet_preprocessed / f"Dataset{args.dataset_id}_{args.dataset_name}"
-    # case_npz_path = prep_dir / args.case_npz
-    # if not case_npz_path.exists():
-    #     raise FileNotFoundError(f"Case not found: {case_npz_path}")
-    # # Load case data
-    # case_arr = load_case_npz(prep_dir, args.case_npz)  # (C,D,H,W)
-    # C, D, H, W = case_arr.shape
-    # vol_t = torch.from_numpy(case_arr)[None, ...]  # (1,C,D,H,W)
-
     # Pick target layer
     target_layer = pick_target_layer(model, args.layer_regex)
+
+    cfg = meta["configuration_manager"]
+    mult = downsample_multiples(cfg)  # e.g., (32, 32, 32)
+    vol_pad, pads = pad_to_multiples(vol_t, mult)
 
     # Run CAM
     cam_3d = run_cam(
         model=model,
-        vol=vol_t,
+        vol=vol_pad,
         target_layer=target_layer,
         class_idx=args.class_idx,
         method=args.method,
         use_pred_mask=args.use_pred_mask,
     )  # (D,H,W) in [0,1]
+    cam_3d = unpad_3d(cam_3d, pads)
 
     # Save outputs
     # out_dir = Path(args.out_dir)

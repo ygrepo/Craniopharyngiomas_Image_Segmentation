@@ -400,5 +400,35 @@ def pick_target_layer(model: nn.Module, layer_regex: str) -> nn.Module:
             f"{len(all_convs)} convs exist; try a looser regex or print them."
         )
     # Heuristic: take the first match (often shallow encoder). Adjust if you want a deeper block.
-    print(f"[info] Using target layer: {candidates[0][0]}")
+    logger.info(f"[info] Using target layer: {candidates[0][1]}")
     return candidates[0][1]
+
+
+def downsample_multiples(cfg) -> tuple[int, int, int]:
+    # cfg.pool_op_kernel_sizes is a list like [(2,2,2), (2,2,2), (2,2,2), (2,2,2), (2,2,2)]
+    import math
+
+    sizes = cfg.pool_op_kernel_sizes
+    mult_d = math.prod(k[0] for k in sizes)
+    mult_h = math.prod(k[1] for k in sizes)
+    mult_w = math.prod(k[2] for k in sizes)
+    return mult_d, mult_h, mult_w
+
+
+def pad_to_multiples(x: torch.Tensor, mult: tuple[int, int, int]):
+    _, _, D, H, W = x.shape
+    md, mh, mw = mult
+    padD = (md - D % md) % md
+    padH = (mh - H % mh) % mh
+    padW = (mw - W % mw) % mw
+    # F.pad expects (W_right, W_left, H_right, H_left, D_right, D_left)
+    x_pad = torch.nn.functional.pad(x, (0, padW, 0, padH, 0, padD))
+    return x_pad, (padD, padH, padW)
+
+
+def unpad_3d(arr: np.ndarray, pads: tuple[int, int, int]) -> np.ndarray:
+    padD, padH, padW = pads
+    D, H, W = arr.shape
+    return arr[
+        : D - padD if padD else D, : H - padH if padH else H, : W - padW if padW else W
+    ]
