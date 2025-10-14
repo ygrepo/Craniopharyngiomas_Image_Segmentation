@@ -2,8 +2,8 @@
 import argparse
 import sys
 from pathlib import Path
-import os
 import pickle
+import pprint
 import numpy as np
 import torch
 
@@ -32,6 +32,9 @@ def load_volume(
     # read properties
     with open(pkl, "rb") as f:
         props = pickle.load(f)
+
+    print("Keys in props:\n")
+    pprint.pprint(list(props.keys()))
 
     # infer shape and channels
     size = (
