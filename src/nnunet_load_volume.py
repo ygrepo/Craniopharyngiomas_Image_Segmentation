@@ -36,6 +36,27 @@ def load_volume(
     print("Keys in props:\n")
     pprint.pprint(list(props.keys()))
 
+    # infer shape and channels (supports all known v2 formats)
+    size = (
+        props.get("size_after_cropping")
+        or props.get("size_after_resampling")
+        or props.get("size_after_padding")
+        or props.get("shape_after_cropping_and_before_resampling")
+        or props.get("shape_before_cropping")
+    )
+    if size is None:
+        if "bbox_used_for_cropping" in props:
+            # fallback: derive shape from bounding box (z,y,x)
+            z0, z1, y0, y1, x0, x1 = props["bbox_used_for_cropping"]
+            size = [z1 - z0, y1 - y0, x1 - x0]
+            logger.info(f"Inferred size from bbox_used_for_cropping: {size}")
+        else:
+            raise KeyError(f"No usable size info in props keys: {list(props.keys())}")
+
+    D, H, W = map(int, size)
+    C = len(props.get("modalities", [])) or int(props.get("num_modalities", 1))
+    logger.info(f"Volume shape inferred: C={C}, D={D}, H={H}, W={W}")
+
     # infer shape and channels
     size = (
         props.get("size_after_cropping")
