@@ -14,6 +14,7 @@ import nnunetv2
 import json
 import torch.nn as nn
 
+import re
 import blosc2
 
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
