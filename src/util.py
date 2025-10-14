@@ -85,6 +85,12 @@ def write_image(img: sitk.Image, path: Path):
     sitk.WriteImage(img, str(path), useCompression=True)
 
 
+def save_npy(ar: np.ndarray, out_path: Path):
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(out_path, ar)
+    logger.info(f"[ok] Saved: {out_path}")
+
+
 def same_geometry(a: sitk.Image, b: sitk.Image) -> bool:
     return (
         a.GetSize() == b.GetSize()

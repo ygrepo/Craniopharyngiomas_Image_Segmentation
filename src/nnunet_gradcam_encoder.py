@@ -54,6 +54,7 @@ from src.util import (
     downsample_multiples,
     pad_to_multiples,
     unpad_3d,
+    save_npy,
 )
 
 logger = get_logger(__name__)
@@ -94,12 +95,6 @@ class SegmentationClassAveragedTarget:
             return (score_map * mask.float()).sum() / (mask.sum().clamp_min(1.0))
         else:
             return score_map.mean()
-
-
-def save_cam_npy(cam_3d: np.ndarray, out_path: Path):
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    np.save(out_path, cam_3d)
-    print(f"[ok] Saved CAM volume: {out_path}")
 
 
 def overlay_and_save_pngs(
@@ -194,6 +189,13 @@ def parse_args():
         help="Path to data dir (e.g., nnUNet_preprocessed/Dataset501_BraTS2017_4ch/nnUNetPlans_3d_fullres)",
     )
     ap.add_argument(
+        "--output_dir",
+        type=Path,
+        required=False,
+        default="output/cam",
+        help="Path to output dir",
+    )
+    ap.add_argument(
         "--case",
         type=str,
         required=False,
@@ -222,7 +224,6 @@ def parse_args():
         "--method", type=str, default="gradcam", choices=["gradcam", "layercam"]
     )
     ap.add_argument("--use_pred_mask", type=bool, default=True, help="1=True, 0=False")
-    ap.add_argument("--out_dir", type=str, default="cam_out")
     ap.add_argument(
         "--log_file",
         type=Path,
@@ -278,12 +279,11 @@ def main():
     cam_3d = unpad_3d(cam_3d, pads)
 
     # Save outputs
-    # out_dir = Path(args.out_dir)
-    # out_dir.mkdir(parents=True, exist_ok=True)
-    # base = Path(args.case_npz).stem
-    # save_cam_npy(
-    #     cam_3d, out_dir / f"{base}_class{args.class_idx}_{args.method}_cam.npy"
-    # )
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    save_npy(
+        cam_3d, out_dir / f"{case_stem}_class{args.class_idx}_{args.method}_cam.npy"
+    )
 
     # # For PNG overlays, pick a visualization channel (T1CE often at index 2; fallback to 0 if absent)
     # vis_ch = 2 if C > 2 else 0
