@@ -91,6 +91,11 @@ def save_npy(ar: np.ndarray, out_path: Path):
     logger.info(f"[ok] Saved: {out_path}")
 
 
+def load_npy(path: Path) -> np.ndarray:
+    logger.info(f"Loading: {path}")
+    return np.load(path)
+
+
 def same_geometry(a: sitk.Image, b: sitk.Image) -> bool:
     return (
         a.GetSize() == b.GetSize()

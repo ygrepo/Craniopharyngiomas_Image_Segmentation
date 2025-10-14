@@ -279,7 +279,7 @@ def main():
     cam_3d = unpad_3d(cam_3d, pads)
 
     # Save outputs
-    out_dir = Path(args.out_dir)
+    out_dir = Path(args.output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     save_npy(
         cam_3d, out_dir / f"{case_stem}_class{args.class_idx}_{args.method}_cam.npy"
