@@ -6,6 +6,7 @@ import pickle
 import pprint
 import numpy as np
 import torch
+import blosc2
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -15,40 +16,43 @@ from src.util import get_logger, setup_logging
 logger = get_logger(__name__)
 
 
-def load_volume(
-    data_dir: Path,
-    case_stem: str,
-):
+def load_volume(data_dir: Path, case_stem: str):
     """
-    Use nnU-Net v2's helper to load a preprocessed case (.b2nd + .pkl)
-    Returns (data, props) where data is float32 array (C, D, H, W).
+    Load nnU-Net v2 preprocessed case (.b2nd + .pkl) via Blosc2.
+    Returns (torch tensor (1, C, D, H, W), props)
     """
-
     b2nd = data_dir / f"{case_stem}.b2nd"
     pkl = data_dir / f"{case_stem}.pkl"
     if not b2nd.exists() or not pkl.exists():
         raise FileNotFoundError(f"Missing .b2nd or .pkl for {case_stem} in {data_dir}")
 
-    # read properties
+    # props (spacing, crop bbox, etc.), useful for later but not needed to decode b2nd
     with open(pkl, "rb") as f:
         props = pickle.load(f)
-
     print("Keys in props:\n")
     pprint.pprint(list(props.keys()))
-    size = props.get("shape_after_cropping_and_before_resampling")
 
-    D, H, W = map(int, size)
-    # Each BraTS case has 4 modalities (FLAIR, T1, T1CE, T2)
-    C = len(props.get("modalities", [])) or 4
-    logger.info(f"Volume shape inferred: C={C}, D={D}, H={H}, W={W}")
+    # --- load compressed array (shape + dtype are stored inside) ---
+    nd = blosc2.open(str(b2nd))  # Blosc2 NDArray handle
+    arr = np.asarray(nd)  # materialize to NumPy
 
-    data = np.fromfile(b2nd, dtype=np.float32)
-    expected = C * D * H * W
-    if data.size != expected:
-        raise ValueError(f"File size mismatch: expected {expected}, got {data.size}")
+    # Normalize to (C, D, H, W)
+    if arr.ndim == 3:
+        # single-channel volume (D, H, W)
+        arr = arr[None, ...]  # -> (1, D, H, W)
+    elif arr.ndim == 4:
+        # either (C, D, H, W) or (D, H, W, C)
+        if arr.shape[0] in (1, 2, 3, 4, 5):
+            pass  # already (C, D, H, W)
+        elif arr.shape[-1] in (1, 2, 3, 4, 5):
+            arr = np.moveaxis(arr, -1, 0)  # (D,H,W,C) -> (C,D,H,W)
+        else:
+            raise ValueError(f"Ambiguous channel axis for shape {arr.shape}")
+    else:
+        raise ValueError(f"Unexpected ndim {arr.ndim} for {b2nd.name}")
 
-    data = data.reshape(C, D, H, W)
-    vol_t = torch.from_numpy(data)[None, ...]  # (1, C, D, H, W)
+    arr = arr.astype(np.float32, copy=False)
+    vol_t = torch.from_numpy(arr)[None, ...]  # (1, C, D, H, W)
     return vol_t, props
 
 
