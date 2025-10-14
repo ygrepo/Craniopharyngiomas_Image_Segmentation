@@ -59,12 +59,14 @@ def parse_args():
         "--data_dir",
         type=Path,
         required=False,
+        default="nnUNet_preprocessed/Dataset501_BraTS2017_4ch/nnUNetPlans_3d_fullres",
         help="Path to data dir (e.g., nnUNet_preprocessed/Dataset501_BraTS2017_4ch/nnUNetPlans_3d_fullres)",
     )
     ap.add_argument(
         "--case",
         type=str,
         required=False,
+        default="Brats17_CBICA_AAG_1",
         help="Case stem (e.g., 'Brats17_CBICA_AAG_1')",
     )
     ap.add_argument(
