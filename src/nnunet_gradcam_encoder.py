@@ -59,33 +59,6 @@ logger = get_logger(__name__)
 
 
 # ---------------------------
-# Layer discovery utilities
-# ---------------------------
-def list_conv_layers(
-    model: nn.Module, name_filter: Optional[str] = None
-) -> List[Tuple[str, nn.Module]]:
-    layers = []
-    for n, m in model.named_modules():
-        if isinstance(m, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
-            if name_filter is None or re.search(name_filter, n):
-                layers.append((n, m))
-    return layers
-
-
-def pick_target_layer(model: nn.Module, layer_regex: str) -> nn.Module:
-    candidates = list_conv_layers(model, name_filter=layer_regex)
-    if not candidates:
-        all_convs = list_conv_layers(model)
-        raise RuntimeError(
-            f"No conv layer matched regex '{layer_regex}'. "
-            f"{len(all_convs)} convs exist; try a looser regex or print them."
-        )
-    # Heuristic: take the first match (often shallow encoder). Adjust if you want a deeper block.
-    print(f"[info] Using target layer: {candidates[0][0]}")
-    return candidates[0][1]
-
-
-# ---------------------------
 # Targets for segmentation
 # ---------------------------
 class SegmentationClassAveragedTarget:
@@ -118,27 +91,27 @@ class SegmentationClassAveragedTarget:
 # ---------------------------
 # I/O helpers
 # ---------------------------
-def load_case_npz(prep_dir: Path, case_npz: str) -> np.ndarray:
-    """
-    Load preprocessed nnU-Net .npz (C,D,H,W) from $nnUNet_preprocessed/.../imagesTr
-    Returns float32 array normalized per-channel (z-score).
-    """
-    npz_path = prep_dir / case_npz
-    if not npz_path.exists():
-        raise FileNotFoundError(f"Case not found: {npz_path}")
-    d = np.load(npz_path)
-    # nnU-Net v2 stores under key 'data' typically
-    if "data" not in d:
-        # Some pipelines save as unnamed array; fallback
-        arr = list(d.values())[0]
-    else:
-        arr = d["data"]
-    arr = arr.astype(np.float32)  # (C,D,H,W)
-    # Simple per-channel z-score (your pipeline may already be normalized; if so, skip)
-    for c in range(arr.shape[0]):
-        mu, sd = arr[c].mean(), arr[c].std()
-        arr[c] = (arr[c] - mu) / (sd + 1e-6)
-    return arr
+# def load_case_npz(prep_dir: Path, case_npz: str) -> np.ndarray:
+#     """
+#     Load preprocessed nnU-Net .npz (C,D,H,W) from $nnUNet_preprocessed/.../imagesTr
+#     Returns float32 array normalized per-channel (z-score).
+#     """
+#     npz_path = prep_dir / case_npz
+#     if not npz_path.exists():
+#         raise FileNotFoundError(f"Case not found: {npz_path}")
+#     d = np.load(npz_path)
+#     # nnU-Net v2 stores under key 'data' typically
+#     if "data" not in d:
+#         # Some pipelines save as unnamed array; fallback
+#         arr = list(d.values())[0]
+#     else:
+#         arr = d["data"]
+#     arr = arr.astype(np.float32)  # (C,D,H,W)
+#     # Simple per-channel z-score (your pipeline may already be normalized; if so, skip)
+#     for c in range(arr.shape[0]):
+#         mu, sd = arr[c].mean(), arr[c].std()
+#         arr[c] = (arr[c] - mu) / (sd + 1e-6)
+#     return arr
 
 
 def save_cam_npy(cam_3d: np.ndarray, out_path: Path):
@@ -226,7 +199,7 @@ def parse_args():
     ap.add_argument(
         "--model_dir",
         type=Path,
-        required=True,
+        default="nnUNet_results/Dataset502_BraTS2017_4ch/nnUNetTrainer__nnUNetResEncUNetMPlans__3d_fullres/",
         help="Path to model dir (e.g., nnUNet_results/nnUNetTrainer__nnUNetPlans__3d_fullres/501_BraTS2017_4ch)",
     )
     ap.add_argument(
