@@ -51,7 +51,13 @@ from nnunetv2.utilities.network_initialization import init_architecture_from_pla
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
-from src.util import get_logger, setup_logging, load_model_from_results
+from src.util import (
+    get_logger,
+    setup_logging,
+    load_model_from_results,
+    pick_target_layer,
+    load_volume,
+)
 
 logger = get_logger(__name__)
 
@@ -221,17 +227,25 @@ def run_cam(
 # ---------------------------
 def parse_args():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset_id", type=int, default=501)
-    ap.add_argument("--dataset_name", type=str, default="BraTS2017_4ch")
-    ap.add_argument("--cfg", type=str, default="3d_fullres")
-    ap.add_argument("--trainer", type=str, default="nnUNetTrainer")
-    ap.add_argument("--plans_id", type=str, default="nnUNetPlans")
-    ap.add_argument("--fold", type=int, default=0)
     ap.add_argument(
         "--model_dir",
         type=Path,
         required=True,
         help="Path to model dir (e.g., nnUNet_results/nnUNetTrainer__nnUNetPlans__3d_fullres/501_BraTS2017_4ch)",
+    )
+    ap.add_argument(
+        "--data_dir",
+        type=Path,
+        required=False,
+        default="nnUNet_preprocessed/Dataset501_BraTS2017_4ch/nnUNetPlans_3d_fullres",
+        help="Path to data dir (e.g., nnUNet_preprocessed/Dataset501_BraTS2017_4ch/nnUNetPlans_3d_fullres)",
+    )
+    ap.add_argument(
+        "--case",
+        type=str,
+        required=False,
+        default="Brats17_CBICA_AAG_1",
+        help="Case stem (e.g., 'Brats17_CBICA_AAG_1')",
     )
     ap.add_argument(
         "--fold",
@@ -240,34 +254,16 @@ def parse_args():
         help="Fold to load (0 for 5-fold xval; -1 for ensemble)",
     )
     ap.add_argument(
-        "--log_file",
-        type=Path,
-        default=None,
-        help="Log file path (in addition to console).",
-    )
-    ap.add_argument(
-        "--log_level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        help="Logging verbosity.",
-    )
-    ap.add_argument(
-        "--case_npz",
-        type=str,
-        required=True,
-        help="Relative path under .../imagesTr, e.g. imagesTr/CASE.npz",
-    )
-    ap.add_argument(
-        "--class_idx",
-        type=int,
-        default=1,
-        help="Target output channel (verify your mapping!)",
-    )
-    ap.add_argument(
         "--layer_regex",
         type=str,
         default=r"encoder|down|context|stem",
         help="Regex to pick encoder conv",
+    )
+    ap.add_argument(
+        "--class_idx",
+        type=int,
+        default=3,
+        help="Target output channel (verify your mapping!)",
     )
     ap.add_argument(
         "--method", type=str, default="gradcam", choices=["gradcam", "layercam"]
@@ -287,24 +283,28 @@ def main():
     args = parse_args()
     setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
     logger.info(f"Args: {args}")
-    model = load_model_from_results(
+    model, meta = load_model_from_results(
         model_dir=args.model_dir.resolve(),
         fold=args.fold,
         checkpoint_name="checkpoint_best.pth",
         trainer=None,
     )
+    data_dir = args.data_dir.resolve()
+    case_stem = args.case  # e.g., 'Brats17_CBICA_AAG_1'
 
-    # Resolve env paths
-    nnUNet_preprocessed = Path(os.environ["nnUNet_preprocessed"]).resolve()
+    vol_t, props = load_volume(data_dir, case_stem)
 
-    prep_dir = nnUNet_preprocessed / f"Dataset{args.dataset_id}_{args.dataset_name}"
-    case_npz_path = prep_dir / args.case_npz
-    if not case_npz_path.exists():
-        raise FileNotFoundError(f"Case not found: {case_npz_path}")
-    # Load case data
-    case_arr = load_case_npz(prep_dir, args.case_npz)  # (C,D,H,W)
-    C, D, H, W = case_arr.shape
-    vol_t = torch.from_numpy(case_arr)[None, ...]  # (1,C,D,H,W)
+    # # Resolve env paths
+    # nnUNet_preprocessed = Path(os.environ["nnUNet_preprocessed"]).resolve()
+
+    # prep_dir = nnUNet_preprocessed / f"Dataset{args.dataset_id}_{args.dataset_name}"
+    # case_npz_path = prep_dir / args.case_npz
+    # if not case_npz_path.exists():
+    #     raise FileNotFoundError(f"Case not found: {case_npz_path}")
+    # # Load case data
+    # case_arr = load_case_npz(prep_dir, args.case_npz)  # (C,D,H,W)
+    # C, D, H, W = case_arr.shape
+    # vol_t = torch.from_numpy(case_arr)[None, ...]  # (1,C,D,H,W)
 
     # Pick target layer
     target_layer = pick_target_layer(model, args.layer_regex)
@@ -320,36 +320,36 @@ def main():
     )  # (D,H,W) in [0,1]
 
     # Save outputs
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    base = Path(args.case_npz).stem
-    save_cam_npy(
-        cam_3d, out_dir / f"{base}_class{args.class_idx}_{args.method}_cam.npy"
-    )
+    # out_dir = Path(args.out_dir)
+    # out_dir.mkdir(parents=True, exist_ok=True)
+    # base = Path(args.case_npz).stem
+    # save_cam_npy(
+    #     cam_3d, out_dir / f"{base}_class{args.class_idx}_{args.method}_cam.npy"
+    # )
 
-    # For PNG overlays, pick a visualization channel (T1CE often at index 2; fallback to 0 if absent)
-    vis_ch = 2 if C > 2 else 0
-    img_3d = case_arr[vis_ch]  # (D,H,W)
+    # # For PNG overlays, pick a visualization channel (T1CE often at index 2; fallback to 0 if absent)
+    # vis_ch = 2 if C > 2 else 0
+    # img_3d = case_arr[vis_ch]  # (D,H,W)
 
-    z_list = [int(z) for z in args.z_slices.split(",") if z.strip().isdigit()]
-    overlay_and_save_pngs(
-        cam_3d,
-        img_3d,
-        out_dir,
-        prefix=f"{base}_c{args.class_idx}_{args.method}",
-        zs=z_list,
-        alpha=0.45,
-    )
+    # z_list = [int(z) for z in args.z_slices.split(",") if z.strip().isdigit()]
+    # overlay_and_save_pngs(
+    #     cam_3d,
+    #     img_3d,
+    #     out_dir,
+    #     prefix=f"{base}_c{args.class_idx}_{args.method}",
+    #     zs=z_list,
+    #     alpha=0.45,
+    # )
 
-    # Optional: print some available conv names to help you refine layer_regex
-    print(
-        "\n[hint] A few conv layer names that matched your regex (or try printing all):"
-    )
-    matched = [n for n, _ in list_conv_layers(model, args.layer_regex)]
-    for n in matched[:10]:
-        print("  ", n)
-    if len(matched) > 10:
-        print(f"  ... (+{len(matched)-10} more)")
+    # # Optional: print some available conv names to help you refine layer_regex
+    # print(
+    #     "\n[hint] A few conv layer names that matched your regex (or try printing all):"
+    # )
+    # matched = [n for n, _ in list_conv_layers(model, args.layer_regex)]
+    # for n in matched[:10]:
+    #     print("  ", n)
+    # if len(matched) > 10:
+    #     print(f"  ... (+{len(matched)-10} more)")
 
 
 if __name__ == "__main__":
