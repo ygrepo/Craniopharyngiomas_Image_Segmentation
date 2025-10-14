@@ -66,7 +66,7 @@ def main():
     args = parse_args()
     setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
     logger.info(f"Args: {args}")
-    model = load_model_from_results(
+    model, meta = load_model_from_results(
         model_dir=args.model_dir.resolve(),
         fold=args.fold,
         checkpoint_name="checkpoint_best.pth",
