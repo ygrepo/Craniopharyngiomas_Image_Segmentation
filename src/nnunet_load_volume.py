@@ -35,32 +35,19 @@ def load_volume(
 
     print("Keys in props:\n")
     pprint.pprint(list(props.keys()))
-
-    # infer shape and channels (supports all known v2 formats)
-    size = (
-        props.get("size_after_cropping")
-        or props.get("size_after_resampling")
-        or props.get("size_after_padding")
-        or props.get("shape_after_cropping_and_before_resampling")
-        or props.get("shape_before_cropping")
-    )
-    if size is None:
-        if "bbox_used_for_cropping" in props:
-            # fallback: derive shape from bounding box (z,y,x)
-            z0, z1, y0, y1, x0, x1 = props["bbox_used_for_cropping"]
-            size = [z1 - z0, y1 - y0, x1 - x0]
-            logger.info(f"Inferred size from bbox_used_for_cropping: {size}")
-        else:
-            raise KeyError(f"No usable size info in props keys: {list(props.keys())}")
+    size = props.get("shape_after_cropping_and_before_resampling")
 
     D, H, W = map(int, size)
-    C = len(props.get("modalities", [])) or int(props.get("num_modalities", 1))
+    # Each BraTS case has 4 modalities (FLAIR, T1, T1CE, T2)
+    C = len(props.get("modalities", [])) or 4
     logger.info(f"Volume shape inferred: C={C}, D={D}, H={H}, W={W}")
 
-    # read binary tensor
-    data = np.fromfile(b2nd, dtype=np.float32).reshape(C, D, H, W)
-    if data.ndim != 4:
-        raise ValueError(f"Unexpected data shape {data.shape} for {case_stem}")
+    data = np.fromfile(b2nd, dtype=np.float32)
+    expected = C * D * H * W
+    if data.size != expected:
+        raise ValueError(f"File size mismatch: expected {expected}, got {data.size}")
+
+    data = data.reshape(C, D, H, W)
     vol_t = torch.from_numpy(data)[None, ...]  # (1, C, D, H, W)
     return vol_t, props
 
