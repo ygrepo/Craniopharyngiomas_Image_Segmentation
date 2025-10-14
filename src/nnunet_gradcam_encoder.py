@@ -181,7 +181,8 @@ def run_cam(
     targets = [SegmentationClassAveragedTarget(class_idx, mask=mask)]
     cam_cls = GradCAM if method.lower() == "gradcam" else LayerCAM
     cam = cam_cls(
-        model=model, target_layers=[target_layer], use_cuda=device.type == "cuda"
+        model=model,
+        target_layers=[target_layer],
     )
 
     cam_map = cam(input_tensor=vol, targets=targets, eigen_smooth=False)[
