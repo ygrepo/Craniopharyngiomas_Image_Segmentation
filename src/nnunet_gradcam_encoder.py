@@ -270,6 +270,7 @@ def main():
         fold=args.fold,
         checkpoint_name="checkpoint_best.pth",
         trainer=None,
+        compile_network=False,
     )
     data_dir = args.data_dir.resolve()
     case_stem = args.case  # e.g., 'Brats17_CBICA_AAG_1'
