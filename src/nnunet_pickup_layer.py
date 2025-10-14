@@ -77,5 +77,16 @@ def main():
     logger.info("[OK] Done.")
 
 
+# # Optional: print some available conv names to help you refine layer_regex
+# print(
+#     "\n[hint] A few conv layer names that matched your regex (or try printing all):"
+# )
+# matched = [n for n, _ in list_conv_layers(model, args.layer_regex)]
+# for n in matched[:10]:
+#     print("  ", n)
+# if len(matched) > 10:
+#     print(f"  ... (+{len(matched)-10} more)")
+
+
 if __name__ == "__main__":
     main()

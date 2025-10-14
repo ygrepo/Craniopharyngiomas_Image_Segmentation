@@ -1,38 +1,12 @@
 #!/usr/bin/env python3
 """
 Grad-CAM / LayerCAM on nnU-Net v2 (BraTS2017) encoder layers.
-
-- Loads model from $nnUNet_results/Dataset{ID}_{NAME}/{TR}__{PLANS}__{CFG}/fold_{FOLD}/checkpoint_best.pth
-- Loads one preprocessed case (.npz) from $nnUNet_preprocessed/Dataset{ID}_{NAME}/imagesTr
-- Computes 3D CAM for a chosen class channel on a chosen encoder layer (regex match)
-- Saves: CAM .npy and a few PNG overlays
-
-Usage (example):
-  python nnunet_gradcam_encoder.py \
-    --dataset_id 501 \
-    --dataset_name BraTS2017_4ch \
-    --cfg 3d_fullres \
-    --trainer nnUNetTrainer \
-    --plans_id nnUNetPlans \
-    --fold 0 \
-    --case_npz imagesTr/BraTS17_001.npz \
-    --class_idx 1 \
-    --layer_regex "encoder|down|context|stem" \
-    --method gradcam \
-    --use_pred_mask 1 \
-    --out_dir cam_out
-
-Class index mapping to verify for YOUR checkpoint:
-  0 = background
-  1 = enhancing tumor (ET)
-  2 = peritumoral edema (ED)
-  3 = non-enhancing/necrotic core (NCR/NET)
 """
 
 import sys
 import argparse
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Optional
 
 import numpy as np
 import torch
