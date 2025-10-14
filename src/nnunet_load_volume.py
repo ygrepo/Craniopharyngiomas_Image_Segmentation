@@ -58,13 +58,13 @@ def parse_args():
     ap.add_argument(
         "--data_dir",
         type=Path,
-        required=True,
+        required=False,
         help="Path to data dir (e.g., nnUNet_preprocessed/Dataset501_BraTS2017_4ch/nnUNetPlans_3d_fullres)",
     )
     ap.add_argument(
         "--case",
         type=str,
-        required=True,
+        required=False,
         help="Case stem (e.g., 'Brats17_CBICA_AAG_1')",
     )
     ap.add_argument(
