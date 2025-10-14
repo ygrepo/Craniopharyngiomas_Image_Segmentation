@@ -241,6 +241,18 @@ def parse_args():
     ap.add_argument("--use_pred_mask", type=bool, default=True, help="1=True, 0=False")
     ap.add_argument("--out_dir", type=str, default="cam_out")
     ap.add_argument(
+        "--log_file",
+        type=Path,
+        default="logs/nnunet_gradcam_encoder.log",
+        help="Log file path (in addition to console).",
+    )
+    ap.add_argument(
+        "--log_level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Logging verbosity.",
+    )
+    ap.add_argument(
         "--z_slices",
         type=str,
         default="40,60,80",
