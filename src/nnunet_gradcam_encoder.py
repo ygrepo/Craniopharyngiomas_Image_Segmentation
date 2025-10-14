@@ -51,7 +51,7 @@ from nnunetv2.utilities.network_initialization import init_architecture_from_pla
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
-from src.util import get_logger, setup_logging  # noqa: E402
+from src.util import get_logger, setup_logging, load_model_from_results
 
 logger = get_logger(__name__)
 
@@ -216,49 +216,49 @@ def run_cam(
     return cam_norm
 
 
-# ---------------------------
-# nnU-Net v2 model loader
-# ---------------------------
-def load_model_from_results(
-    nnUNet_results: Path,
-    dataset_id: int,
-    dataset_name: str,
-    trainer: str,
-    plans_id: str,
-    cfg: str,
-    fold: int,
-) -> nn.Module:
-    res_dir = (
-        nnUNet_results
-        / f"Dataset{dataset_id}_{dataset_name}"
-        / f"{trainer}__{plans_id}__{cfg}"
-    )
-    ckpt_path = res_dir / f"fold_{fold}" / "checkpoint_best.pth"
-    plans_path = res_dir / "plans.json"
+# # ---------------------------
+# # nnU-Net v2 model loader
+# # ---------------------------
+# def load_model_from_results(
+#     nnUNet_results: Path,
+#     dataset_id: int,
+#     dataset_name: str,
+#     trainer: str,
+#     plans_id: str,
+#     cfg: str,
+#     fold: int,
+# ) -> nn.Module:
+#     res_dir = (
+#         nnUNet_results
+#         / f"Dataset{dataset_id}_{dataset_name}"
+#         / f"{trainer}__{plans_id}__{cfg}"
+#     )
+#     ckpt_path = res_dir / f"fold_{fold}" / "checkpoint_best.pth"
+#     plans_path = res_dir / "plans.json"
 
-    if not ckpt_path.exists():
-        raise FileNotFoundError(f"Missing checkpoint: {ckpt_path}")
-    if not plans_path.exists():
-        raise FileNotFoundError(f"Missing plans.json: {plans_path}")
+#     if not ckpt_path.exists():
+#         raise FileNotFoundError(f"Missing checkpoint: {ckpt_path}")
+#     if not plans_path.exists():
+#         raise FileNotFoundError(f"Missing plans.json: {plans_path}")
 
-    pm = PlansManager(str(plans_path))
-    # Infer io channels from plans
-    num_input_channels = pm.get_configuration(cfg)["num_input_channels"]
-    num_output_channels = pm.get_configuration(cfg)["num_output_channels"]
-    print(f"[info] I/O channels: in={num_input_channels}, out={num_output_channels}")
+#     pm = PlansManager(str(plans_path))
+#     # Infer io channels from plans
+#     num_input_channels = pm.get_configuration(cfg)["num_input_channels"]
+#     num_output_channels = pm.get_configuration(cfg)["num_output_channels"]
+#     print(f"[info] I/O channels: in={num_input_channels}, out={num_output_channels}")
 
-    model = init_architecture_from_plans(
-        pm, cfg, num_input_channels, num_output_channels
-    )
+#     model = init_architecture_from_plans(
+#         pm, cfg, num_input_channels, num_output_channels
+#     )
 
-    ckpt = torch.load(ckpt_path, map_location="cpu")
-    state = ckpt.get("network_state_dict", ckpt.get("state_dict", ckpt))
-    model.load_state_dict(state, strict=True)
+#     ckpt = torch.load(ckpt_path, map_location="cpu")
+#     state = ckpt.get("network_state_dict", ckpt.get("state_dict", ckpt))
+#     model.load_state_dict(state, strict=True)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device).eval()
-    print(f"[info] Loaded model on {device}: {ckpt_path}")
-    return model
+#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     model = model.to(device).eval()
+#     print(f"[info] Loaded model on {device}: {ckpt_path}")
+#     return model
 
 
 # ---------------------------
@@ -272,6 +272,30 @@ def parse_args():
     ap.add_argument("--trainer", type=str, default="nnUNetTrainer")
     ap.add_argument("--plans_id", type=str, default="nnUNetPlans")
     ap.add_argument("--fold", type=int, default=0)
+    ap.add_argument(
+        "--model_dir",
+        type=Path,
+        required=True,
+        help="Path to model dir (e.g., nnUNet_results/nnUNetTrainer__nnUNetPlans__3d_fullres/501_BraTS2017_4ch)",
+    )
+    ap.add_argument(
+        "--fold",
+        type=int,
+        default=0,
+        help="Fold to load (0 for 5-fold xval; -1 for ensemble)",
+    )
+    ap.add_argument(
+        "--log_file",
+        type=Path,
+        default=None,
+        help="Log file path (in addition to console).",
+    )
+    ap.add_argument(
+        "--log_level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Logging verbosity.",
+    )
     ap.add_argument(
         "--case_npz",
         type=str,
@@ -306,27 +330,22 @@ def parse_args():
 
 def main():
     args = parse_args()
+    setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
+    logger.info(f"Args: {args}")
+    model = load_model_from_results(
+        model_dir=args.model_dir.resolve(),
+        fold=args.fold,
+        checkpoint_name="checkpoint_best.pth",
+        trainer=None,
+    )
 
     # Resolve env paths
-    nnUNet_results = Path(os.environ["nnUNet_results"]).resolve()
     nnUNet_preprocessed = Path(os.environ["nnUNet_preprocessed"]).resolve()
 
     prep_dir = nnUNet_preprocessed / f"Dataset{args.dataset_id}_{args.dataset_name}"
     case_npz_path = prep_dir / args.case_npz
     if not case_npz_path.exists():
         raise FileNotFoundError(f"Case not found: {case_npz_path}")
-
-    # Load model
-    model = load_model_from_results(
-        nnUNet_results=nnUNet_results,
-        dataset_id=args.dataset_id,
-        dataset_name=args.dataset_name,
-        trainer=args.trainer,
-        plans_id=args.plans_id,
-        cfg=args.cfg,
-        fold=args.fold,
-    )
-
     # Load case data
     case_arr = load_case_npz(prep_dir, args.case_npz)  # (C,D,H,W)
     C, D, H, W = case_arr.shape
