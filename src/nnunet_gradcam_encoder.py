@@ -62,57 +62,7 @@ logger = get_logger(__name__)
 # ---------------------------
 # Targets for segmentation
 # ---------------------------
-class SegmentationClassAveragedTarget:
-    """
-    For 3D semantic segmentation:
-    - model_output: (N, C, D, H, W)
-    - class_idx: channel index to emphasize
-    - mask: optional boolean/float mask (1,D,H,W) or (N,D,H,W) to spatially restrict the objective
-    """
-
-    def __init__(self, class_idx: int, mask: Optional[torch.Tensor] = None):
-        self.class_idx = class_idx
-        self.mask = mask
-
-    def __call__(self, model_output: torch.Tensor) -> torch.Tensor:
-        assert model_output.ndim == 5
-        class_map = model_output[
-            :, self.class_idx : self.class_idx + 1, ...
-        ]  # (N,1,D,H,W)
-        if self.mask is None:
-            return class_map.mean()
-        m = self.mask
-        if m.ndim == 4:
-            m = m[:, None, ...]  # (N,1,D,H,W)
-        m = m.to(class_map).float()
-        denom = torch.clamp(m.sum(), min=1.0)
-        return (class_map * m).sum() / denom
-
-
-# ---------------------------
-# I/O helpers
-# ---------------------------
-# def load_case_npz(prep_dir: Path, case_npz: str) -> np.ndarray:
-#     """
-#     Load preprocessed nnU-Net .npz (C,D,H,W) from $nnUNet_preprocessed/.../imagesTr
-#     Returns float32 array normalized per-channel (z-score).
-#     """
-#     npz_path = prep_dir / case_npz
-#     if not npz_path.exists():
-#         raise FileNotFoundError(f"Case not found: {npz_path}")
-#     d = np.load(npz_path)
-#     # nnU-Net v2 stores under key 'data' typically
-#     if "data" not in d:
-#         # Some pipelines save as unnamed array; fallback
-#         arr = list(d.values())[0]
-#     else:
-#         arr = d["data"]
-#     arr = arr.astype(np.float32)  # (C,D,H,W)
-#     # Simple per-channel z-score (your pipeline may already be normalized; if so, skip)
-#     for c in range(arr.shape[0]):
-#         mu, sd = arr[c].mean(), arr[c].std()
-#         arr[c] = (arr[c] - mu) / (sd + 1e-6)
-#     return arr
+class SegmentationClassAveragedTarget
 
 
 def save_cam_npy(cam_3d: np.ndarray, out_path: Path):
@@ -151,7 +101,7 @@ def overlay_and_save_pngs(
         plt.tight_layout()
         plt.savefig(out_png, dpi=150)
         plt.close()
-        print(f"[ok] Saved overlay: {out_png}")
+        logger.info(f"[ok] Saved overlay: {out_png}")
 
 
 # ---------------------------
@@ -169,14 +119,16 @@ def run_cam(
     device = next(model.parameters()).device
     vol = vol.to(device)
 
+
     with torch.no_grad():
-        logits = model(vol)  # (1,C,D,H,W)
+        logits = model(vol)  # (1, C, D, H, W)
 
     mask = None
     if use_pred_mask:
         logger.info("Using predicted mask to spatially restrict the objective")
-        pred = logits.argmax(dim=1)  # (1,D,H,W)
-        mask = pred == class_idx
+        pred = logits.argmax(dim=1)              # (1, D, H, W)
+        mask = (pred == class_idx)[0]            # (D, H, W)  <-- drop batch dim
+
 
     targets = [SegmentationClassAveragedTarget(class_idx, mask=mask)]
     cam_cls = GradCAM if method.lower() == "gradcam" else LayerCAM
