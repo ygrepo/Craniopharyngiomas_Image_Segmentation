@@ -2,16 +2,19 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import SimpleITK as sitk
 import numpy as np
+import pickle
 
 from typing import Dict, Any
 import torch
 from torch.serialization import add_safe_globals
 import nnunetv2
 import json
+import torch.nn as nn
 
+import blosc2
 
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 
@@ -332,3 +335,69 @@ def load_model_from_results(
         f"| in={num_input_channels} out={num_output_channels} on {device}"
     )
     return network, meta
+
+
+def load_volume(data_dir: Path, case_stem: str):
+    """
+    Load nnU-Net v2 preprocessed case (.b2nd + .pkl) via Blosc2.
+    Returns (torch tensor (1, C, D, H, W), props)
+    """
+    b2nd = data_dir / f"{case_stem}.b2nd"
+    pkl = data_dir / f"{case_stem}.pkl"
+    if not b2nd.exists() or not pkl.exists():
+        raise FileNotFoundError(f"Missing .b2nd or .pkl for {case_stem} in {data_dir}")
+
+    # props (spacing, crop bbox, etc.), useful for later but not needed to decode b2nd
+    with open(pkl, "rb") as f:
+        props = pickle.load(f)
+
+    # --- load compressed array (shape + dtype are stored inside) ---
+    nd = blosc2.open(str(b2nd))  # Blosc2 NDArray handle
+    arr = np.asarray(nd)  # materialize to NumPy
+
+    # Normalize to (C, D, H, W)
+    if arr.ndim == 3:
+        # single-channel volume (D, H, W)
+        arr = arr[None, ...]  # -> (1, D, H, W)
+    elif arr.ndim == 4:
+        # either (C, D, H, W) or (D, H, W, C)
+        if arr.shape[0] in (1, 2, 3, 4, 5):
+            pass  # already (C, D, H, W)
+        elif arr.shape[-1] in (1, 2, 3, 4, 5):
+            arr = np.moveaxis(arr, -1, 0)  # (D,H,W,C) -> (C,D,H,W)
+        else:
+            raise ValueError(f"Ambiguous channel axis for shape {arr.shape}")
+    else:
+        raise ValueError(f"Unexpected ndim {arr.ndim} for {b2nd.name}")
+
+    arr = arr.astype(np.float32, copy=False)
+    vol_t = torch.from_numpy(arr)[None, ...]  # (1, C, D, H, W)
+    logger.info(f"Loaded {b2nd.name} with shape {vol_t.shape}")
+    return vol_t, props
+
+
+# ---------------------------
+# Layer discovery utilities
+# ---------------------------
+def list_conv_layers(
+    model: nn.Module, name_filter: Optional[str] = None
+) -> List[Tuple[str, nn.Module]]:
+    layers = []
+    for n, m in model.named_modules():
+        if isinstance(m, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+            if name_filter is None or re.search(name_filter, n):
+                layers.append((n, m))
+    return layers
+
+
+def pick_target_layer(model: nn.Module, layer_regex: str) -> nn.Module:
+    candidates = list_conv_layers(model, name_filter=layer_regex)
+    if not candidates:
+        all_convs = list_conv_layers(model)
+        raise RuntimeError(
+            f"No conv layer matched regex '{layer_regex}'. "
+            f"{len(all_convs)} convs exist; try a looser regex or print them."
+        )
+    # Heuristic: take the first match (often shallow encoder). Adjust if you want a deeper block.
+    print(f"[info] Using target layer: {candidates[0][0]}")
+    return candidates[0][1]

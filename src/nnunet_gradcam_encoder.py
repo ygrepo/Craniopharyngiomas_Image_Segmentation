@@ -216,51 +216,6 @@ def run_cam(
     return cam_norm
 
 
-# # ---------------------------
-# # nnU-Net v2 model loader
-# # ---------------------------
-# def load_model_from_results(
-#     nnUNet_results: Path,
-#     dataset_id: int,
-#     dataset_name: str,
-#     trainer: str,
-#     plans_id: str,
-#     cfg: str,
-#     fold: int,
-# ) -> nn.Module:
-#     res_dir = (
-#         nnUNet_results
-#         / f"Dataset{dataset_id}_{dataset_name}"
-#         / f"{trainer}__{plans_id}__{cfg}"
-#     )
-#     ckpt_path = res_dir / f"fold_{fold}" / "checkpoint_best.pth"
-#     plans_path = res_dir / "plans.json"
-
-#     if not ckpt_path.exists():
-#         raise FileNotFoundError(f"Missing checkpoint: {ckpt_path}")
-#     if not plans_path.exists():
-#         raise FileNotFoundError(f"Missing plans.json: {plans_path}")
-
-#     pm = PlansManager(str(plans_path))
-#     # Infer io channels from plans
-#     num_input_channels = pm.get_configuration(cfg)["num_input_channels"]
-#     num_output_channels = pm.get_configuration(cfg)["num_output_channels"]
-#     print(f"[info] I/O channels: in={num_input_channels}, out={num_output_channels}")
-
-#     model = init_architecture_from_plans(
-#         pm, cfg, num_input_channels, num_output_channels
-#     )
-
-#     ckpt = torch.load(ckpt_path, map_location="cpu")
-#     state = ckpt.get("network_state_dict", ckpt.get("state_dict", ckpt))
-#     model.load_state_dict(state, strict=True)
-
-#     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#     model = model.to(device).eval()
-#     print(f"[info] Loaded model on {device}: {ckpt_path}")
-#     return model
-
-
 # ---------------------------
 # CLI
 # ---------------------------
