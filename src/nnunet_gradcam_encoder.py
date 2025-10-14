@@ -62,7 +62,38 @@ logger = get_logger(__name__)
 # ---------------------------
 # Targets for segmentation
 # ---------------------------
-class SegmentationClassAveragedTarget
+class SegmentationClassAveragedTarget:
+    def __init__(self, class_idx: int, mask: Optional[torch.Tensor] = None):
+        """
+        mask: (D,H,W) or (1,D,H,W) boolean. Will be reshaped to match.
+        """
+        self.class_idx = int(class_idx)
+        self.mask = mask  # can be None
+
+    def __call__(self, model_output: torch.Tensor) -> torch.Tensor:
+        # Accept (C,D,H,W) or (N,C,D,H,W)
+        if model_output.ndim == 5:
+            # batch size should be 1 in our usage; take the first item
+            model_output = model_output[0]
+        elif model_output.ndim != 4:
+            raise AssertionError(f"Expected 4D or 5D output, got {model_output.ndim}D")
+
+        # model_output: (C, D, H, W)
+        logits_cdhw = model_output
+        score_map = logits_cdhw[self.class_idx]  # (D,H,W)
+
+        if self.mask is not None:
+            mask = self.mask
+            # Normalize mask to (D,H,W) on correct device/dtype
+            if mask.ndim == 4 and mask.shape[0] == 1:
+                mask = mask[0]
+            assert (
+                mask.shape == score_map.shape
+            ), f"Mask shape {mask.shape} != class map {score_map.shape}"
+            mask = mask.to(score_map.device)
+            return (score_map * mask.float()).sum() / (mask.sum().clamp_min(1.0))
+        else:
+            return score_map.mean()
 
 
 def save_cam_npy(cam_3d: np.ndarray, out_path: Path):
@@ -119,16 +150,14 @@ def run_cam(
     device = next(model.parameters()).device
     vol = vol.to(device)
 
-
     with torch.no_grad():
         logits = model(vol)  # (1, C, D, H, W)
 
     mask = None
     if use_pred_mask:
         logger.info("Using predicted mask to spatially restrict the objective")
-        pred = logits.argmax(dim=1)              # (1, D, H, W)
-        mask = (pred == class_idx)[0]            # (D, H, W)  <-- drop batch dim
-
+        pred = logits.argmax(dim=1)  # (1, D, H, W)
+        mask = (pred == class_idx)[0]  # (D, H, W)  <-- drop batch dim
 
     targets = [SegmentationClassAveragedTarget(class_idx, mask=mask)]
     cam_cls = GradCAM if method.lower() == "gradcam" else LayerCAM
