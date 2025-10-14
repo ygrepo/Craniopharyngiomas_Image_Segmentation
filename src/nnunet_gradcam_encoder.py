@@ -173,6 +173,7 @@ def run_cam(
 
     mask = None
     if use_pred_mask:
+        logger.info("Using predicted mask to spatially restrict the objective")
         pred = logits.argmax(dim=1)  # (1,D,H,W)
         mask = pred == class_idx
 
@@ -237,7 +238,7 @@ def parse_args():
     ap.add_argument(
         "--method", type=str, default="gradcam", choices=["gradcam", "layercam"]
     )
-    ap.add_argument("--use_pred_mask", type=int, default=1, help="1=True, 0=False")
+    ap.add_argument("--use_pred_mask", type=bool, default=True, help="1=True, 0=False")
     ap.add_argument("--out_dir", type=str, default="cam_out")
     ap.add_argument(
         "--z_slices",
@@ -285,7 +286,7 @@ def main():
         target_layer=target_layer,
         class_idx=args.class_idx,
         method=args.method,
-        use_pred_mask=bool(args.use_pred_mask),
+        use_pred_mask=args.use_pred_mask,
     )  # (D,H,W) in [0,1]
 
     # Save outputs
