@@ -57,18 +57,6 @@ def load_volume(
     C = len(props.get("modalities", [])) or int(props.get("num_modalities", 1))
     logger.info(f"Volume shape inferred: C={C}, D={D}, H={H}, W={W}")
 
-    # infer shape and channels
-    size = (
-        props.get("size_after_cropping")
-        or props.get("size_after_resampling")
-        or props.get("size_after_padding")
-    )
-    if size is None:
-        raise KeyError("Could not determine volume size from props.")
-    D, H, W = map(int, size)
-    C = len(props.get("modalities", [])) or int(props.get("num_modalities", 1))
-    logger.info(f"Volume shape: {C, D, H, W}")
-
     # read binary tensor
     data = np.fromfile(b2nd, dtype=np.float32).reshape(C, D, H, W)
     if data.ndim != 4:
