@@ -44,10 +44,6 @@ import matplotlib.pyplot as plt
 from pytorch_grad_cam import GradCAM, LayerCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
 
-# ---- nnU-Net v2 utilities (shipped with nnUNetv2) ----
-from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
-from nnunetv2.utilities.network_initialization import init_architecture_from_plans
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
