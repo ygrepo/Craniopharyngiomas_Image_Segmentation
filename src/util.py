@@ -402,7 +402,16 @@ def list_conv_layers(
     return layers
 
 
-def pick_target_layer(model: nn.Module, layer_regex: str) -> nn.Module:
+def list_matching_layers(model: nn.Module, layer_regex: str) -> list[str]:
+    return [n for n, _ in list_conv_layers(model, name_filter=layer_regex)]
+
+
+def pick_target_layer(
+    model: nn.Module,
+    layer_regex: str,
+    *,
+    target_idx: int = 0,
+) -> nn.Module:
     candidates = list_conv_layers(model, name_filter=layer_regex)
     if not candidates:
         all_convs = list_conv_layers(model)
@@ -410,9 +419,43 @@ def pick_target_layer(model: nn.Module, layer_regex: str) -> nn.Module:
             f"No conv layer matched regex '{layer_regex}'. "
             f"{len(all_convs)} convs exist; try a looser regex or print them."
         )
-    # Heuristic: take the first match (often shallow encoder). Adjust if you want a deeper block.
-    logger.info(f"[info] Using target layer: {candidates[0][1]}")
-    return candidates[0][1]
+
+    # Python-style negative indexing
+    if target_idx < 0:
+        target_idx += len(candidates)
+
+    if not (0 <= target_idx < len(candidates)):
+        raise IndexError(
+            f"target_idx={target_idx} out of bounds (have {len(candidates)} matches)"
+        )
+
+    name, layer = candidates[target_idx]
+    logger.info(f"[info] Using target layer: {name}")
+    return layer
+
+
+# def pick_target_layer(
+#     model: nn.Module,
+#     layer_regex: str,
+#     *,
+#     target_idx: int = -1,
+# ) -> nn.Module:
+#     candidates = list_conv_layers(model, name_filter=layer_regex)
+#     if not candidates:
+#         all_convs = list_conv_layers(model)
+#         raise RuntimeError(
+#             f"No conv layer matched regex '{layer_regex}'. "
+#             f"{len(all_convs)} convs exist; try a looser regex or print them."
+#         )
+#     # Heuristic: take the first match (often shallow encoder).
+#     if target_idx < 0:
+#         target_idx = 0
+#     if target_idx >= len(candidates):
+#         raise IndexError(
+#             f"target_idx={target_idx} is out of bounds for {len(candidates)} candidates"
+#         )
+#     logger.info(f"[info] Using target layer: {candidates[0][target_idx]}")
+#     return candidates[0][target_idx]
 
 
 def downsample_multiples(cfg) -> tuple[int, int, int]:

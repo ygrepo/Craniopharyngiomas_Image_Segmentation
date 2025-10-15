@@ -68,18 +68,15 @@ def main():
         checkpoint_name="checkpoint_best.pth",
         trainer=None,
     )
-    target_layer = pick_target_layer(model, args.layer_regex)
-    logger.info(f"Target layer: {target_layer}")
-    print(
+    logger.info(
         "\n[hint] A few conv layer names that matched your regex (or try printing all):"
     )
     matched = [n for n, _ in list_conv_layers(model, args.layer_regex)]
     for n in matched:
         logger.info(f"  {n}")
-    # for n in matched[:10]:
-    #     logger.info(f"  {n}")
-    # if len(matched) > 10:
-    #     logger.info(f"  ... (+{len(matched)-10} more)")
+    target_layer = pick_target_layer(model, args.layer_regex)
+    logger.info(f"Target layer: {target_layer}")
+
     logger.info("[OK] Done.")
 
 
