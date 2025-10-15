@@ -26,7 +26,7 @@ def parse_args():
     ap.add_argument(
         "--model_dir",
         type=Path,
-        default="nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetResEncUNetMPlans__3d_fullres/",
+        default="nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/",
         help="Path to model dir (e.g., nnUNet_results/nnUNetTrainer__nnUNetPlans__3d_fullres/501_BraTS2017_4ch)",
     )
     ap.add_argument(
