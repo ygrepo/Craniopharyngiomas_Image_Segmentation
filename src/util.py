@@ -429,6 +429,7 @@ def downsample_multiples(cfg) -> tuple[int, int, int]:
 def pad_to_multiples(x: torch.Tensor, mult: tuple[int, int, int]):
     _, _, D, H, W = x.shape
     md, mh, mw = mult
+    logger.info(f"Padding {x.shape} to multiples of {mult}")
     padD = (md - D % md) % md
     padH = (mh - H % mh) % mh
     padW = (mw - W % mw) % mw
@@ -440,6 +441,7 @@ def pad_to_multiples(x: torch.Tensor, mult: tuple[int, int, int]):
 def unpad_3d(arr: np.ndarray, pads: tuple[int, int, int]) -> np.ndarray:
     padD, padH, padW = pads
     D, H, W = arr.shape
+    logger.info(f"Unpadding {arr.shape} by {pads}")
     return arr[
         : D - padD if padD else D, : H - padH if padH else H, : W - padW if padW else W
     ]

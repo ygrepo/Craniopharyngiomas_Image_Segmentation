@@ -10,11 +10,13 @@ Loads a 3D CAM (as .npy) and a 3D image volume (as .npy), makes axial overlays f
 import sys
 import argparse
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 import numpy as np
 import matplotlib.pyplot as plt
 import blosc2
+
+from pytorch_grad_cam.utils.image import show_cam_on_image
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -55,9 +57,6 @@ def overlay_and_save_pngs(
     if cam_max > cam_min + 1e-8:
         cam_3d = (cam_3d - cam_min) / (cam_max - cam_min)
     cam_3d = np.clip(cam_3d, 0.0, 1.0)
-
-    # Local import to avoid heavy dependency at module import time
-    from pytorch_grad_cam.utils.image import show_cam_on_image
 
     for z in zs:
         if not (0 <= z < cam_3d.shape[0]):

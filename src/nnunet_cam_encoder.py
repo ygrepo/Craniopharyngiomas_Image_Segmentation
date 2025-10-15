@@ -49,6 +49,7 @@ class SegmentationClassAveragedTarget:
         # Accept (C,D,H,W) or (N,C,D,H,W)
         if model_output.ndim == 5:
             # batch size should be 1 in our usage; take the first item
+            logger.info("Using batch size 1")
             model_output = model_output[0]
         elif model_output.ndim != 4:
             raise AssertionError(f"Expected 4D or 5D output, got {model_output.ndim}D")
@@ -58,6 +59,7 @@ class SegmentationClassAveragedTarget:
         score_map = logits_cdhw[self.class_idx]  # (D,H,W)
 
         if self.mask is not None:
+            logger.info("Using mask to spatially restrict the objective")
             mask = self.mask
             # Normalize mask to (D,H,W) on correct device/dtype
             if mask.ndim == 4 and mask.shape[0] == 1:
@@ -68,6 +70,7 @@ class SegmentationClassAveragedTarget:
             mask = mask.to(score_map.device)
             return (score_map * mask.float()).sum() / (mask.sum().clamp_min(1.0))
         else:
+            logger.info("Using mean activation as objective")
             return score_map.mean()
 
 
@@ -195,7 +198,7 @@ def parse_args():
         help="Target output channel (verify your mapping!)",
     )
     ap.add_argument(
-        "--method", type=str, default="gradcam", choices=["gradcam", "layercam"]
+        "--method", type=str, default="layercam", choices=["gradcam", "layercam"]
     )
     ap.add_argument("--use_pred_mask", type=bool, default=True, help="1=True, 0=False")
     ap.add_argument(

@@ -2,11 +2,6 @@
 import argparse
 import sys
 from pathlib import Path
-import pickle
-import pprint
-import numpy as np
-import torch
-import blosc2
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +11,7 @@ from src.util import (
     setup_logging,
     load_model_from_results,
     pick_target_layer,
+    list_conv_layers,
 )
 
 logger = get_logger(__name__)
@@ -74,18 +70,15 @@ def main():
     )
     target_layer = pick_target_layer(model, args.layer_regex)
     logger.info(f"Target layer: {target_layer}")
+    print(
+        "\n[hint] A few conv layer names that matched your regex (or try printing all):"
+    )
+    matched = [n for n, _ in list_conv_layers(model, args.layer_regex)]
+    for n in matched[:10]:
+        logger.info(f"  {n}")
+    if len(matched) > 10:
+        logger.info(f"  ... (+{len(matched)-10} more)")
     logger.info("[OK] Done.")
-
-
-# # Optional: print some available conv names to help you refine layer_regex
-# print(
-#     "\n[hint] A few conv layer names that matched your regex (or try printing all):"
-# )
-# matched = [n for n, _ in list_conv_layers(model, args.layer_regex)]
-# for n in matched[:10]:
-#     print("  ", n)
-# if len(matched) > 10:
-#     print(f"  ... (+{len(matched)-10} more)")
 
 
 if __name__ == "__main__":
