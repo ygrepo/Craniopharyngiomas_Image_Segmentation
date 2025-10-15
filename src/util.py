@@ -16,6 +16,7 @@ import torch.nn as nn
 
 import re
 import blosc2
+import scipy.ndimage as ndi
 
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 
@@ -401,6 +402,7 @@ def list_conv_layers(
                 layers.append((n, m))
     return layers
 
+
 def pick_target_layer(
     model: nn.Module,
     layer_regex: str,
@@ -427,30 +429,6 @@ def pick_target_layer(
     name, layer = candidates[target_idx]
     logger.info(f"[info] Using target layer: {name}")
     return layer
-
-
-# def pick_target_layer(
-#     model: nn.Module,
-#     layer_regex: str,
-#     *,
-#     target_idx: int = -1,
-# ) -> nn.Module:
-#     candidates = list_conv_layers(model, name_filter=layer_regex)
-#     if not candidates:
-#         all_convs = list_conv_layers(model)
-#         raise RuntimeError(
-#             f"No conv layer matched regex '{layer_regex}'. "
-#             f"{len(all_convs)} convs exist; try a looser regex or print them."
-#         )
-#     # Heuristic: take the first match (often shallow encoder).
-#     if target_idx < 0:
-#         target_idx = 0
-#     if target_idx >= len(candidates):
-#         raise IndexError(
-#             f"target_idx={target_idx} is out of bounds for {len(candidates)} candidates"
-#         )
-#     logger.info(f"[info] Using target layer: {candidates[0][target_idx]}")
-#     return candidates[0][target_idx]
 
 
 def downsample_multiples(cfg) -> tuple[int, int, int]:
@@ -483,3 +461,13 @@ def unpad_3d(arr: np.ndarray, pads: tuple[int, int, int]) -> np.ndarray:
     return arr[
         : D - padD if padD else D, : H - padH if padH else H, : W - padW if padW else W
     ]
+
+
+def largest_cc_bool(mask_3d: torch.Tensor) -> torch.Tensor:
+    lab, n = ndi.label(mask_3d.cpu().numpy().astype(np.uint8))
+    if n == 0:
+        return mask_3d
+    sizes = ndi.sum(mask_3d.cpu().numpy(), lab, index=range(1, n + 1))
+    keep = 1 + int(np.argmax(sizes))
+    out = lab == keep
+    return torch.from_numpy(out).to(mask_3d.device)

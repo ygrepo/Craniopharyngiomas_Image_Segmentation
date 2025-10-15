@@ -29,6 +29,7 @@ from src.util import (
     pad_to_multiples,
     unpad_3d,
     save_npy,
+    largest_cc_bool,
 )
 
 logger = get_logger(__name__)
@@ -120,7 +121,7 @@ def run_cam(
 ) -> np.ndarray:
     model.eval()
     device = next(model.parameters()).device
-    vol = vol.to(device)
+    vol = vol.to(device).contiguous()
 
     with torch.no_grad():
         logits = model(vol)  # (1, C, D, H, W)
@@ -132,6 +133,7 @@ def run_cam(
         )
         pred = logits.argmax(dim=1)  # (1, D, H, W)
         mask = (pred == class_idx)[0]  # (D, H, W)  <-- drop batch dim
+        mask = largest_cc_bool(mask)
 
     targets = [SegmentationClassAveragedTarget(class_idx, mask=mask)]
     cam_cls = GradCAM if method.lower() == "gradcam" else LayerCAM
@@ -262,7 +264,7 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     save_npy(
         cam_3d,
-        out_dir / f"{case_stem}_class{args.class_idx}_{args.method}_layercam.npy",
+        out_dir / f"{case_stem}_class{args.class_idx}_{args.method}.npy",
     )
 
 
