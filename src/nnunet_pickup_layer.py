@@ -74,7 +74,7 @@ def main():
     matched = [n for n, _ in list_conv_layers(model, args.layer_regex)]
     for n in matched:
         logger.info(f"  {n}")
-    target_layer = pick_target_layer(model, args.layer_regex)
+    target_layer = pick_target_layer(model, args.layer_regex, target_idx=-1)
     logger.info(f"Target layer: {target_layer}")
 
     logger.info("[OK] Done.")
