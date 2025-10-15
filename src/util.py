@@ -470,4 +470,5 @@ def largest_cc_bool(mask_3d: torch.Tensor) -> torch.Tensor:
     sizes = ndi.sum(mask_3d.cpu().numpy(), lab, index=range(1, n + 1))
     keep = 1 + int(np.argmax(sizes))
     out = lab == keep
+    logger.info(f"Kept CC {keep} out of {n} (size={sizes[keep - 1]})")
     return torch.from_numpy(out).to(mask_3d.device)

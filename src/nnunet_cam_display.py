@@ -145,7 +145,7 @@ def parse_args():
         "--input_fn",
         type=Path,
         required=False,
-        default=Path("Brats17_CBICA_AAG_1_class3_layercam_layercam.npy"),
+        default=Path("Brats17_CBICA_AAG_1_class3_layercam.npy"),
         #        default=Path("Brats17_CBICA_AAG_1_class3_gradcam_cam.npy"),
         help="File name of CAM .npy inside --input_dir (alternative to --cam_path).",
     )
