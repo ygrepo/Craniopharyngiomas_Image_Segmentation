@@ -127,7 +127,9 @@ def run_cam(
 
     mask = None
     if use_pred_mask:
-        logger.info("Using predicted mask to spatially restrict the objective")
+        logger.info(
+            "Using ground truth or predicted mask to spatially restrict the objective"
+        )
         pred = logits.argmax(dim=1)  # (1, D, H, W)
         mask = (pred == class_idx)[0]  # (D, H, W)  <-- drop batch dim
 
