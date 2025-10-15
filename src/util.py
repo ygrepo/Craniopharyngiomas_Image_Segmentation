@@ -472,3 +472,33 @@ def largest_cc_bool(mask_3d: torch.Tensor) -> torch.Tensor:
     out = lab == keep
     logger.info(f"Kept CC {keep} out of {n} (size={sizes[keep - 1]})")
     return torch.from_numpy(out).to(mask_3d.device)
+
+
+def resolve_class_idx(meta, class_name, fallback_idx):
+    lm = meta["label_manager"]
+    dsj = meta["dataset_json"]
+    if hasattr(lm, "foreground_labels") and lm.foreground_labels:  # label-based
+        if class_name:
+            # dataset_json['labels'] maps name->id, you may also invert
+            inv = {v: k for k, v in dsj["labels"].items()}
+            key = class_name.lower()
+            # simple aliases
+            alias = {
+                "necrotic": "necrotic/non-enhancing",
+                "enhancing": "enhancing",
+                "edema": "edema",
+            }
+            key = alias.get(key, key)
+            if key in inv:
+                return int(inv[key])
+        return int(fallback_idx)
+    else:  # region-based
+        regions = [r.name.lower() for r in lm.foreground_regions]
+        if class_name:
+            key = class_name.lower()
+            alias = {"wt": "whole tumor", "tc": "tumor core", "et": "enhancing tumor"}
+            key = alias.get(key, key)
+            for i, n in enumerate(regions):
+                if key in n:
+                    return i
+        return min(fallback_idx, len(regions) - 1)

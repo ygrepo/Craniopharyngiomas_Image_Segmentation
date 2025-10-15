@@ -38,41 +38,69 @@ logger = get_logger(__name__)
 # ---------------------------
 # Targets for segmentation
 # ---------------------------
+# class SegmentationClassAveragedTarget:
+#     def __init__(self, class_idx: int, mask: Optional[torch.Tensor] = None):
+#         """
+#         mask: (D,H,W) or (1,D,H,W) boolean. Will be reshaped to match.
+#         """
+#         self.class_idx = int(class_idx)
+#         self.mask = mask  # can be None
+
+#     def __call__(self, model_output: torch.Tensor) -> torch.Tensor:
+#         # Accept (C,D,H,W) or (N,C,D,H,W)
+#         if model_output.ndim == 5:
+#             # batch size should be 1 in our usage; take the first item
+#             logger.info("Using batch size 1")
+#             model_output = model_output[0]
+#         elif model_output.ndim != 4:
+#             raise AssertionError(f"Expected 4D or 5D output, got {model_output.ndim}D")
+
+#         # model_output: (C, D, H, W)
+#         logits_cdhw = model_output
+#         score_map = logits_cdhw[self.class_idx]  # (D,H,W)
+
+#         if self.mask is not None:
+#             logger.info("Using mask to spatially restrict the objective")
+#             mask = self.mask
+#             # Normalize mask to (D,H,W) on correct device/dtype
+#             if mask.ndim == 4 and mask.shape[0] == 1:
+#                 mask = mask[0]
+#             assert (
+#                 mask.shape == score_map.shape
+#             ), f"Mask shape {mask.shape} != class map {score_map.shape}"
+#             mask = mask.to(score_map.device)
+#             return (score_map * mask.float()).sum() / (mask.sum().clamp_min(1.0))
+#         else:
+#             logger.info("Using mean activation as objective")
+#             return score_map.mean()
+
+
 class SegmentationClassAveragedTarget:
-    def __init__(self, class_idx: int, mask: Optional[torch.Tensor] = None):
-        """
-        mask: (D,H,W) or (1,D,H,W) boolean. Will be reshaped to match.
-        """
+    def __init__(
+        self, class_idx: int, mask: Optional[torch.Tensor] = None, lam_bg: float = 0.25
+    ):
         self.class_idx = int(class_idx)
-        self.mask = mask  # can be None
+        self.mask = mask
+        self.lam_bg = lam_bg
 
     def __call__(self, model_output: torch.Tensor) -> torch.Tensor:
-        # Accept (C,D,H,W) or (N,C,D,H,W)
         if model_output.ndim == 5:
-            # batch size should be 1 in our usage; take the first item
-            logger.info("Using batch size 1")
             model_output = model_output[0]
-        elif model_output.ndim != 4:
-            raise AssertionError(f"Expected 4D or 5D output, got {model_output.ndim}D")
-
-        # model_output: (C, D, H, W)
-        logits_cdhw = model_output
-        score_map = logits_cdhw[self.class_idx]  # (D,H,W)
-
-        if self.mask is not None:
-            logger.info("Using mask to spatially restrict the objective")
-            mask = self.mask
-            # Normalize mask to (D,H,W) on correct device/dtype
-            if mask.ndim == 4 and mask.shape[0] == 1:
-                mask = mask[0]
-            assert (
-                mask.shape == score_map.shape
-            ), f"Mask shape {mask.shape} != class map {score_map.shape}"
-            mask = mask.to(score_map.device)
-            return (score_map * mask.float()).sum() / (mask.sum().clamp_min(1.0))
-        else:
-            logger.info("Using mean activation as objective")
-            return score_map.mean()
+        if model_output.ndim != 4:
+            raise AssertionError(f"Expected 4D/5D, got {model_output.ndim}D")
+        s = model_output[self.class_idx]  # (D,H,W)
+        if self.mask is None:
+            return s.mean()
+        m = self.mask
+        if m.ndim == 4 and m.shape[0] == 1:
+            m = m[0]
+        if m.shape != s.shape:
+            raise AssertionError(f"Mask {m.shape} != score {s.shape}")
+        m = m.to(s.device).float()
+        inv = 1.0 - m
+        fg = (s * m).sum() / m.sum().clamp_min(1)
+        bg = (s * inv).sum() / inv.sum().clamp_min(1)
+        return fg - self.lam_bg * bg
 
 
 def overlay_and_save_pngs(
@@ -135,7 +163,7 @@ def run_cam(
         mask = (pred == class_idx)[0]  # (D, H, W)  <-- drop batch dim
         mask = largest_cc_bool(mask)
 
-    targets = [SegmentationClassAveragedTarget(class_idx, mask=mask)]
+    targets = [SegmentationClassAveragedTarget(class_idx, mask=mask, lam_bg=0.25)]
     cam_cls = GradCAM if method.lower() == "gradcam" else LayerCAM
     cam = cam_cls(
         model=model,
