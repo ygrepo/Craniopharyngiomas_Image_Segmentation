@@ -34,6 +34,7 @@ def overlay_and_save_pngs(
     img_3d: np.ndarray,
     out_dir: Path,
     prefix: str,
+    suffix: str,
     zs: List[int],
     alpha: float = 0.45,
 ) -> None:
@@ -70,7 +71,7 @@ def overlay_and_save_pngs(
 
         overlay = show_cam_on_image(rgb, sl_cam, use_rgb=True, image_weight=(1 - alpha))
 
-        out_png = out_dir / f"{prefix}_z{z:03d}.png"
+        out_png = out_dir / f"{prefix}_{suffix}_z{z:03d}.png"
         plt.figure(figsize=(6, 6))
         plt.imshow(overlay)
         plt.axis("off")
@@ -144,7 +145,8 @@ def parse_args():
         "--input_fn",
         type=Path,
         required=False,
-        default=Path("Brats17_CBICA_AAG_1_class3_gradcam_cam.npy"),
+        default=Path("Brats17_CBICA_AAG_1_class3_layercam_cam.npy"),
+        #        default=Path("Brats17_CBICA_AAG_1_class3_gradcam_cam.npy"),
         help="File name of CAM .npy inside --input_dir (alternative to --cam_path).",
     )
     ap.add_argument(
@@ -230,6 +232,7 @@ def main():
         img_3d=img_3d,
         out_dir=output_dir,
         prefix=prefix,
+        suffix="layercam",
         zs=z_list,
         alpha=float(args.alpha),
     )
