@@ -238,7 +238,7 @@ def main():
 
     vol_t, props = load_volume(data_dir, case_stem)
     # Pick target layer
-    target_layer = pick_target_layer(model, args.layer_regex)
+    target_layer = pick_target_layer(model, args.layer_regex, target_idx=-1)
 
     cfg = meta["configuration_manager"]
     mult = downsample_multiples(cfg)  # e.g., (32, 32, 32)
@@ -259,32 +259,9 @@ def main():
     out_dir = Path(args.output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     save_npy(
-        cam_3d, out_dir / f"{case_stem}_class{args.class_idx}_{args.method}_cam.npy"
+        cam_3d,
+        out_dir / f"{case_stem}_class{args.class_idx}_{args.method}_layercam.npy",
     )
-
-    # # For PNG overlays, pick a visualization channel (T1CE often at index 2; fallback to 0 if absent)
-    # vis_ch = 2 if C > 2 else 0
-    # img_3d = case_arr[vis_ch]  # (D,H,W)
-
-    # z_list = [int(z) for z in args.z_slices.split(",") if z.strip().isdigit()]
-    # overlay_and_save_pngs(
-    #     cam_3d,
-    #     img_3d,
-    #     out_dir,
-    #     prefix=f"{base}_c{args.class_idx}_{args.method}",
-    #     zs=z_list,
-    #     alpha=0.45,
-    # )
-
-    # # Optional: print some available conv names to help you refine layer_regex
-    # print(
-    #     "\n[hint] A few conv layer names that matched your regex (or try printing all):"
-    # )
-    # matched = [n for n, _ in list_conv_layers(model, args.layer_regex)]
-    # for n in matched[:10]:
-    #     print("  ", n)
-    # if len(matched) > 10:
-    #     print(f"  ... (+{len(matched)-10} more)")
 
 
 if __name__ == "__main__":

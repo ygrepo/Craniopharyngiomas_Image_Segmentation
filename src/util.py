@@ -401,11 +401,6 @@ def list_conv_layers(
                 layers.append((n, m))
     return layers
 
-
-def list_matching_layers(model: nn.Module, layer_regex: str) -> list[str]:
-    return [n for n, _ in list_conv_layers(model, name_filter=layer_regex)]
-
-
 def pick_target_layer(
     model: nn.Module,
     layer_regex: str,
