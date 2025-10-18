@@ -334,7 +334,6 @@ def main():
         if args.ref_nifti is not None:
             ref_img = load_nii(str(args.ref_nifti))
             target = (ref_img, ref_img.affine)
-
             nii_base = resample_from_to(nii_base, target, order=1)
             nii_heat = resample_from_to(nii_heat, target, order=1)
             if nii_mask is not None:
