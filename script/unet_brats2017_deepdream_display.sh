@@ -53,6 +53,7 @@ $PYTHON "$MAIN" \
     --alpha 0.45 \
     --mask_pct 97.5 \
     --save_slicer 1 \
+    --ref_nifti nnUNet_raw/Dataset501_BraTS2017_4ch/imagesTr/Brats17_CBICA_AAG_1_0002.nii.gz \
     --log_file "$LOG_DIR/nnunet_deepdream_display.log" \
     --log_level "$LOG_LEVEL"
 

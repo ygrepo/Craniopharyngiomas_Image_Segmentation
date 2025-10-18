@@ -25,7 +25,6 @@ from typing import List, Optional
 import matplotlib.cm as cm
 
 import numpy as np
-import blosc2
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -44,6 +43,7 @@ from src.util import (
     normalize_heat_abs,
     coerce_same_shape,
     load_volume_npy_b2nd,
+    reorient_like,
 )
 from src.plot_util import save_image
 
@@ -234,6 +234,18 @@ def parse_args():
         default=97.5,
         help="Percentile on |delta| to make a binary mask (set e.g. 95–99). Use -1 to skip.",
     )
+    ap.add_argument(
+        "--ref_nifti",
+        type=Path,
+        default=None,
+        help="Reference NIfTI to match orientation (e.g., the initial scanner-space image).",
+    )
+    ap.add_argument(
+        "--target_orient",
+        type=str,
+        default=None,
+        help="Fallback 3-letter orientation code to save in (e.g., RAS or LPS) if --ref_nifti not set.",
+    )
 
     ap.add_argument("--log_file", type=Path, default=None, help="Optional log file.")
     ap.add_argument("--log_level", type=str, default="INFO")
@@ -291,11 +303,6 @@ def main():
         spacing, origin = get_spacing_origin_from_props(props)
         affine = affine_from_spacing_origin(spacing, origin)
 
-        # 2) Recompute the same base/heat/mask we used for overlays
-        #    (reuse internal helpers)
-        # img_arr = load_volume_npy_b2nd(args.image_path)
-        # base_all, vis_ch = pick_vis_channel(img_arr)  # (D,H,W), raw intensities
-
         # Align shapes if needed
         delta_3d, base_all = coerce_same_shape(delta_3d, base_all)
 
@@ -310,25 +317,42 @@ def main():
         out_dir = args.output_dir.resolve()
         prefix = (args.delta_path or args.dream_path or Path("deepdream")).stem
 
+        # Optionally load reference NIfTI to match its orientation
+        ref_img = nib.load(str(args.ref_nifti)) if args.ref_nifti is not None else None
+
+        # Ensure base/delta-derived outputs share the same orientation as the reference
+        base_save, aff_save = reorient_like(
+            base_all, affine, ref_img, args.target_orient
+        )
+
         # Base image (raw intensities of the chosen channel)
         save_nifti_3d(
-            base_all, affine, out_dir / f"{prefix}_image.nii.gz", dtype=np.float32
+            base_save, aff_save, out_dir / f"{prefix}_image.nii.gz", dtype=np.float32
+        )
+
+        heat_save, aff_heat = reorient_like(
+            heat_3d, affine, ref_img, args.target_orient
         )
 
         # DeepDream heat (0..1)
         save_nifti_3d(
-            heat_3d,
-            affine,
+            heat_save,
+            aff_heat,
             out_dir / f"{prefix}_deepdream_heat_abs.nii.gz",
             dtype=np.float32,
         )
 
         # Binary mask (optional)
         if mask_3d is not None:
+            mask_save, aff_mask = reorient_like(
+                mask_3d.astype(np.uint8), affine, ref_img, args.target_orient
+            )
+            aff_mask = aff_save if mask_save.shape == base_save.shape else aff_mask
+
             pct_int = int(round(float(args.mask_pct)))
             save_nifti_3d(
-                mask_3d,
-                affine,
+                mask_save,
+                aff_mask,
                 out_dir / f"{prefix}_deepdream_mask_p{pct_int}.nii.gz",
                 dtype=np.uint8,
             )
@@ -338,8 +362,15 @@ def main():
             dream_3d, _ = coerce_same_shape(
                 pick_channel_like(dream_arr, vis_ch), base_all
             )
+            dream_save, aff_dream = reorient_like(
+                dream_3d, affine, ref_img, args.target_orient
+            )
+            aff_dream = aff_save if dream_save.shape == base_save.shape else aff_dream
             save_nifti_3d(
-                dream_3d, affine, out_dir / f"{prefix}_dream.nii.gz", dtype=np.float32
+                dream_save,
+                aff_dream,
+                out_dir / f"{prefix}_dream.nii.gz",
+                dtype=np.float32,
             )
 
         logger.info("[ok] Slicer-ready NIfTI exports written to %s", out_dir)

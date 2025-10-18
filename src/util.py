@@ -7,6 +7,13 @@ import SimpleITK as sitk
 import numpy as np
 import pickle
 import nibabel as nib
+from nibabel.orientations import (
+    io_orientation,
+    axcodes2ornt,
+    ornt_transform,
+    apply_orientation,
+    inv_ornt_aff,
+)
 
 from typing import Dict, Any
 import torch
@@ -275,6 +282,47 @@ def coerce_same_shape(a: np.ndarray, b: np.ndarray) -> Tuple[np.ndarray, np.ndar
             f"Shape mismatch {a.shape} vs {b.shape}; cropping both to ({D},{H},{W})"
         )
     return a[:D, :H, :W], b[:D, :H, :W]
+
+
+def reorient_like(
+    data_3d: np.ndarray,
+    affine: np.ndarray,
+    ref_img: Optional[nib.spatialimages.SpatialImage] = None,
+    target_orient: Optional[str] = None,  # e.g., "RAS" or "LPS"
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Reorient (D,H,W) and affine to match either a reference NIfTI's orientation
+    or an explicit target orientation string.
+
+    Returns: (data_reoriented, affine_reoriented)
+    """
+    # Current orientation from our affine
+    cur_ornt = io_orientation(affine)
+
+    if ref_img is not None:
+        tgt_ornt = io_orientation(ref_img.affine)
+    elif target_orient:
+        if len(target_orient) != 3 or any(
+            c not in "RLPAIS" for c in target_orient.upper()
+        ):
+            raise ValueError(
+                f"target_orient must be a 3-letter code like 'RAS' or 'LPS', got {target_orient}"
+            )
+        tgt_ornt = axcodes2ornt(tuple(target_orient.upper()))
+    else:
+        # No target → keep as-is
+        return data_3d, affine
+
+    # If already matching, skip
+    if np.allclose(cur_ornt, tgt_ornt):
+        return data_3d, affine
+
+    # Build orientation transform and apply to data
+    xform = ornt_transform(cur_ornt, tgt_ornt)
+    data_re = apply_orientation(data_3d, xform)
+    # Update affine so that new voxel indices map correctly to the same world space
+    aff_re = affine @ inv_ornt_aff(xform, data_3d.shape)
+    return data_re, aff_re
 
 
 def find_case_files(case_dir: Path, modalities: List[str]) -> List[Path]:
