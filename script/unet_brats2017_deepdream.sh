@@ -48,6 +48,9 @@ $PYTHON "$MAIN" \
     --model_dir "nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/" \
     --data_dir "nnUNet_preprocessed/Dataset501_BraTS2017_4ch/nnUNetPlans_3d_fullres" \
     --output_dir "output/deepdream" \
+    --use_octaves 0 \
+    --num_octaves 4 \
+    --octave_scale 1.4 \
     --case "Brats17_CBICA_AAG_1" \
     --fold 0 \
     --objective "logit" \
@@ -56,6 +59,7 @@ $PYTHON "$MAIN" \
     --channel_idx 16 \
     --use_pred_mask 1 \
     --steps 250 \
+    --steps_per_octave 120 \
     --lr 0.07 \
     --w_tv 1e-3 \
     --w_hf 1e-5 \
