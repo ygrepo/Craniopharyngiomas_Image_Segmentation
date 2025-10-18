@@ -296,6 +296,7 @@ def reorient_like(
 
     Returns: (data_reoriented, affine_reoriented)
     """
+    logger.info(f"Reorienting {data_3d.shape} to match {ref_img} or {target_orient}")
     # Current orientation from our affine
     cur_ornt = io_orientation(affine)
 
@@ -315,6 +316,7 @@ def reorient_like(
 
     # If already matching, skip
     if np.allclose(cur_ornt, tgt_ornt):
+        logger.info(f"Already matching {cur_ornt} == {tgt_ornt}")
         return data_3d, affine
 
     # Build orientation transform and apply to data
