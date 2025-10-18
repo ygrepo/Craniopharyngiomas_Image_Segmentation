@@ -248,12 +248,20 @@ def main():
 
     # Load base MRI
     img_arr = load_volume_npy_b2nd(args.image_path)
+    base_all, vis_ch = pick_vis_channel(img_arr)  # (D,H,W), raw intensities
 
     # Load dream/delta
     fn = args.dream_path / f"{args.case}_{args.objective}_dream.npy"
     dream_arr = load_npy(fn) if args.dream_path is not None else None
     fn = args.delta_path / f"{args.case}_{args.objective}_delta.npy"
     delta_arr = load_npy(fn) if args.delta_path is not None else None
+    if delta_arr is not None:
+        delta_3d = pick_channel_like(delta_arr, vis_ch)
+    elif dream_arr is not None:
+        dream_3d = pick_channel_like(dream_arr, vis_ch)
+        delta_3d = dream_3d - base_all
+    else:
+        raise ValueError("Provide --delta_path or --dream_path to export NIfTI.")
 
     # Squeeze possible leading batch dim in dream/delta handled in _pick_same_channel
     z_list = [int(z) for z in args.z_slices.split(",") if z.strip().isdigit()]
@@ -285,18 +293,8 @@ def main():
 
         # 2) Recompute the same base/heat/mask we used for overlays
         #    (reuse internal helpers)
-        img_arr = load_volume_npy_b2nd(args.image_path)
-        base_all, vis_ch = pick_vis_channel(img_arr)  # (D,H,W), raw intensities
-
-        dream_arr = load_npy(args.dream_path) if args.dream_path is not None else None
-        delta_arr = load_npy(args.delta_path) if args.delta_path is not None else None
-        if delta_arr is not None:
-            delta_3d = pick_channel_like(delta_arr, vis_ch)
-        elif dream_arr is not None:
-            dream_3d = pick_channel_like(dream_arr, vis_ch)
-            delta_3d = dream_3d - base_all
-        else:
-            raise ValueError("Provide --delta_path or --dream_path to export NIfTI.")
+        # img_arr = load_volume_npy_b2nd(args.image_path)
+        # base_all, vis_ch = pick_vis_channel(img_arr)  # (D,H,W), raw intensities
 
         # Align shapes if needed
         delta_3d, base_all = coerce_same_shape(delta_3d, base_all)
