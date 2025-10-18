@@ -332,8 +332,21 @@ def main():
 
         # --- reorient/resample all outputs to match ref_nifti ---
         if args.ref_nifti is not None:
-            ref_img = load_nii(str(args.ref_nifti))
-            target = (ref_img, ref_img.affine)
+            # ref_img = load_nii(str(args.ref_nifti))
+            # target = (ref_img.shape, ref_img.affine)
+            # nii_base = resample_from_to(nii_base, target, order=1)
+            # nii_heat = resample_from_to(nii_heat, target, order=1)
+            # if nii_mask is not None:
+            #     nii_mask = resample_from_to(nii_mask, target, order=0)
+            # if nii_dream is not None:
+            #     nii_dream = resample_from_to(nii_dream, target, order=1)
+
+            ref_img = nib.load(str(args.ref_nifti))
+            target = (
+                ref_img.shape,
+                ref_img.affine,
+            )  # <-- NOT (ref_img, ref_img.affine)
+
             nii_base = resample_from_to(nii_base, target, order=1)
             nii_heat = resample_from_to(nii_heat, target, order=1)
             if nii_mask is not None:
