@@ -26,6 +26,9 @@ import matplotlib.cm as cm
 
 import numpy as np
 import nibabel as nib
+from nibabel import load as load_nii
+from nibabel import Nifti1Image
+from nibabel.processing import resample_from_to
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -298,81 +301,134 @@ def main():
         signed_pct=float(args.signed_pct),
     )
     logger.info("[ok] All overlays written.")
+
     if args.save_slicer:
-        # 1) Load props and build affine
         props = load_props_from_pkl(args.props_path)
         spacing, origin = get_spacing_origin_from_props(props)
         affine = affine_from_spacing_origin(spacing, origin)
 
-        # Align shapes if needed
+        # Align shapes
         delta_3d, base_all = coerce_same_shape(delta_3d, base_all)
-
-        # 3) Build heat + optional mask
         heat_3d, mask_3d = build_heat_and_mask(
             delta_3d,
             abs_pct=float(args.abs_pct),
             bin_pct=(None if float(args.mask_pct) < 0 else float(args.mask_pct)),
         )
 
-        # 4) Write NIfTI files (float32 for image/heat; uint8 for mask)
-        out_dir = args.output_dir.resolve()
-        prefix = (args.delta_path or args.dream_path or Path("deepdream")).stem
-
-        # Optionally load reference NIfTI to match its orientation
-        ref_img = nib.load(str(args.ref_nifti)) if args.ref_nifti is not None else None
-
-        # Ensure base/delta-derived outputs share the same orientation as the reference
-        base_save, aff_save = reorient_like(
-            base_all, affine, ref_img, args.target_orient
+        # Build nifti objects in nnUNet (RAS) space
+        nii_base = Nifti1Image(base_all.astype(np.float32), affine)
+        nii_heat = Nifti1Image(heat_3d.astype(np.float32), affine)
+        nii_mask = (
+            Nifti1Image(mask_3d.astype(np.uint8), affine)
+            if mask_3d is not None
+            else None
         )
-
-        # Base image (raw intensities of the chosen channel)
-        save_nifti_3d(
-            base_save, aff_save, out_dir / f"{prefix}_image.nii.gz", dtype=np.float32
-        )
-
-        heat_save, aff_heat = reorient_like(
-            heat_3d, affine, ref_img, args.target_orient
-        )
-
-        # DeepDream heat (0..1)
-        save_nifti_3d(
-            heat_save,
-            aff_heat,
-            out_dir / f"{prefix}_deepdream_heat_abs.nii.gz",
-            dtype=np.float32,
-        )
-
-        # Binary mask (optional)
-        if mask_3d is not None:
-            mask_save, aff_mask = reorient_like(
-                mask_3d.astype(np.uint8), affine, ref_img, args.target_orient
-            )
-            aff_mask = aff_save if mask_save.shape == base_save.shape else aff_mask
-
-            pct_int = int(round(float(args.mask_pct)))
-            save_nifti_3d(
-                mask_save,
-                aff_mask,
-                out_dir / f"{prefix}_deepdream_mask_p{pct_int}.nii.gz",
-                dtype=np.uint8,
-            )
-
-        # Dream volume (optional, if --dream_path)
+        nii_dream = None
         if dream_arr is not None:
             dream_3d, _ = coerce_same_shape(
                 pick_channel_like(dream_arr, vis_ch), base_all
             )
-            dream_save, aff_dream = reorient_like(
-                dream_3d, affine, ref_img, args.target_orient
-            )
-            aff_dream = aff_save if dream_save.shape == base_save.shape else aff_dream
-            save_nifti_3d(
-                dream_save,
-                aff_dream,
-                out_dir / f"{prefix}_dream.nii.gz",
-                dtype=np.float32,
-            )
+            nii_dream = Nifti1Image(dream_3d.astype(np.float32), affine)
+
+        # --- reorient/resample all outputs to match ref_nifti ---
+        if args.ref_nifti is not None:
+            ref_img = load_nii(str(args.ref_nifti))
+            target = (ref_img, ref_img.affine)
+
+            nii_base = resample_from_to(nii_base, target, order=1)
+            nii_heat = resample_from_to(nii_heat, target, order=1)
+            if nii_mask is not None:
+                nii_mask = resample_from_to(nii_mask, target, order=0)
+            if nii_dream is not None:
+                nii_dream = resample_from_to(nii_dream, target, order=1)
+
+        # --- Save results ---
+        out_dir = args.output_dir.resolve()
+        prefix = (args.delta_path or args.dream_path or Path("deepdream")).stem
+
+        nii_base.to_filename(out_dir / f"{prefix}_image.nii.gz")
+        nii_heat.to_filename(out_dir / f"{prefix}_deepdream_heat_abs.nii.gz")
+        if nii_mask is not None:
+            pct_int = int(round(float(args.mask_pct)))
+            nii_mask.to_filename(out_dir / f"{prefix}_deepdream_mask_p{pct_int}.nii.gz")
+        if nii_dream is not None:
+            nii_dream.to_filename(out_dir / f"{prefix}_dream.nii.gz")
+
+        # if args.save_slicer:
+        #     # 1) Load props and build affine
+        #     props = load_props_from_pkl(args.props_path)
+        #     spacing, origin = get_spacing_origin_from_props(props)
+        #     affine = affine_from_spacing_origin(spacing, origin)
+
+        #     # Align shapes if needed
+        #     delta_3d, base_all = coerce_same_shape(delta_3d, base_all)
+
+        #     # 3) Build heat + optional mask
+        #     heat_3d, mask_3d = build_heat_and_mask(
+        #         delta_3d,
+        #         abs_pct=float(args.abs_pct),
+        #         bin_pct=(None if float(args.mask_pct) < 0 else float(args.mask_pct)),
+        #     )
+
+        #     # 4) Write NIfTI files (float32 for image/heat; uint8 for mask)
+        #     out_dir = args.output_dir.resolve()
+        #     prefix = (args.delta_path or args.dream_path or Path("deepdream")).stem
+
+        #     # Optionally load reference NIfTI to match its orientation
+        #     ref_img = nib.load(str(args.ref_nifti)) if args.ref_nifti is not None else None
+
+        #     # Ensure base/delta-derived outputs share the same orientation as the reference
+        #     base_save, aff_save = reorient_like(
+        #         base_all, affine, ref_img, args.target_orient
+        #     )
+
+        #     # Base image (raw intensities of the chosen channel)
+        #     save_nifti_3d(
+        #         base_save, aff_save, out_dir / f"{prefix}_image.nii.gz", dtype=np.float32
+        #     )
+
+        #     heat_save, aff_heat = reorient_like(
+        #         heat_3d, affine, ref_img, args.target_orient
+        #     )
+
+        #     # DeepDream heat (0..1)
+        #     save_nifti_3d(
+        #         heat_save,
+        #         aff_heat,
+        #         out_dir / f"{prefix}_deepdream_heat_abs.nii.gz",
+        #         dtype=np.float32,
+        #     )
+
+        #     # Binary mask (optional)
+        #     if mask_3d is not None:
+        #         mask_save, aff_mask = reorient_like(
+        #             mask_3d.astype(np.uint8), affine, ref_img, args.target_orient
+        #         )
+        #         aff_mask = aff_save if mask_save.shape == base_save.shape else aff_mask
+
+        #         pct_int = int(round(float(args.mask_pct)))
+        #         save_nifti_3d(
+        #             mask_save,
+        #             aff_mask,
+        #             out_dir / f"{prefix}_deepdream_mask_p{pct_int}.nii.gz",
+        #             dtype=np.uint8,
+        #         )
+
+        #     # Dream volume (optional, if --dream_path)
+        #     if dream_arr is not None:
+        #         dream_3d, _ = coerce_same_shape(
+        #             pick_channel_like(dream_arr, vis_ch), base_all
+        #         )
+        #         dream_save, aff_dream = reorient_like(
+        #             dream_3d, affine, ref_img, args.target_orient
+        #         )
+        #         aff_dream = aff_save if dream_save.shape == base_save.shape else aff_dream
+        #         save_nifti_3d(
+        #             dream_save,
+        #             aff_dream,
+        #             out_dir / f"{prefix}_dream.nii.gz",
+        #             dtype=np.float32,
+        #         )
 
         logger.info("[ok] Slicer-ready NIfTI exports written to %s", out_dir)
 

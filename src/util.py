@@ -296,7 +296,7 @@ def reorient_like(
 
     Returns: (data_reoriented, affine_reoriented)
     """
-    logger.info(f"Reorienting {data_3d.shape} to match {ref_img} or {target_orient}")
+    logger.info(f"Reorienting {data_3d.shape} to match reference nifti {ref_img}")
     # Current orientation from our affine
     cur_ornt = io_orientation(affine)
 
