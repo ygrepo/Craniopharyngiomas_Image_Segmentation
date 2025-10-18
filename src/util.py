@@ -6,8 +6,9 @@ from typing import List, Optional, Tuple
 import SimpleITK as sitk
 import numpy as np
 import pickle
+import nibabel as nib
 
-from typing import Dict, Any
+from typing import Dict, Any, Callable
 import torch
 from torch.serialization import add_safe_globals
 import nnunetv2
@@ -104,6 +105,68 @@ def same_geometry(a: sitk.Image, b: sitk.Image) -> bool:
         and np.allclose(a.GetDirection(), b.GetDirection())
         and np.allclose(a.GetOrigin(), b.GetOrigin())
     )
+
+
+# --- add helpers (place near other helpers) ---
+def load_props_from_pkl(pkl_path: Path) -> dict:
+    with open(pkl_path, "rb") as f:
+        logger.info(f"Loading props from {pkl_path}")
+        props = pickle.load(f)
+    return props
+
+
+def get_spacing_origin_from_props(
+    props: dict,
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    # nnU-Net v2 common keys; fallbacks are safe
+    spacing = tuple(
+        props.get("spacing_after_resampling")
+        or props.get("spacing")
+        or props.get("itk_spacing")
+        or (1.0, 1.0, 1.0)
+    )
+    origin = tuple(props.get("origin") or props.get("itk_origin") or (0.0, 0.0, 0.0))
+    # ensure 3 floats
+    logger.info(f"Origin: {origin} → {origin[:3]}")
+    logger.info(f"Spacing: {spacing} → {spacing[:3]}")
+    spacing = tuple(float(x) for x in spacing[:3])
+    origin = tuple(float(x) for x in origin[:3])
+    return spacing, origin
+
+
+def affine_from_spacing_origin(
+    spacing: tuple[float, float, float], origin: tuple[float, float, float]
+) -> np.ndarray:
+    # RAS-ish diagonal; if your pipeline uses a specific orientation, swap signs/axes here
+    aff = np.eye(4, dtype=np.float32)
+    aff[0, 0], aff[1, 1], aff[2, 2] = spacing
+    aff[0, 3], aff[1, 3], aff[2, 3] = origin
+    logger.info(f"Affine:\n{aff}")
+    return aff
+
+
+def save_nifti_3d(
+    vol_DHW: np.ndarray, affine: np.ndarray, out_path: Path, dtype=np.float32
+):
+    vol = np.asarray(vol_DHW, dtype=dtype, order="F")  # F-order is fine for nibabel
+    img = nib.Nifti1Image(vol, affine)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Saving to {out_path}")
+    nib.save(img, str(out_path))
+
+
+def build_heat_and_mask(delta_3d: np.ndarray, abs_pct: float, bin_pct: float | None):
+    """Return (heat_0_1, mask_or_None). heat is |delta| normalized to [0,1] by abs_pct."""
+    heat = np.abs(delta_3d).astype(np.float32)
+    hi = np.percentile(heat, abs_pct)
+    hi = hi if hi > 1e-12 else 1e-6
+    heat = np.clip(heat / hi, 0.0, 1.0)
+    mask = None
+    if bin_pct is not None:
+        thr = np.percentile(np.abs(delta_3d), bin_pct)
+        mask = (np.abs(delta_3d) >= thr).astype(np.uint8)
+    logger.info(f"Built heat (pct={abs_pct}) and mask (pct={bin_pct})")
+    return heat, mask
 
 
 def find_case_files(case_dir: Path, modalities: List[str]) -> List[Path]:
