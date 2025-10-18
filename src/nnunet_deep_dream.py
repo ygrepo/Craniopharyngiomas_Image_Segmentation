@@ -54,10 +54,10 @@ logger = get_logger(__name__)
 # ---------------------------
 def tv3d(z: torch.Tensor) -> torch.Tensor:
     # z: (1, C, D, H, W)
-    logger.info(f"TV: {dz.item():.4f} + {dy.item():.4f} + {dx.item():.4f}")
     dz = (z[:, :, 1:, :, :] - z[:, :, :-1, :, :]).abs().mean()
     dy = (z[:, :, :, 1:, :] - z[:, :, :, :-1, :]).abs().mean()
     dx = (z[:, :, :, :, 1:] - z[:, :, :, :, :-1]).abs().mean()
+    logger.info(f"TV: {dz.item():.4f} + {dy.item():.4f} + {dx.item():.4f}")
     return dx + dy + dz
 
 
