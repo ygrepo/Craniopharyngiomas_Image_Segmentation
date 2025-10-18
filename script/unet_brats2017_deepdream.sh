@@ -47,32 +47,21 @@ MAIN="src/nnunet_deep_dream.py"
 $PYTHON "$MAIN" \
     --model_dir "nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/" \
     --data_dir "nnUNet_preprocessed/Dataset501_BraTS2017_4ch/nnUNetPlans_3d_fullres" \
+    --output_dir "output/deepdream" \
     --case "Brats17_CBICA_AAG_1" \
     --fold 0 \
     --objective "logit" \
     --class_idx 3 \
     --layer_regex "encoder|down|context|stem" \
     --channel_idx 16 \
-    --dream_path output/deepdream/Brats17_CBICA_AAG_1_feature_dream.npy \
-    --delta_path output/deepdream/Brats17_CBICA_AAG_1_feature_delta.npy \
-    --image_path nnUNet_preprocessed/Dataset501_BraTS2017_4ch/nnUNetPlans_3d_fullres/Brats17_CBICA_AAG_1.b2nd \
-    --props_path nnUNet_preprocessed/Dataset501_BraTS2017_4ch/nnUNetPlans_3d_fullres/Brats17_CBICA_AAG_1.pkl \
-    --output_dir output/deepdream_overlay \
     --use_pred_mask 1 \
-    --z_slices 40,60,80 \
-    --mode abs \
-    --abs_pct 99.0 \
-    --signed_pct 99.0 \
     --steps 250 \
     --lr 0.07 \
     --w_tv 1e-3 \
     --w_hf 1e-5 \
     --w_anchor 5e-4 \
     --clamp_to_init 1 \
-    --alpha 0.45 \
-    --mask_pct 97.5 \
-    --save_slicer 1 \
-    --log_file "$LOG_DIR/nnunet_deepdream_display.log" \
+    --log_file "$LOG_DIR/nnunet_deepdream.log" \
     --log_level "$LOG_LEVEL"
 
 echo "[ok]"
