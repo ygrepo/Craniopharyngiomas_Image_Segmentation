@@ -161,6 +161,12 @@ def parse_args():
         "--delta_path", type=Path, default=None, help="Path to delta.npy (1,C,D,H,W)."
     )
     ap.add_argument(
+        "--case",
+        type=str,
+        default="Brats17_CBICA_AAG_1",
+        help="Case stem, e.g., 'Brats17_CBICA_AAG_1'.",
+    )
+    ap.add_argument(
         "--image_path",
         type=Path,
         default=Path(

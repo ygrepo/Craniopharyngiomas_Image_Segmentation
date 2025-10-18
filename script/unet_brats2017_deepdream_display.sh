@@ -40,6 +40,7 @@ PYTHON="${ENV_PREFIX}/bin/python"
 
 MAIN="src/nnunet_deepdream_display.py"
 $PYTHON "$MAIN" \
+    --case Brats17_CBICA_AAG_1 \
     --dream_path output/deepdream/Brats17_CBICA_AAG_1_feature_dream.npy \
     --delta_path output/deepdream/Brats17_CBICA_AAG_1_feature_delta.npy \
     --image_path nnUNet_preprocessed/Dataset501_BraTS2017_4ch/nnUNetPlans_3d_fullres/Brats17_CBICA_AAG_1.b2nd \
