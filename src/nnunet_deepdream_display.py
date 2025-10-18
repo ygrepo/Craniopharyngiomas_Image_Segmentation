@@ -21,10 +21,10 @@ Tip:
 import sys
 import argparse
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Optional
+import matplotlib.cm as cm
 
 import numpy as np
-import matplotlib.pyplot as plt
 import blosc2
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -38,7 +38,14 @@ from src.util import (
     affine_from_spacing_origin,
     save_nifti_3d,
     build_heat_and_mask,
+    normalize_robust,
+    pick_vis_channel,
+    pick_channel_like,
+    normalize_heat_abs,
+    coerce_same_shape,
+    load_volume_npy_b2nd,
 )
+from src.plot_util import save_image
 
 logger = get_logger(__name__)
 
@@ -46,88 +53,12 @@ logger = get_logger(__name__)
 # ---------------------------
 # Helpers
 # ---------------------------
-def _pick_vis_channel(volume: np.ndarray) -> np.ndarray:
-    """Return (D,H,W) grayscale volume from input shaped as:
-    - (D,H,W)           → return as-is
-    - (C,D,H,W)         → choose channel 2 if C>2 else 0  (BraTS: T1CE≈2)
-    - (1,C,D,H,W)       → squeeze batch then choose channel
-    - (D,H,W,C)         → move channels to front then choose
-    """
-    arr = volume
-    if arr.ndim == 5 and arr.shape[0] == 1:
-        arr = arr[0]  # -> (C,D,H,W)
-    if arr.ndim == 4:
-        if arr.shape[0] in (1, 2, 3, 4, 5):
-            C = arr.shape[0]
-            vis_ch = 2 if C > 2 else 0
-            return arr[vis_ch]
-        elif arr.shape[-1] in (1, 2, 3, 4, 5):
-            arr = np.moveaxis(arr, -1, 0)
-            C = arr.shape[0]
-            vis_ch = 2 if C > 2 else 0
-            return arr[vis_ch]
-    if arr.ndim == 3:
-        return arr
-    raise ValueError(
-        f"Unsupported image shape {arr.shape}; expected (D,H,W) or (C,D,H,W) or (1,C,D,H,W)"
-    )
-
-
-def _pick_same_channel(tensor_1C_DHW: np.ndarray, ref: np.ndarray) -> np.ndarray:
-    """Ensures delta/dream channel choice matches the base image channel choice.
-    If tensor is (1,C,D,H,W) or (C,D,H,W) or (D,H,W), returns (D,H,W) with same channel index rule as base.
-    """
-    arr = tensor_1C_DHW
-    if arr.ndim == 5 and arr.shape[0] == 1:
-        arr = arr[0]  # (C,D,H,W)
-    if arr.ndim == 4:
-        # pick channel like base: 2 if >2 else 0
-        C = arr.shape[0]
-        vis_ch = 2 if C > 2 else 0
-        return arr[vis_ch]
-    if arr.ndim == 3:
-        return arr
-    raise ValueError(f"Unsupported delta/dream shape {arr.shape}")
-
-
-def _coerce_same_shape(a: np.ndarray, b: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-    """Crop both to the minimum (D,H,W)."""
-    if a.shape == b.shape:
-        return a, b
-    D = min(a.shape[0], b.shape[0])
-    H = min(a.shape[1], b.shape[1])
-    W = min(a.shape[2], b.shape[2])
-    if (D, H, W) != a.shape or (D, H, W) != b.shape:
-        logger.warning(
-            f"Shape mismatch {a.shape} vs {b.shape}; cropping both to ({D},{H},{W})"
-        )
-    return a[:D, :H, :W], b[:D, :H, :W]
-
-
-def _normalize_img_robust(img_3d: np.ndarray) -> np.ndarray:
-    base = img_3d.astype(np.float32, copy=False)
-    lo, hi = np.percentile(base, 1), np.percentile(base, 99)
-    if hi <= lo:
-        hi = lo + 1e-6
-    base = (base - lo) / (hi - lo)
-    return np.clip(base, 0.0, 1.0)
-
-
-def _normalize_heat_abs(delta_3d: np.ndarray, pct: float = 99.0) -> np.ndarray:
-    """Normalize |delta| to [0,1] using robust percentile."""
-    a = np.abs(delta_3d).astype(np.float32)
-    hi = np.percentile(a, pct)
-    if hi <= 1e-12:
-        hi = 1e-6
-    a = np.clip(a / hi, 0.0, 1.0)
-    return a
 
 
 def _render_signed_overlay(
     gray: np.ndarray, delta: np.ndarray, q: float = 99.0, alpha: float = 0.5
 ):
     """Create a red/blue signed overlay (no external show_cam_on_image dependency)."""
-    import matplotlib.cm as cm
 
     # Normalize base
     rgb = np.stack([gray, gray, gray], axis=-1).astype(np.float32)
@@ -145,15 +76,6 @@ def _render_signed_overlay(
     out = (1 - alpha) * rgb + alpha * heat
     out = np.clip(out, 0.0, 1.0)
     return out
-
-
-def _save_png(img: np.ndarray, path: Path):
-    plt.figure(figsize=(6, 6))
-    plt.imshow(img)
-    plt.axis("off")
-    plt.tight_layout()
-    plt.savefig(path, dpi=150)
-    plt.close()
 
 
 # ---------------------------
@@ -178,20 +100,20 @@ def overlay_deepdream(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Base grayscale (D,H,W)
-    img_3d_all = _pick_vis_channel(image_arr)
-    img_3d = _normalize_img_robust(img_3d_all)
+    img_3d_all, vis_ch = pick_vis_channel(image_arr)
+    img_3d = normalize_robust(img_3d_all)
 
     # Delta (D,H,W)
     if delta_arr is not None:
-        delta_3d = _pick_same_channel(delta_arr, img_3d_all)
+        delta_3d = pick_channel_like(delta_arr, vis_ch)
     elif dream_arr is not None:
-        dream_3d = _pick_same_channel(dream_arr, img_3d_all)
+        dream_3d = pick_channel_like(dream_arr, vis_ch)
         delta_3d = dream_3d - img_3d_all  # both are raw intensities for same channel
     else:
         raise ValueError("Provide at least --delta_path or --dream_path.")
 
     # Align shapes (if dream/delta came from padded/unpadded passes)
-    delta_3d, img_3d = _coerce_same_shape(delta_3d, img_3d)
+    delta_3d, img_3d = coerce_same_shape(delta_3d, img_3d)
 
     for z in z_slices:
         if not (0 <= z < img_3d.shape[0]):
@@ -202,7 +124,7 @@ def overlay_deepdream(
 
         if mode == "abs":
             # Use |delta| heat like CAM in [0,1]
-            heat = _normalize_heat_abs(sl_delta, pct=abs_pct)
+            heat = normalize_heat_abs(sl_delta, pct=abs_pct)
             # manual lightweight overlay (no Grad-CAM util): colorize heat with 'jet'
             import matplotlib.cm as cm
 
@@ -213,16 +135,14 @@ def overlay_deepdream(
             overlay = (1 - alpha) * rgb + alpha * heat_rgb
             overlay = np.clip(overlay, 0.0, 1.0)
             out_png = out_dir / f"{prefix}_deepdream_abs_z{z:03d}.png"
-            _save_png(overlay, out_png)
-            logger.info(f"[ok] Saved {out_png}")
+            save_image(overlay, out_png)
 
         elif mode == "signed":
             overlay = _render_signed_overlay(
                 sl_gray, sl_delta, q=signed_pct, alpha=alpha
             )
             out_png = out_dir / f"{prefix}_deepdream_signed_z{z:03d}.png"
-            _save_png(overlay, out_png)
-            logger.info(f"[ok] Saved {out_png}")
+            save_image(overlay, out_png)
         else:
             raise ValueError("mode must be 'abs' or 'signed'")
 
@@ -259,6 +179,13 @@ def parse_args():
         type=str,
         default="40,60,80",
         help="Comma-separated axial slice indices.",
+    )
+    ap.add_argument(
+        "--objective",
+        type=str,
+        default="logit",
+        choices=["logit", "feature"],
+        help="Maximize a class logit or an internal feature channel.",
     )
     ap.add_argument("--alpha", type=float, default=0.45, help="Overlay opacity (0..1).")
     ap.add_argument(
@@ -308,25 +235,19 @@ def parse_args():
     return ap.parse_args()
 
 
-def _load_volume_any(path: Path) -> np.ndarray:
-    if path.suffix.lower() == ".npy":
-        return load_npy(path)
-    # assume blosc2 .b2nd
-    arr = blosc2.open(str(path))
-    return np.asarray(arr)
-
-
 def main():
     args = parse_args()
     setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
     logger.info(f"Args: {args}")
 
     # Load base MRI
-    img_arr = _load_volume_any(args.image_path)
+    img_arr = load_volume_npy_b2nd(args.image_path)
 
     # Load dream/delta
-    dream_arr = load_npy(args.dream_path) if args.dream_path is not None else None
-    delta_arr = load_npy(args.delta_path) if args.delta_path is not None else None
+    fn = args.dream_path / f"{args.case}_{args.objective}_dream.npy"
+    dream_arr = load_npy(fn) if args.dream_path is not None else None
+    fn = args.delta_path / f"{args.case}_{args.objective}_delta.npy"
+    delta_arr = load_npy(fn) if args.delta_path is not None else None
 
     # Squeeze possible leading batch dim in dream/delta handled in _pick_same_channel
     z_list = [int(z) for z in args.z_slices.split(",") if z.strip().isdigit()]
@@ -358,21 +279,21 @@ def main():
 
         # 2) Recompute the same base/heat/mask we used for overlays
         #    (reuse internal helpers)
-        img_arr = _load_volume_any(args.image_path)
-        base_all = _pick_vis_channel(img_arr)  # (D,H,W), raw intensities
+        img_arr = load_volume_npy_b2nd(args.image_path)
+        base_all, vis_ch = pick_vis_channel(img_arr)  # (D,H,W), raw intensities
 
         dream_arr = load_npy(args.dream_path) if args.dream_path is not None else None
         delta_arr = load_npy(args.delta_path) if args.delta_path is not None else None
         if delta_arr is not None:
-            delta_3d = _pick_same_channel(delta_arr, base_all)
+            delta_3d = pick_channel_like(delta_arr, vis_ch)
         elif dream_arr is not None:
-            dream_3d = _pick_same_channel(dream_arr, base_all)
+            dream_3d = pick_channel_like(dream_arr, vis_ch)
             delta_3d = dream_3d - base_all
         else:
             raise ValueError("Provide --delta_path or --dream_path to export NIfTI.")
 
         # Align shapes if needed
-        delta_3d, base_all = _coerce_same_shape(delta_3d, base_all)
+        delta_3d, base_all = coerce_same_shape(delta_3d, base_all)
 
         # 3) Build heat + optional mask
         heat_3d, mask_3d = build_heat_and_mask(
@@ -410,8 +331,8 @@ def main():
 
         # Dream volume (optional, if --dream_path)
         if dream_arr is not None:
-            dream_3d, _ = _coerce_same_shape(
-                _pick_same_channel(dream_arr, base_all), base_all
+            dream_3d, _ = coerce_same_shape(
+                pick_channel_like(dream_arr, vis_ch), base_all
             )
             save_nifti_3d(
                 dream_3d, affine, out_dir / f"{prefix}_dream.nii.gz", dtype=np.float32

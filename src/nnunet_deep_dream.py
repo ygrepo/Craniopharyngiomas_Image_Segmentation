@@ -53,10 +53,14 @@ logger = get_logger(__name__)
 # Helpers
 # ---------------------------
 def tv3d(z: torch.Tensor) -> torch.Tensor:
+    """3D Total Variation (TV) penalty on a volume."""
+
     # z: (1, C, D, H, W)
+    # Subtract along each dim, take abs, mean
     dz = (z[:, :, 1:, :, :] - z[:, :, :-1, :, :]).abs().mean()
     dy = (z[:, :, :, 1:, :] - z[:, :, :, :-1, :]).abs().mean()
     dx = (z[:, :, :, :, 1:] - z[:, :, :, :, :-1]).abs().mean()
+    # Log TV values
     logger.info(f"TV: {dz.item():.4f} + {dy.item():.4f} + {dx.item():.4f}")
     return dx + dy + dz
 
@@ -64,10 +68,10 @@ def tv3d(z: torch.Tensor) -> torch.Tensor:
 def radial_freq_energy(z: torch.Tensor, frac: float = 0.35) -> torch.Tensor:
     """
     Penalize energy beyond a radial cutoff in k-space to discourage unrealistic high-freq texture.
+    Returns the mean energy in the high-frequency shell.
     z: (1, C, D, H, W) – assumes channels share same spatial dims.
     """
     # FFT over spatial dims only
-    logger.info(f"FFT: {z.shape}")
     Z = torch.fft.fftn(z, dim=(-3, -2, -1))
     Zs = torch.fft.fftshift(Z, dim=(-3, -2, -1))
     D, H, W = z.shape[-3:]
@@ -103,7 +107,7 @@ class FeatureHook:
 
 
 # ---------------------------
-# Dream objective
+# Dream objectives
 # ---------------------------
 def seg_logit_objective(
     logits: torch.Tensor,
@@ -112,6 +116,7 @@ def seg_logit_objective(
     lam_bg: float = 0.25,
 ) -> torch.Tensor:
     """
+    Maximize segmentation logit within a mask.
     logits: (1, C, D, H, W)
     mask  : (D, H, W) or (1, D, H, W) boolean/float
     """
@@ -126,6 +131,72 @@ def seg_logit_objective(
     bg = (s * inv).sum() / inv.sum().clamp_min(1)
     logger.info(f"FG: {fg.item():.4f}, BG: {bg.item():.4f}")
     return fg - lam_bg * bg
+
+
+def seg_logit_edge_rim_objective(
+    logits: torch.Tensor,
+    class_idx: int,
+    mask: torch.Tensor,
+    rim_width: int = 1,
+    lam_bg: float = 0.0,
+) -> torch.Tensor:
+    """
+    Maximize segmentation logit within a thin rim around the mask.
+    mask: (D, H, W) or (1, D, H, W) boolean/float
+    rim_width: width of the rim in voxels (1 = 1-voxel-wide rim)
+    lam_bg: weight of the background (1 - mask)
+    """
+    s = logits[0, class_idx]  # (D,H,W)
+    if mask.ndim == 4:
+        mask = mask[0]
+    mask = mask.float()
+    # Erode to get a thin contour region: rim = mask - erode(mask)
+    k = torch.ones((1, 1, 3, 3, 3), device=s.device)
+    m = mask[None, None]
+    eroded = (F.conv3d(m, k, padding=1) >= 27 - 3 * rim_width).float()  # crude erosion
+    rim = (mask - eroded[0, 0]).clamp(min=0.0)
+    if rim.sum() == 0:  # fallback
+        rim = mask
+    fg = (s * rim).sum() / rim.sum().clamp_min(1)
+    if lam_bg > 0:
+        inv = 1 - mask
+        bg = (s * inv).sum() / inv.sum().clamp_min(1)
+        return fg - lam_bg * bg
+    return fg
+
+
+def seg_logit_grad_weighted_objective(
+    logits: torch.Tensor,
+    class_idx: int,
+    mask: Optional[torch.Tensor],
+    image: torch.Tensor,
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """
+    Maximize segmentation logit within a mask, weighted by image gradient magnitude.
+    mask: (D, H, W) or (1, D, H, W) boolean/float
+    image: (1, C, D, H, W) tensor to compute gradient on (e.g., MRI)
+    """
+
+    # image: (1,1,D,H,W) or (1,C,D,H,W) -> pick one channel; compute |∇image|
+    s = logits[0, class_idx]  # (D,H,W)
+    if image.dim() == 5:
+        img = image[0, 0]  # pick a channel
+    else:
+        img = image[0]
+    # finite differences as edge strength
+    gx = img[2:, :, :] - img[:-2, :, :]
+    gy = img[:, 2:, :] - img[:, :-2, :]
+    gz = img[:, :, 2:] - img[:, :, :-2]
+    gmag = torch.nn.functional.pad(
+        torch.sqrt(gx**2 + gy**2 + gz**2 + eps), (0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1)
+    )
+    w = gmag / (gmag.mean() + eps)
+    if mask is not None:
+        if mask.ndim == 4:
+            mask = mask[0]
+        w = w * mask.float()
+    return (s * w).sum() / w.sum().clamp_min(1)
 
 
 def feature_channel_objective(feat: torch.Tensor, channel_idx: int) -> torch.Tensor:
@@ -267,62 +338,6 @@ def run_deepdream(
     init = unpad_3d(x0.detach().cpu().numpy(), pads)
     delta = dream - init
     return {"dream": dream, "delta": delta, "trace": hist}
-
-    # for t in range(1, steps + 1):
-    #     opt.zero_grad()
-
-    #     # Forward
-    #     logits = model(x)  # (1,C,D,H,W)
-
-    #     if objective == "logit":
-    #         obj = seg_logit_objective(logits, class_idx, mask=mask, lam_bg=0.25)
-    #     else:
-    #         # Ensure hook fired
-    #         _ = logits  # no-op; forward already done
-    #         if f_hook is None or f_hook.feat is None:
-    #             # Some nnU-Net variants compute encoder before decoder; a second call is harmless if needed.
-    #             logits = model(x)
-    #         feat = f_hook.feat
-    #         if feat is None:
-    #             raise RuntimeError(
-    #                 "Feature hook did not capture activations. Check --layer_regex."
-    #             )
-    #         if channel_idx is None or channel_idx >= feat.shape[1]:
-    #             raise ValueError(
-    #                 f"--channel_idx out of range (got {channel_idx}, feature has {feat.shape[1]} channels)."
-    #             )
-    #         obj = feature_channel_objective(feat, channel_idx)
-
-    #     # Regularizers
-    #     r_tv = tv3d(x)
-    #     r_hf = radial_freq_energy(x, frac=0.35)
-    #     r_anchor = intensity_anchor(x, x0)
-
-    #     loss = -(obj) + w_tv * r_tv + w_hf * r_hf + w_anchor * r_anchor
-    #     loss.backward()
-    #     opt.step()
-
-    #     if clamp_to_init:
-    #         # Keep intensities within [min, max] of the padded original
-    #         x.data.clamp_(x0.min().item(), x0.max().item())
-
-    #     # Log
-    #     hist["obj"].append(float(obj.detach().cpu()))
-    #     hist["tv"].append(float(r_tv.detach().cpu()))
-    #     hist["hf"].append(float(r_hf.detach().cpu()))
-    #     hist["anchor"].append(float(r_anchor.detach().cpu()))
-
-    #     if t % max(1, steps // 10) == 0:
-    #         logger.info(
-    #             f"[{t:04d}/{steps}] obj={hist['obj'][-1]:.4f} | "
-    #             f"tv={hist['tv'][-1]:.4e} hf={hist['hf'][-1]:.4e} anchor={hist['anchor'][-1]:.4e}"
-    #         )
-
-    # # Unpad to original shape
-    # dream = unpad_3d(x.detach().cpu().numpy(), pads)  # (1,C,D,H,W)
-    # init = unpad_3d(x0.detach().cpu().numpy(), pads)
-    # delta = dream - init
-    # return {"dream": dream, "delta": delta, "trace": hist}
 
 
 def run_deepdream_octaves(

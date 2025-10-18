@@ -95,6 +95,14 @@ def save_npy(ar: np.ndarray, out_path: Path):
     logger.info(f"[ok] Saved: {out_path}")
 
 
+def load_volume_npy_b2nd(path: Path) -> np.ndarray:
+    if path.suffix.lower() == ".npy":
+        return load_npy(path)
+    # assume blosc2 .b2nd
+    arr = blosc2.open(str(path))
+    return np.asarray(arr)
+
+
 def load_npy(path: Path) -> np.ndarray:
     logger.info(f"Loading: {path}")
     return np.load(path)
@@ -107,6 +115,81 @@ def same_geometry(a: sitk.Image, b: sitk.Image) -> bool:
         and np.allclose(a.GetDirection(), b.GetDirection())
         and np.allclose(a.GetOrigin(), b.GetOrigin())
     )
+
+
+def pick_vis_channel(volume: np.ndarray) -> tuple[np.ndarray, int]:
+    """
+    Returns:
+      vol3d: (D,H,W) selected grayscale channel
+      vis_ch: integer channel index used (0-based); -1 if input was already (D,H,W)
+    """
+    arr = volume
+    # Squeeze leading batch if present
+    if arr.ndim == 5 and arr.shape[0] == 1:
+        arr = arr[0]  # -> (C,D,H,W)
+
+    # Already single-channel
+    if arr.ndim == 3:
+        return arr, -1
+
+    # Handle channel-first (C,D,H,W) or channel-last (D,H,W,C)
+    if arr.ndim == 4:
+        # Prefer explicit detection of channel axis
+        # Heuristic: channel dim is the one with the smallest size among the 4 dims if <= 16
+        # (works for medical volumes where D/H/W are large)
+        dims = arr.shape
+        candidate_axes = [i for i, s in enumerate(dims) if s <= 16]
+        if candidate_axes:
+            ch_axis = min(candidate_axes, key=lambda i: dims[i])
+        else:
+            # Fallback: if first dim looks like channels (<=16), assume (C,D,H,W),
+            # else if last dim looks like channels, assume (D,H,W,C),
+            # else default to channel-first.
+            ch_axis = 0 if dims[0] <= 16 else (3 if dims[-1] <= 16 else 0)
+
+        # Move channels to axis 0
+        if ch_axis != 0:
+            arr = np.moveaxis(arr, ch_axis, 0)  # -> (C,D,H,W)
+
+        C = arr.shape[0]
+        vis_ch = 2 if C > 2 else 0
+        if vis_ch >= C:
+            vis_ch = C - 1  # guard
+
+        return arr[vis_ch], vis_ch
+
+    raise ValueError(
+        f"Unsupported shape {arr.shape}; expected (D,H,W), (C,D,H,W), (1,C,D,H,W), or (D,H,W,C)"
+    )
+
+
+def pick_channel_like(arr: np.ndarray, vis_ch: int) -> np.ndarray:
+    """
+    Pick the same channel as the base image.
+    arr: (1,C,D,H,W) or (C,D,H,W) or (D,H,W)
+    vis_ch: channel index used for the base image
+    Returns (D,H,W)
+    """
+    if arr.ndim == 5 and arr.shape[0] == 1:
+        arr = arr[0]  # (C,D,H,W)
+    if arr.ndim == 4:
+        C = arr.shape[0]
+        if not (0 <= vis_ch < C):
+            raise ValueError(f"vis_ch={vis_ch} out of range for C={C}")
+        return arr[vis_ch]
+    if arr.ndim == 3:
+        return arr
+    raise ValueError(f"Unsupported shape {arr.shape}")
+
+
+def normalize_heat_abs(delta_3d: np.ndarray, pct: float = 99.0) -> np.ndarray:
+    """Normalize |delta| to [0,1] using robust percentile."""
+    a = np.abs(delta_3d).astype(np.float32)
+    hi = np.percentile(a, pct)
+    if hi <= 1e-12:
+        hi = 1e-6
+    a = np.clip(a / hi, 0.0, 1.0)
+    return a
 
 
 # --- add helpers (place near other helpers) ---
@@ -157,6 +240,15 @@ def save_nifti_3d(
     nib.save(img, str(out_path))
 
 
+def normalize_robust(img_3d: np.ndarray) -> np.ndarray:
+    base = img_3d.astype(np.float32, copy=False)
+    lo, hi = np.percentile(base, 1), np.percentile(base, 99)
+    if hi <= lo:
+        hi = lo + 1e-6
+    base = (base - lo) / (hi - lo)
+    return np.clip(base, 0.0, 1.0)
+
+
 def build_heat_and_mask(delta_3d: np.ndarray, abs_pct: float, bin_pct: float | None):
     """Return (heat_0_1, mask_or_None). heat is |delta| normalized to [0,1] by abs_pct."""
     heat = np.abs(delta_3d).astype(np.float32)
@@ -169,6 +261,20 @@ def build_heat_and_mask(delta_3d: np.ndarray, abs_pct: float, bin_pct: float | N
         mask = (np.abs(delta_3d) >= thr).astype(np.uint8)
     logger.info(f"Built heat (pct={abs_pct}) and mask (pct={bin_pct})")
     return heat, mask
+
+
+def coerce_same_shape(a: np.ndarray, b: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Crop both to the minimum (D,H,W)."""
+    if a.shape == b.shape:
+        return a, b
+    D = min(a.shape[0], b.shape[0])
+    H = min(a.shape[1], b.shape[1])
+    W = min(a.shape[2], b.shape[2])
+    if (D, H, W) != a.shape or (D, H, W) != b.shape:
+        logger.warning(
+            f"Shape mismatch {a.shape} vs {b.shape}; cropping both to ({D},{H},{W})"
+        )
+    return a[:D, :H, :W], b[:D, :H, :W]
 
 
 def find_case_files(case_dir: Path, modalities: List[str]) -> List[Path]:
