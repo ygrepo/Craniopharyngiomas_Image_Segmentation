@@ -8,16 +8,18 @@ import numpy as np
 import pickle
 import nibabel as nib
 
-from typing import Dict, Any, Callable
+from typing import Dict, Any
 import torch
 from torch.serialization import add_safe_globals
 import nnunetv2
 import json
 import torch.nn as nn
 
+import random
 import re
 import blosc2
 import scipy.ndimage as ndi
+import math
 
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 
@@ -494,18 +496,19 @@ def pick_target_layer(
     return layer
 
 
-def downsample_multiples(cfg) -> tuple[int, int, int]:
+def downsample_multiples(cfg: Any) -> tuple[int, int, int]:
     # cfg.pool_op_kernel_sizes is a list like [(2,2,2), (2,2,2), (2,2,2), (2,2,2), (2,2,2)]
-    import math
-
     sizes = cfg.pool_op_kernel_sizes
     mult_d = math.prod(k[0] for k in sizes)
     mult_h = math.prod(k[1] for k in sizes)
     mult_w = math.prod(k[2] for k in sizes)
+    logger.info(f"Downsample multiples: {mult_d}x{mult_h}x{mult_w}")
     return mult_d, mult_h, mult_w
 
 
-def pad_to_multiples(x: torch.Tensor, mult: tuple[int, int, int]):
+def pad_to_multiples(
+    x: torch.Tensor, mult: tuple[int, int, int]
+) -> tuple[torch.Tensor, tuple[int, int, int]]:
     _, _, D, H, W = x.shape
     md, mh, mw = mult
     logger.info(f"Padding {x.shape} to multiples of {mult}")
@@ -517,18 +520,43 @@ def pad_to_multiples(x: torch.Tensor, mult: tuple[int, int, int]):
     return x_pad, (padD, padH, padW)
 
 
+def pad_to_multiples_dynamic(
+    x: torch.Tensor, cfg: Optional[Any] = None
+) -> tuple[torch.Tensor, tuple[int, int, int]]:
+    mult = downsample_multiples(cfg) if cfg is not None else (32, 32, 32)
+    x_pad, pads = pad_to_multiples(x, mult)
+    return x_pad, pads
+
+
 def unpad_3d(arr: np.ndarray, pads: tuple[int, int, int]) -> np.ndarray:
-    padD, padH, padW = pads
-    D, H, W = arr.shape
+    """
+    Remove trailing padding (pad-at-the-end) from the last three dims.
+    Works for shapes (..., D, H, W) including (D,H,W), (C,D,H,W), (N,C,D,H,W).
+    """
     logger.info(f"Unpadding {arr.shape} by {pads}")
-    return arr[
-        : D - padD if padD else D, : H - padH if padH else H, : W - padW if padW else W
+    padD, padH, padW = pads
+    *lead, D, H, W = arr.shape
+    slicer = [slice(None)] * len(lead) + [
+        slice(0, D - padD if padD else D),
+        slice(0, H - padH if padH else H),
+        slice(0, W - padW if padW else W),
     ]
+    return arr[tuple(slicer)]
+
+
+def jitter3d(x: torch.Tensor, vox: int = 1) -> torch.Tensor:
+    if vox <= 0:
+        return x
+    dz = random.randint(-vox, vox)
+    dy = random.randint(-vox, vox)
+    dx = random.randint(-vox, vox)
+    return torch.roll(x, shifts=(dz, dy, dx), dims=(-3, -2, -1))
 
 
 def largest_cc_bool(mask_3d: torch.Tensor) -> torch.Tensor:
     lab, n = ndi.label(mask_3d.cpu().numpy().astype(np.uint8))
     if n == 0:
+        logger.info("No CCs found")
         return mask_3d
     sizes = ndi.sum(mask_3d.cpu().numpy(), lab, index=range(1, n + 1))
     keep = 1 + int(np.argmax(sizes))

@@ -25,6 +25,8 @@ from typing import Optional, Dict, Any
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from tqdm import trange
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -37,9 +39,11 @@ from src.util import (
     load_volume,
     downsample_multiples,
     pad_to_multiples,
+    pad_to_multiples_dynamic,
     unpad_3d,
     save_npy,
     largest_cc_bool,
+    jitter3d,
 )
 
 logger = get_logger(__name__)
@@ -50,6 +54,7 @@ logger = get_logger(__name__)
 # ---------------------------
 def tv3d(z: torch.Tensor) -> torch.Tensor:
     # z: (1, C, D, H, W)
+    logger.info(f"TV: {dz.item():.4f} + {dy.item():.4f} + {dx.item():.4f}")
     dz = (z[:, :, 1:, :, :] - z[:, :, :-1, :, :]).abs().mean()
     dy = (z[:, :, :, 1:, :] - z[:, :, :, :-1, :]).abs().mean()
     dx = (z[:, :, :, :, 1:] - z[:, :, :, :, :-1]).abs().mean()
@@ -62,6 +67,7 @@ def radial_freq_energy(z: torch.Tensor, frac: float = 0.35) -> torch.Tensor:
     z: (1, C, D, H, W) – assumes channels share same spatial dims.
     """
     # FFT over spatial dims only
+    logger.info(f"FFT: {z.shape}")
     Z = torch.fft.fftn(z, dim=(-3, -2, -1))
     Zs = torch.fft.fftshift(Z, dim=(-3, -2, -1))
     D, H, W = z.shape[-3:]
@@ -73,6 +79,7 @@ def radial_freq_energy(z: torch.Tensor, frac: float = 0.35) -> torch.Tensor:
     )
     r = (xx**2 + yy**2 + zz**2).sqrt()
     mask = (r > frac).float()  # high-frequency shell
+    logger.info(f"Radial freq energy: {mask.mean().item():.4f}")
     return (Zs * mask).abs().pow(2).mean()
 
 
@@ -117,6 +124,7 @@ def seg_logit_objective(
     inv = 1.0 - mask
     fg = (s * mask).sum() / mask.sum().clamp_min(1)
     bg = (s * inv).sum() / inv.sum().clamp_min(1)
+    logger.info(f"FG: {fg.item():.4f}, BG: {bg.item():.4f}")
     return fg - lam_bg * bg
 
 
@@ -124,7 +132,9 @@ def feature_channel_objective(feat: torch.Tensor, channel_idx: int) -> torch.Ten
     """
     feat: (1, K, D', H', W'), maximize mean of one channel
     """
-    return feat[0, channel_idx].mean()
+    mean_t = feat[0, channel_idx].mean()
+    logger.info(f"Feature channel {channel_idx} mean: {mean_t.item():.4f}")
+    return mean_t
 
 
 # ---------------------------
@@ -188,7 +198,12 @@ def run_deepdream(
     # For logging
     hist = {"obj": [], "tv": [], "hf": [], "anchor": []}
 
-    for t in range(1, steps + 1):
+    log_every = max(1, steps // 10)
+
+    pbar = trange(
+        1, steps + 1, total=steps, dynamic_ncols=True, desc="DeepDream", leave=False
+    )
+    for t in pbar:
         opt.zero_grad()
 
         # Forward
@@ -200,7 +215,6 @@ def run_deepdream(
             # Ensure hook fired
             _ = logits  # no-op; forward already done
             if f_hook is None or f_hook.feat is None:
-                # Some nnU-Net variants compute encoder before decoder; a second call is harmless if needed.
                 logits = model(x)
             feat = f_hook.feat
             if feat is None:
@@ -223,26 +237,259 @@ def run_deepdream(
         opt.step()
 
         if clamp_to_init:
-            # Keep intensities within [min, max] of the padded original
             x.data.clamp_(x0.min().item(), x0.max().item())
 
-        # Log
+        # Log history
         hist["obj"].append(float(obj.detach().cpu()))
         hist["tv"].append(float(r_tv.detach().cpu()))
         hist["hf"].append(float(r_hf.detach().cpu()))
         hist["anchor"].append(float(r_anchor.detach().cpu()))
 
-        if t % max(1, steps // 10) == 0:
-            logger.info(
+        # Periodic console log + tqdm postfix (don’t spam every step)
+        if t % log_every == 0 or t == steps or t == 1:
+            msg = (
                 f"[{t:04d}/{steps}] obj={hist['obj'][-1]:.4f} | "
                 f"tv={hist['tv'][-1]:.4e} hf={hist['hf'][-1]:.4e} anchor={hist['anchor'][-1]:.4e}"
             )
+            logger.info(msg)
+            # Update progress-bar postfix (string for scientific notation readability)
+            if hasattr(pbar, "set_postfix"):
+                pbar.set_postfix(
+                    obj=f"{hist['obj'][-1]:.4f}",
+                    tv=f"{hist['tv'][-1]:.2e}",
+                    hf=f"{hist['hf'][-1]:.2e}",
+                    anchor=f"{hist['anchor'][-1]:.2e}",
+                    refresh=False,
+                )
 
     # Unpad to original shape
     dream = unpad_3d(x.detach().cpu().numpy(), pads)  # (1,C,D,H,W)
     init = unpad_3d(x0.detach().cpu().numpy(), pads)
     delta = dream - init
     return {"dream": dream, "delta": delta, "trace": hist}
+
+    # for t in range(1, steps + 1):
+    #     opt.zero_grad()
+
+    #     # Forward
+    #     logits = model(x)  # (1,C,D,H,W)
+
+    #     if objective == "logit":
+    #         obj = seg_logit_objective(logits, class_idx, mask=mask, lam_bg=0.25)
+    #     else:
+    #         # Ensure hook fired
+    #         _ = logits  # no-op; forward already done
+    #         if f_hook is None or f_hook.feat is None:
+    #             # Some nnU-Net variants compute encoder before decoder; a second call is harmless if needed.
+    #             logits = model(x)
+    #         feat = f_hook.feat
+    #         if feat is None:
+    #             raise RuntimeError(
+    #                 "Feature hook did not capture activations. Check --layer_regex."
+    #             )
+    #         if channel_idx is None or channel_idx >= feat.shape[1]:
+    #             raise ValueError(
+    #                 f"--channel_idx out of range (got {channel_idx}, feature has {feat.shape[1]} channels)."
+    #             )
+    #         obj = feature_channel_objective(feat, channel_idx)
+
+    #     # Regularizers
+    #     r_tv = tv3d(x)
+    #     r_hf = radial_freq_energy(x, frac=0.35)
+    #     r_anchor = intensity_anchor(x, x0)
+
+    #     loss = -(obj) + w_tv * r_tv + w_hf * r_hf + w_anchor * r_anchor
+    #     loss.backward()
+    #     opt.step()
+
+    #     if clamp_to_init:
+    #         # Keep intensities within [min, max] of the padded original
+    #         x.data.clamp_(x0.min().item(), x0.max().item())
+
+    #     # Log
+    #     hist["obj"].append(float(obj.detach().cpu()))
+    #     hist["tv"].append(float(r_tv.detach().cpu()))
+    #     hist["hf"].append(float(r_hf.detach().cpu()))
+    #     hist["anchor"].append(float(r_anchor.detach().cpu()))
+
+    #     if t % max(1, steps // 10) == 0:
+    #         logger.info(
+    #             f"[{t:04d}/{steps}] obj={hist['obj'][-1]:.4f} | "
+    #             f"tv={hist['tv'][-1]:.4e} hf={hist['hf'][-1]:.4e} anchor={hist['anchor'][-1]:.4e}"
+    #         )
+
+    # # Unpad to original shape
+    # dream = unpad_3d(x.detach().cpu().numpy(), pads)  # (1,C,D,H,W)
+    # init = unpad_3d(x0.detach().cpu().numpy(), pads)
+    # delta = dream - init
+    # return {"dream": dream, "delta": delta, "trace": hist}
+
+
+def run_deepdream_octaves(
+    model: nn.Module,
+    vol_t: torch.Tensor,  # (1,C,D,H,W) normalized
+    objective: str,  # "logit" | "feature"
+    class_idx: int,
+    use_pred_mask: bool,
+    layer_regex: Optional[str],
+    channel_idx: Optional[int],
+    num_octaves: int = 4,
+    octave_scale: float = 1.4,
+    steps_per_octave: int = 120,
+    lr: float = 0.07,
+    w_tv: float = 1e-3,
+    w_hf: float = 1e-5,
+    w_anchor: float = 5e-4,
+    clamp_to_init: bool = True,
+    jitter_vox: int = 1,
+):
+    model.eval()
+    device = next(model.parameters()).device
+
+    # We build a pyramid of target shapes from coarse -> fine
+    _, C, D0, H0, W0 = vol_t.shape
+    shapes = []
+    for o in range(num_octaves - 1, -1, -1):  # coarse to fine
+        scale = octave_scale ** (-o)
+        shapes.append(
+            (
+                max(8, int(round(D0 * scale))),
+                max(8, int(round(H0 * scale))),
+                max(8, int(round(W0 * scale))),
+            )
+        )
+
+    # Init at coarsest
+    Dc, Hc, Wc = shapes[0]
+    x_coarse = F.interpolate(
+        vol_t, size=(Dc, Hc, Wc), mode="trilinear", align_corners=False
+    )
+    x_ref = x_coarse.detach().clone()  # reference for anchoring
+    x = x_coarse.detach().clone().requires_grad_(True)
+
+    # Prepare mask once at native res; we’ll downsample it per octave if needed (logit objective)
+    base_mask = None
+    if use_pred_mask and objective == "logit":
+        with torch.no_grad():
+            # pad native, predict, unpad
+            cfg = getattr(model, "configuration_manager", None)
+            x_native_pad, pads = pad_to_multiples_dynamic(vol_t, cfg)
+            logits_native = model(x_native_pad)
+            pred_native = logits_native.argmax(dim=1)  # (1,Dp,Hp,Wp)
+            pred_native = torch.from_numpy(
+                unpad_3d(pred_native.cpu().numpy(), pads)
+            ).to(device)
+            mask0 = (pred_native == class_idx).float()  # (1,D,H,W)
+            mask0 = (
+                largest_cc_bool(mask0[0]).unsqueeze(0).float().to(device)
+            )  # (1,D,H,W)
+            base_mask = mask0  # keep for resampling per octave
+
+    # Feature hook (for 'feature')
+    f_hook = None
+    if objective == "feature":
+        if layer_regex is None:
+            raise ValueError("For 'feature' objective, --layer_regex must be provided.")
+        target_layer = pick_target_layer(model, layer_regex, target_idx=-1)
+        f_hook = FeatureHook(target_layer)
+
+    trace = {"obj": [], "tv": [], "hf": [], "anchor": [], "octave": []}
+
+    for oi, (D, H, W) in enumerate(shapes):
+        # Upsample from previous octave (except first)
+        if oi > 0:
+            x = F.interpolate(
+                x.detach(), size=(D, H, W), mode="trilinear", align_corners=False
+            ).requires_grad_(True)
+            x_ref = F.interpolate(
+                vol_t, size=(D, H, W), mode="trilinear", align_corners=False
+            ).detach()
+
+        # Downsample mask to this octave if used
+        mask = None
+        if base_mask is not None:
+            mask = F.interpolate(base_mask, size=(D, H, W), mode="nearest")[
+                0
+            ]  # (D,H,W)
+
+        # Pad for nnU-Net multiples at this scale
+        cfg = getattr(model, "configuration_manager", None)
+        x_pad, pads = pad_to_multiples_dynamic(x, cfg)
+        x_ref_pad, _ = pad_to_multiples_dynamic(x_ref, cfg)
+
+        opt = torch.optim.Adam([x_pad], lr=lr)
+
+        for t in range(steps_per_octave):
+            opt.zero_grad()
+
+            # Optional jitter (on the padded tensor)
+            if jitter_vox > 0:
+                x_pad_j = jitter3d(x_pad, jitter_vox)
+            else:
+                x_pad_j = x_pad
+
+            logits = model(x_pad_j)
+
+            if objective == "logit":
+                obj = seg_logit_objective(logits, class_idx, mask=mask, lam_bg=0.25)
+            else:
+                # ensure feature captured
+                _ = logits
+                feat = f_hook.feat
+                if feat is None:
+                    # second pass rarely needed, but keep as fallback
+                    logits = model(x_pad_j)
+                    feat = f_hook.feat
+                if channel_idx is None or channel_idx >= feat.shape[1]:
+                    raise ValueError(
+                        f"--channel_idx out of range for this layer ({feat.shape[1]} channels)."
+                    )
+                obj = feature_channel_objective(feat, channel_idx)
+
+            # Regularizers on *unpadded* crop to avoid border bias
+            x_unpad = torch.from_numpy(unpad_3d(x_pad.detach().cpu().numpy(), pads)).to(
+                device
+            )
+            x_ref_unpad = torch.from_numpy(
+                unpad_3d(x_ref_pad.detach().cpu().numpy(), pads)
+            ).to(device)
+
+            r_tv = tv3d(x_unpad)
+            r_hf = radial_freq_energy(x_unpad, frac=0.35)
+            r_anchor = intensity_anchor(x_unpad, x_ref_unpad)
+
+            loss = -(obj) + w_tv * r_tv + w_hf * r_hf + w_anchor * r_anchor
+            loss.backward()
+            opt.step()
+
+            if clamp_to_init:
+                with torch.no_grad():
+                    lo, hi = x_ref_pad.min().item(), x_ref_pad.max().item()
+                    x_pad.data.clamp_(lo, hi)
+
+            # write the optimized (padded) back to x (unpadded) for next iter/octave
+            x_np = unpad_3d(x_pad.detach().cpu().numpy(), pads)
+            x = torch.from_numpy(x_np).to(device).requires_grad_(True)
+
+            trace["obj"].append(float(obj.detach().cpu()))
+            trace["tv"].append(float(r_tv.detach().cpu()))
+            trace["hf"].append(float(r_hf.detach().cpu()))
+            trace["anchor"].append(float(r_anchor.detach().cpu()))
+            trace["octave"].append(oi)
+
+        # optional small gaussian smooth after each octave (helps stability at upsample)
+        # (cheap separable blur via average pooling as a proxy)
+        x = F.avg_pool3d(
+            F.pad(x, (1, 1, 1, 1, 1, 1), mode="replicate"), kernel_size=3, stride=1
+        )
+
+    # Final result at native size
+    dream = F.interpolate(
+        x.detach().cpu(), size=(D0, H0, W0), mode="trilinear", align_corners=False
+    ).numpy()
+    init = vol_t.detach().cpu().numpy()
+    delta = dream - init
+    return {"dream": dream, "delta": delta, "trace": trace}
 
 
 # ---------------------------
@@ -330,6 +577,20 @@ def parse_args():
         help="Clamp intensities to the original min/max (1/0).",
     )
     ap.add_argument(
+        "--use_octaves",
+        type=int,
+        default=1,
+        help="Use octaves (1/0).",
+    )
+    ap.add_argument("--num_octaves", type=int, default=4)
+    ap.add_argument(
+        "--octave_scale", type=float, default=1.4, help=">1: coarser at lower octaves"
+    )
+    ap.add_argument("--steps_per_octave", type=int, default=120)
+    ap.add_argument(
+        "--jitter_vox", type=int, default=1, help="random ±vox shifts each step"
+    )
+    ap.add_argument(
         "--log_file",
         type=Path,
         default="logs/nnunet_deepdream.log",
@@ -367,21 +628,42 @@ def main():
     vol_t = vol_t.to(device)
 
     # 3) Run DeepDream
-    out = run_deepdream(
-        model=model,
-        vol_t=vol_t,
-        objective=args.objective.lower(),
-        class_idx=int(args.class_idx),
-        use_pred_mask=bool(args.use_pred_mask),
-        layer_regex=args.layer_regex if args.objective == "feature" else None,
-        channel_idx=int(args.channel_idx) if args.objective == "feature" else None,
-        steps=int(args.steps),
-        lr=float(args.lr),
-        w_tv=float(args.w_tv),
-        w_hf=float(args.w_hf),
-        w_anchor=float(args.w_anchor),
-        clamp_to_init=bool(args.clamp_to_init),
-    )
+    if args.use_octaves:
+        out = run_deepdream_octaves(
+            model=model,
+            vol_t=vol_t,
+            objective=args.objective.lower(),
+            class_idx=int(args.class_idx),
+            use_pred_mask=bool(args.use_pred_mask),
+            layer_regex=args.layer_regex if args.objective == "feature" else None,
+            channel_idx=int(args.channel_idx) if args.objective == "feature" else None,
+            num_octaves=int(args.num_octaves),
+            octave_scale=float(args.octave_scale),
+            steps_per_octave=int(args.steps_per_octave),
+            lr=float(args.lr),
+            w_tv=float(args.w_tv),
+            w_hf=float(args.w_hf),
+            w_anchor=float(args.w_anchor),
+            clamp_to_init=bool(args.clamp_to_init),
+            jitter_vox=int(args.jitter_vox),
+        )
+
+    else:
+        out = run_deepdream(
+            model=model,
+            vol_t=vol_t,
+            objective=args.objective.lower(),
+            class_idx=int(args.class_idx),
+            use_pred_mask=bool(args.use_pred_mask),
+            layer_regex=args.layer_regex if args.objective == "feature" else None,
+            channel_idx=int(args.channel_idx) if args.objective == "feature" else None,
+            steps=int(args.steps),
+            lr=float(args.lr),
+            w_tv=float(args.w_tv),
+            w_hf=float(args.w_hf),
+            w_anchor=float(args.w_anchor),
+            clamp_to_init=bool(args.clamp_to_init),
+        )
 
     # 4) Save outputs
     out_dir = Path(args.output_dir).resolve()
@@ -398,7 +680,11 @@ def main():
         ],
         axis=1,
     )
-    save_npy(trace, out_dir / f"{args.case}_{args.objective}_trace.npy")
+    if args.use_octaves:
+        fn = f"{args.case}_{args.objective}_trace_octaves.npy"
+    else:
+        fn = f"{args.case}_{args.objective}_trace.npy"
+    save_npy(trace, out_dir / fn)
     logger.info(f"Saved dream/delta/trace to {out_dir}")
 
 
