@@ -25,6 +25,7 @@ from typing import List, Optional
 import matplotlib.cm as cm
 
 import numpy as np
+import nibabel as nib
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
