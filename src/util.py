@@ -27,6 +27,7 @@ import re
 import blosc2
 import scipy.ndimage as ndi
 import math
+import warnings
 
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 
@@ -122,6 +123,71 @@ def same_geometry(a: sitk.Image, b: sitk.Image) -> bool:
         and np.allclose(a.GetDirection(), b.GetDirection())
         and np.allclose(a.GetOrigin(), b.GetOrigin())
     )
+
+
+def sitk_to_nib(img_sitk: sitk.Image) -> nib.Nifti1Image:
+    """Convert SimpleITK image to nibabel image."""
+    logger.info("Converting SimpleITK to nibabel")
+    arr = sitk.GetArrayFromImage(img_sitk)  # z,y,x
+    arr = arr.astype(np.float32, copy=False)
+    # Build affine from SITK spacing/direction/origin
+    spacing = np.array(list(img_sitk.GetSpacing()))[::-1]  # x,y,z -> z,y,x
+    direction = np.array(list(img_sitk.GetDirection()))
+    direction = direction.reshape(3, 3)  # x,y,z basis
+    direction = direction[::-1, ::-1]  # reorder to z,y,x
+    origin = np.array(list(img_sitk.GetOrigin()))[::-1]
+    affine = np.eye(4, dtype=np.float32)
+    affine[:3, :3] = direction * spacing
+    affine[:3, 3] = origin
+    return nib.Nifti1Image(arr, affine)
+
+
+def safe_load_nifti(path_in: Path, dtype=np.float32) -> nib.Nifti1Image:
+    """Try nibabel; if header/IO error, fall back to SimpleITK."""
+    try:
+        logger.info(f"Loading: {path_in} (dtype={dtype})")
+        nii = nib.load(str(path_in))
+        # Force read to catch IO errors early
+        _ = nii.get_fdata(dtype=dtype)
+        return nii
+    except Exception as e:
+        warnings.warn(
+            f"[safe_load] nibabel failed on {path_in.name}: {e}. Trying SimpleITK…"
+        )
+        try:
+            img = sitk.ReadImage(str(path_in))
+            return sitk_to_nib(img)
+        except Exception as e2:
+            raise RuntimeError(
+                f"Failed to load {path_in} with nibabel and SimpleITK: {e2}"
+            ) from e
+
+
+def save_nifti_3d(
+    vol_DHW: np.ndarray, affine: np.ndarray, out_path: Path, dtype=np.float32
+):
+    vol = np.asarray(vol_DHW, dtype=dtype, order="F")  # F-order is fine for nibabel
+    img = nib.Nifti1Image(vol, affine)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Saving to {out_path}, dtype={dtype}")
+    nib.save(img, str(out_path))
+
+
+def save_nifti(img: nib.Nifti1Image, out_path: Path):
+    img.set_data_dtype(np.uint8)
+    logger.info(f"Saving to {out_path}, dtype={img.get_data_dtype()}")
+    nib.save(img, str(out_path))
+
+
+def save_nifti_image(
+    path_in: Path, out_path: Path, run_n4: bool, n4_shrink: int, n4_iters: int
+):
+    nii = safe_load_nifti(path_in)
+    data = nii.get_fdata().astype(np.float32, copy=False)
+    if run_n4:
+        data = n4_bias_correct_np(data, shrink=n4_shrink, n_iters=n4_iters)
+    out = nib.Nifti1Image(data, nii.affine, nii.header)
+    save_nifti(out, out_path)
 
 
 def pick_vis_channel(volume: np.ndarray) -> tuple[np.ndarray, int]:
@@ -235,16 +301,6 @@ def affine_from_spacing_origin(
     aff[0, 3], aff[1, 3], aff[2, 3] = origin
     logger.info(f"Affine:\n{aff}")
     return aff
-
-
-def save_nifti_3d(
-    vol_DHW: np.ndarray, affine: np.ndarray, out_path: Path, dtype=np.float32
-):
-    vol = np.asarray(vol_DHW, dtype=dtype, order="F")  # F-order is fine for nibabel
-    img = nib.Nifti1Image(vol, affine)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Saving to {out_path}")
-    nib.save(img, str(out_path))
 
 
 def normalize_robust(img_3d: np.ndarray) -> np.ndarray:

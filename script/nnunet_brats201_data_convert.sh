@@ -39,10 +39,10 @@ OUTPUT_DIR="nnUNet_raw"
 mkdir -p "$OUTPUT_DIR"
 
 PYTHON="${ENV_PREFIX}/bin/python"
-MAIN="src/nnUnet_convert_BraTS2017.py"
+MAIN="src/nnunet_BraTS2017_convert.py"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="${LOG_DIR}/nnunet_convert_BraTS2017_${TIMESTAMP}.log"
+LOG_FILE="${LOG_DIR}/nnunet_brats201_data_convert_${TIMESTAMP}.log"
 
 set +e
 $PYTHON "$MAIN" \

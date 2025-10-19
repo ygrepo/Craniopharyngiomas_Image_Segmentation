@@ -2,9 +2,9 @@
 """
 add_hd95_to_eval_json.py
 - Reads an nnUNet v2 evaluation JSON (e.g., summary.json or per-case list)
-- For each case and each class present in 'metrics', computes HD95 (mm)
+- For each case and each class present in 'metrics', computes label HD95 (mm)
   from the predicted segmentation and the reference label volume.
-- Writes a new JSON with the extra 'HD95' per class.
+- Writes a new JSON with the extra 'HD95' per class/region.
 
 Requires: SimpleITK
 """
@@ -99,11 +99,60 @@ def hd95_mm_from_binary(pred_bin: sitk.Image, ref_bin: sitk.Image) -> float:
     return float(np.percentile(all_d.astype(np.float64), 95))
 
 
+def load_region_spec(dj_path: Optional[str]) -> Optional[Dict[str, List[int]]]:
+    """
+    Parse dataset.json to get region definitions.
+    Returns mapping like {"whole_tumor":[1,2,3], "tumor_core":[2,3], "enhancing_tumor":[3]}
+    or None if dj_path is None.
+    """
+    if not dj_path:
+        return None
+    with open(dj_path, "r") as f:
+        dj = json.load(f)
+    labels = dj.get("labels", {})
+    # normalize keys
+    region_map = {}
+    for k, v in labels.items():
+        if k == "background":
+            continue
+        if isinstance(v, list):
+            region_map[k] = [int(x) for x in v]
+        elif isinstance(v, int):
+            # plain class (not a region)
+            continue
+    return region_map if region_map else None
+
+
+def region_masks_from_labels(
+    lbl_img: sitk.Image, region_to_classes: Dict[str, List[int]]
+) -> Dict[str, sitk.Image]:
+    """
+    Build region binary masks from a discrete label image using unions of class ids.
+    """
+    masks = {}
+    for rname, cls_list in region_to_classes.items():
+        mask = None
+        for cid in cls_list:
+            m = sitk.Equal(lbl_img, int(cid))
+            mask = m if mask is None else sitk.Or(mask, m)
+        if mask is None:
+            # empty (shouldn't happen), create zeros of same size
+            mask = sitk.Equal(lbl_img, -9999)
+        masks[rname] = mask
+    return masks
+
+
 def add_hd95_to_item(
-    item: Dict[str, Any], class_ids: Optional[List[int]] = None
+    item: Dict[str, Any],
+    class_ids: Optional[List[int]] = None,
+    region_to_classes: Optional[Dict[str, List[int]]] = None,
 ) -> None:
     """
-    Compute HD95 per class for a single eval item and insert into item['metrics'][cls]['HD95'].
+    Compute HD95 for label-classes (existing behavior) and, if region_to_classes is given,
+    also compute HD95 for regions (WT/TC/ET) from unions of labels.
+    Writes to:
+      item['metrics'][<class_id>]['HD95']  (labels)
+      item['metrics']['regions'][<region_name>]['HD95']  (regions)
     """
     pred_path = (
         item.get("prediction_file") or item.get("prediction") or item.get("pred")
@@ -112,15 +161,16 @@ def add_hd95_to_item(
     if not (pred_path and ref_path):
         return
 
-    # Read images (keep everything in SITK space so spacing/origin/direction are honored)
     pred_img = sitk.ReadImage(pred_path)
     ref_img = sitk.ReadImage(ref_path)
 
-    # classes to process: from metrics keys unless provided
     metrics = item.get("metrics", {})
+
+    # -------- Label classes (unchanged behavior) --------
     if class_ids is None:
         cls_ids = []
         for k in metrics.keys():
+            # only pick numeric keys at this level
             try:
                 cid = int(k)
             except Exception:
@@ -131,40 +181,62 @@ def add_hd95_to_item(
         cls_ids = class_ids
 
     for cid in cls_ids:
-        # Make binary masks for the class directly in SITK (no numpy re-spacing headaches)
         pred_bin = sitk.Equal(pred_img, int(cid))
         ref_bin = sitk.Equal(ref_img, int(cid))
-
         try:
             val = hd95_mm_from_binary(pred_bin, ref_bin)
-        except Exception as e:
-            # Robust fallback: mark as NaN so downstream can spot failures
+        except Exception:
             val = float("nan")
 
-        # Insert into metrics dict, creating sub-dict if needed
         m = metrics.get(str(cid))
         if not isinstance(m, dict):
             m = {}
             metrics[str(cid)] = m
         m["HD95"] = val
 
-    item["metrics"] = metrics  # ensure write-back
+    # -------- Regions (WT/TC/ET) --------
+    if region_to_classes:
+        # ensure subtree exists
+        regions_metrics = metrics.get("regions")
+        if not isinstance(regions_metrics, dict):
+            regions_metrics = {}
+            metrics["regions"] = regions_metrics
+
+        pred_regions = region_masks_from_labels(pred_img, region_to_classes)
+        ref_regions = region_masks_from_labels(ref_img, region_to_classes)
+
+        for rname, p_mask in pred_regions.items():
+            r_mask = ref_regions[rname]
+            try:
+                val = hd95_mm_from_binary(p_mask, r_mask)
+            except Exception:
+                val = float("nan")
+            m = regions_metrics.get(rname)
+            if not isinstance(m, dict):
+                m = {}
+                regions_metrics[rname] = m
+            m["HD95"] = val
+
+    item["metrics"] = metrics  # write-back
 
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Add HD95 (mm) per class to an nnUNet v2 evaluation JSON."
+        description="Add HD95 (mm) per class/region to an nnUNet v2 evaluation JSON."
     )
     ap.add_argument(
-        "-i", "--input", required=True, help="Path to eval JSON (e.g., summary.json)"
+        "-i", "--input", required=True, help="summary.json or per-case JSON"
     )
-    ap.add_argument(
-        "-o", "--output", default=None, help="Output JSON (default: *_with_hd95.json)"
-    )
+    ap.add_argument("-o", "--output", default=None, help="Default: *_with_hd95.json")
     ap.add_argument(
         "--classes",
         default=None,
-        help="Comma-separated class IDs to compute (default: all non-zero classes present in metrics).",
+        help="Comma-separated class IDs for label HD95 (default: all nonzero ids present).",
+    )
+    ap.add_argument(
+        "--dataset_json",
+        default=None,
+        help="Path to dataset.json (enables region HD95 using its 'labels' unions).",
     )
     args = ap.parse_args()
     setup_logging(None, "INFO")
@@ -172,24 +244,25 @@ def main():
     logger.info(f"Input: {args.input}")
     logger.info(f"Output: {args.output}")
     logger.info(f"Classes: {args.classes}")
+    logger.info(f"Dataset JSON: {args.dataset_json}")
 
-    out_path = args.output or (os.path.splitext(args.input)[0] + "_with_hd95.json")
-    class_ids = None
-    if args.classes:
-        class_ids = [int(x.strip()) for x in args.classes.split(",") if x.strip()]
+    class_ids = (
+        [int(x.strip()) for x in args.classes.split(",")] if args.classes else None
+    )
+    region_to_classes = load_region_spec(args.dataset_json)
+    logger.info(f"Region to classes: {region_to_classes}")
 
     with open(args.input, "r") as f:
         data = json.load(f)
 
     items = load_items(data)
     for it in items:
-        add_hd95_to_item(it, class_ids)
+        add_hd95_to_item(it, class_ids, region_to_classes)
 
-    # If the original top-level was a list, keep it a list; if it was a dict with a key, keep that too
+    # preserve top-level shape
     if isinstance(data, list):
         new_data = items
     elif isinstance(data, dict):
-        # Try to put back under the same key if possible
         placed = False
         for k in ("results", "cases", "items", "per_case"):
             if isinstance(data.get(k), list):
@@ -199,12 +272,12 @@ def main():
         if not placed and (
             any(k in data for k in ("prediction_file", "reference_file", "metrics"))
         ):
-            # Single item dict
             data = items[0] if items else data
         new_data = data
     else:
         new_data = items
 
+    out_path = args.output or (os.path.splitext(args.input)[0] + "_with_hd95.json")
     with open(out_path, "w") as f:
         json.dump(new_data, f, indent=2)
 

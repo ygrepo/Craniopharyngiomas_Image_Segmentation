@@ -6,9 +6,6 @@ import re
 import random
 from collections import OrderedDict, defaultdict
 import argparse
-import warnings
-
-import SimpleITK as sitk
 from tqdm import tqdm
 import sys
 
@@ -17,7 +14,8 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.util import (
     get_logger,
     setup_logging,
-    n4_bias_correct_np,
+    safe_load_nifti,
+    save_nifti_image,
 )
 
 logger = get_logger(__name__)
@@ -52,54 +50,6 @@ def _case_and_modality(path: Path) -> tuple[str, str | None]:
         return (base, None)
     # normalize tag to lowercase
     return (m.group(1), m.group(2).lower())
-
-
-def _sitk_to_nib(img_sitk: sitk.Image) -> nib.Nifti1Image:
-    arr = sitk.GetArrayFromImage(img_sitk)  # z,y,x
-    arr = arr.astype(np.float32, copy=False)
-    # Build affine from SITK spacing/direction/origin
-    spacing = np.array(list(img_sitk.GetSpacing()))[::-1]  # x,y,z -> z,y,x
-    direction = np.array(list(img_sitk.GetDirection()))
-    direction = direction.reshape(3, 3)  # x,y,z basis
-    direction = direction[::-1, ::-1]  # reorder to z,y,x
-    origin = np.array(list(img_sitk.GetOrigin()))[::-1]
-    affine = np.eye(4, dtype=np.float32)
-    affine[:3, :3] = direction * spacing
-    affine[:3, 3] = origin
-    return nib.Nifti1Image(arr, affine)
-
-
-def _safe_load_nifti(path_in: Path, dtype=np.float32) -> nib.Nifti1Image:
-    """Try nibabel; if header/IO error, fall back to SimpleITK."""
-    try:
-        nii = nib.load(str(path_in))
-        # Force read to catch IO errors early
-        _ = nii.get_fdata(dtype=dtype)
-        return nii
-    except Exception as e:
-        warnings.warn(
-            f"[safe_load] nibabel failed on {path_in.name}: {e}. Trying SimpleITK…"
-        )
-        try:
-            img = sitk.ReadImage(str(path_in))
-            return _sitk_to_nib(img)
-        except Exception as e2:
-            raise RuntimeError(
-                f"Failed to load {path_in} with nibabel and SimpleITK: {e2}"
-            ) from e
-
-
-def _save_image_to(
-    path_in: Path, out_path: Path, run_n4: bool, n4_shrink: int, n4_iters: int
-):
-    nii = _safe_load_nifti(path_in)
-    data = nii.get_fdata().astype(np.float32, copy=False)
-    if run_n4:
-        data = n4_bias_correct_np(data, shrink=n4_shrink, n_iters=n4_iters)
-    out = nib.Nifti1Image(data, nii.affine, nii.header)
-    out.set_data_dtype(np.float32)
-    # logger.info(f"Saving to {out_path}")
-    nib.save(out, str(out_path))
 
 
 def convert_braTS_to_nnUNet(
@@ -201,7 +151,7 @@ def convert_braTS_to_nnUNet(
         # images in fixed channel order
         for ch, m in enumerate(modalities):
             try:
-                _save_image_to(
+                save_nifti_image(
                     have[m],
                     imgTr / f"{cid}_{ch:04d}.nii.gz",
                     do_n4,
@@ -236,8 +186,15 @@ def convert_braTS_to_nnUNet(
 
         # labels
         try:
-            seg_nii = _safe_load_nifti(have["seg"], dtype=np.float32)
+            seg_nii = safe_load_nifti(have["seg"], dtype=np.float32)
             seg = remap_labels_to_0123(seg_nii.get_fdata()).astype(np.uint8, copy=False)
+            save_nifti_image(
+                have["seg"],
+                labTr / f"{cid}.nii.gz",
+                do_n4,
+                n4_shrink,
+                n4_iters,
+            )
             out_lbl = nib.Nifti1Image(seg, seg_nii.affine, seg_nii.header)
             out_lbl.set_data_dtype(np.uint8)
             nib.save(out_lbl, str(labTr / f"{cid}.nii.gz"))
@@ -264,7 +221,7 @@ def convert_braTS_to_nnUNet(
             continue
         try:
             for ch, m in enumerate(modalities):
-                _save_image_to(
+                save_nifti_image(
                     have[m],
                     imgTs / f"{cid}_{ch:04d}.nii.gz",
                     do_n4,

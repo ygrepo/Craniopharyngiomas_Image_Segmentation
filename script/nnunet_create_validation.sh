@@ -12,12 +12,20 @@
 set -euo pipefail
 
 # --------- Config (edit if needed) ----------
-DATASET_ID=501
+# DATASET_ID=501
+# DATASET_NAME=BraTS2017_4ch
+# FOLD=0
+# CFG=3d_fullres
+# TR=nnUNetTrainer
+# PLANS_ID=nnUNetPlans
+
+DATASET_ID=502
 DATASET_NAME=BraTS2017_4ch
 FOLD=0
 CFG=3d_fullres
 TR=nnUNetTrainer
-PLANS_ID=nnUNetPlans
+PLANS_ID=nnUNetResEncUNetMPlans
+
 # -------------------------------------------
 
 # --- env setup ---
@@ -74,13 +82,13 @@ spl = os.path.join(prep, "splits_final.json")
 with open(spl) as f:
     splits = json.load(f)
 val_ids = sorted(set(splits[0]["val"]))
-with open("val_ids_fold0.txt","w") as g:
+with open("val_ids_${DATASET_ID}_fold${FOLD}.txt","w") as g:
     g.write("\n".join(val_ids))
-print(f"[ok] Wrote {len(val_ids)} IDs to val_ids_fold0.txt")
+print(f"[ok] Wrote {len(val_ids)} IDs to val_ids_${DATASET_ID}_fold${FOLD}.txt")
 PY
 
 # --- build subset (symlinks) ---
-VAL_ROOT="$PWD/tmp_val"
+VAL_ROOT="$PWD/tmp_${DATASET_ID}_fold${FOLD}_val"
 VALI="${VAL_ROOT}/imagesTr"; mkdir -p "$VALI"
 VALL="${VAL_ROOT}/labelsTr"; mkdir -p "$VALL"
 
@@ -105,7 +113,7 @@ while read -r ID; do
   else
     echo "[warn] missing label: $lab_src"
   fi
-done < val_ids_fold0.txt
+done < val_ids_${DATASET_ID}_fold${FOLD}.txt
 
 n_cases=$(ls -1 "$VALI"/*_0000.nii.gz 2>/dev/null | wc -l | awk '{print $1}')
 echo "[info] Symlinked $n_cases validation cases (counted by *_0000.nii.gz)."
@@ -133,6 +141,7 @@ nnUNetv2_predict \
   -chk checkpoint_best.pth \
   --disable_tta \
   -device cuda \
+  --save_probabilities \
   --disable_progress_bar
 
 # verify predictions were created
@@ -155,16 +164,22 @@ nnUNetv2_evaluate_folder \
 echo "[ok] Wrote metrics to: $OUT_JSON"
 
 # --- add HD95 per class to the JSON (writes summary_with_hd95.json) ---
-ADD_HD95_PY="src/add_hd95_to_eval_json.py"   # path to the helper script
+ADD_HD95_PY="src/nnunet_add_hd95_to_eval_json.py"   # path to the helper script
 OUT_JSON_HD95="${OUTP}/summary_with_hd95.json"
 
 echo "[info] Adding HD95 to: ${OUT_JSON}"
 # Option A: specify exactly which classes to compute (BraTS: 1,2,3)
-"${PYTHON}" "${ADD_HD95_PY}" \
-  -i "${OUT_JSON}" \
-  -o "${OUT_JSON_HD95}"
+# "${PYTHON}" "${ADD_HD95_PY}" \
+#   -i "${OUT_JSON}" \
+#   -o "${OUT_JSON_HD95}"
 
   # \
   # --classes 1,2,3
+
+"${PYTHON}" "${ADD_HD95_PY}" \
+  -i "$OUT_JSON" \
+  -o "$OUT_JSON_HD95" \
+  --dataset_json "${DJ}"
+
 
 echo "[ok] Wrote: ${OUT_JSON_HD95}"
