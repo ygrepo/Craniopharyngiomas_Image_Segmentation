@@ -10,7 +10,6 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 ENV_PREFIX="/projects/gbm_modeling/.conda/envs/mri"
 conda activate "${ENV_PREFIX}"
 PYTHON="${ENV_PREFIX}/bin/python"
-PYTHON="/Users/yvesgreatti/.pyenv/shims/python"
 MAIN="src/nnunet_collect_training_stats.py"
 
 LOG_DIR="logs"
