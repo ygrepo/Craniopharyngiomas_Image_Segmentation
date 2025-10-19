@@ -310,9 +310,8 @@ def main():
         # Align shapes
         delta_3d, base_all = coerce_same_shape(delta_3d, base_all)
 
-        # DEBUG: Check data before processing
         logger.info(
-            f"base_all before processing: shape={base_all.shape}, min={base_all.min()}, max={base_all.max()}, mean={base_all.mean()}"
+            f"base_all before processing: shape={base_all.shape}, min={base_all.min()}, max={base_all.max()}"
         )
 
         heat_3d, mask_3d = build_heat_and_mask(
@@ -324,13 +323,6 @@ def main():
         # Build nifti objects in nnUNet (RAS) space
         nii_base = Nifti1Image(base_all.astype(np.float32), affine)
         nii_heat = Nifti1Image(heat_3d.astype(np.float32), affine)
-
-        # DEBUG: Check NIfTI data before resampling
-        logger.info(
-            f"nii_base before resampling: shape={nii_base.shape}, data range={nii_base.get_fdata().min()}-{nii_base.get_fdata().max()}"
-        )
-        logger.info(f"Original affine:\n{nii_base.affine}")
-
         nii_mask = (
             Nifti1Image(mask_3d.astype(np.uint8), affine)
             if mask_3d is not None
@@ -347,57 +339,86 @@ def main():
         logger.info(f"Reference image: shape={ref_img.shape}")
         logger.info(f"Reference affine:\n{ref_img.affine}")
 
-        target = (ref_img.shape, ref_img.affine)
-
-        # Resample with debugging
-        nii_base_resampled = resample_from_to(nii_base, target, order=1)
-
-        # DEBUG: Check after resampling
-        resampled_data = nii_base_resampled.get_fdata()
-        logger.info(
-            f"After resampling: shape={resampled_data.shape}, min={resampled_data.min()}, max={resampled_data.max()}, mean={resampled_data.mean()}"
+        # SOLUTION 1: Reorient both images to standard orientation first
+        from nibabel.orientations import (
+            io_orientation,
+            ornt_transform,
+            apply_orientation,
         )
 
-        # Check if resampling killed the data
-        if resampled_data.max() == 0 or np.all(
-            resampled_data == resampled_data.flat[0]
-        ):
-            logger.warning("WARNING: Resampling resulted in blank image!")
-            logger.info("Trying alternative resampling...")
+        # Get orientations
+        orig_ornt = io_orientation(nii_base.affine)
+        ref_ornt = io_orientation(ref_img.affine)
 
-            # Try different approach
-            from nilearn.image import resample_to_img
+        logger.info(f"Original orientation: {orig_ornt}")
+        logger.info(f"Reference orientation: {ref_ornt}")
 
-            nii_base = resample_to_img(nii_base, ref_img, interpolation="linear")
-        else:
-            nii_base = nii_base_resampled
+        # Reorient original to match reference orientation
+        ornt_transform_matrix = ornt_transform(orig_ornt, ref_ornt)
 
-            # Continue with other images...
-            nii_heat = resample_from_to(nii_heat, target, order=1)
-            if nii_mask is not None:
-                nii_mask = resample_from_to(nii_mask, target, order=0)
-            if nii_dream is not None:
-                nii_dream = resample_from_to(nii_dream, target, order=1)
+        # Apply orientation transform to data
+        reoriented_data = apply_orientation(nii_base.get_fdata(), ornt_transform_matrix)
 
-        # Final check before saving
+        # Create new affine that matches reference orientation but keeps original spacing
+        new_affine = nii_base.affine.copy()
+        # Copy the orientation part from reference
+        new_affine[:3, :3] = ref_img.affine[:3, :3] * np.abs(new_affine[:3, :3])
+
+        # Create reoriented image
+        nii_base_reoriented = Nifti1Image(
+            reoriented_data.astype(np.float32), new_affine
+        )
+
+        # Now resample
+        target = (ref_img.shape, ref_img.affine)
+        nii_base = resample_from_to(nii_base_reoriented, target, order=1)
+
+        # Check result
         final_data = nii_base.get_fdata()
         logger.info(
-            f"Final data before saving: min={final_data.min()}, max={final_data.max()}"
+            f"After reorientation+resampling: min={final_data.min()}, max={final_data.max()}"
         )
 
-        # --- Save results ---
-        out_dir = args.output_dir.resolve()
-        prefix = (args.delta_path or args.dream_path or Path("deepdream")).stem
+        # Apply same process to other images
+        heat_reoriented_data = apply_orientation(
+            nii_heat.get_fdata(), ornt_transform_matrix
+        )
+        nii_heat_reoriented = Nifti1Image(
+            heat_reoriented_data.astype(np.float32), new_affine
+        )
+        nii_heat = resample_from_to(nii_heat_reoriented, target, order=1)
 
-        nii_base.to_filename(out_dir / f"{prefix}_image.nii.gz")
-        nii_heat.to_filename(out_dir / f"{prefix}_deepdream_heat_abs.nii.gz")
         if nii_mask is not None:
-            pct_int = int(round(float(args.mask_pct)))
-            nii_mask.to_filename(out_dir / f"{prefix}_deepdream_mask_p{pct_int}.nii.gz")
-        if nii_dream is not None:
-            nii_dream.to_filename(out_dir / f"{prefix}_dream.nii.gz")
+            mask_reoriented_data = apply_orientation(
+                nii_mask.get_fdata(), ornt_transform_matrix
+            )
+            nii_mask_reoriented = Nifti1Image(
+                mask_reoriented_data.astype(np.uint8), new_affine
+            )
+            nii_mask = resample_from_to(nii_mask_reoriented, target, order=0)
 
-        logger.info("[ok] Slicer-ready NIfTI exports written to %s", out_dir)
+        if nii_dream is not None:
+            dream_reoriented_data = apply_orientation(
+                nii_dream.get_fdata(), ornt_transform_matrix
+            )
+            nii_dream_reoriented = Nifti1Image(
+                dream_reoriented_data.astype(np.float32), new_affine
+            )
+            nii_dream = resample_from_to(nii_dream_reoriented, target, order=1)
+
+    # --- Save results ---
+    out_dir = args.output_dir.resolve()
+    prefix = (args.delta_path or args.dream_path or Path("deepdream")).stem
+
+    nii_base.to_filename(out_dir / f"{prefix}_image.nii.gz")
+    nii_heat.to_filename(out_dir / f"{prefix}_deepdream_heat_abs.nii.gz")
+    if nii_mask is not None:
+        pct_int = int(round(float(args.mask_pct)))
+        nii_mask.to_filename(out_dir / f"{prefix}_deepdream_mask_p{pct_int}.nii.gz")
+    if nii_dream is not None:
+        nii_dream.to_filename(out_dir / f"{prefix}_dream.nii.gz")
+
+    logger.info("[ok] Slicer-ready NIfTI exports written to %s", out_dir)
 
     # if args.save_slicer:
     #     props = load_props_from_pkl(args.props_path)
@@ -406,6 +427,12 @@ def main():
 
     #     # Align shapes
     #     delta_3d, base_all = coerce_same_shape(delta_3d, base_all)
+
+    #     # DEBUG: Check data before processing
+    #     logger.info(
+    #         f"base_all before processing: shape={base_all.shape}, min={base_all.min()}, max={base_all.max()}, mean={base_all.mean()}"
+    #     )
+
     #     heat_3d, mask_3d = build_heat_and_mask(
     #         delta_3d,
     #         abs_pct=float(args.abs_pct),
@@ -415,6 +442,13 @@ def main():
     #     # Build nifti objects in nnUNet (RAS) space
     #     nii_base = Nifti1Image(base_all.astype(np.float32), affine)
     #     nii_heat = Nifti1Image(heat_3d.astype(np.float32), affine)
+
+    #     # DEBUG: Check NIfTI data before resampling
+    #     logger.info(
+    #         f"nii_base before resampling: shape={nii_base.shape}, data range={nii_base.get_fdata().min()}-{nii_base.get_fdata().max()}"
+    #     )
+    #     logger.info(f"Original affine:\n{nii_base.affine}")
+
     #     nii_mask = (
     #         Nifti1Image(mask_3d.astype(np.uint8), affine)
     #         if mask_3d is not None
@@ -427,20 +461,47 @@ def main():
     #         )
     #         nii_dream = Nifti1Image(dream_3d.astype(np.float32), affine)
 
-    #     # --- reorient/resample all outputs to match ref_nifti ---
-    #     if args.ref_nifti is not None:
-    #         ref_img = nib.load(str(args.ref_nifti))
-    #         target = (
-    #             ref_img.shape,
-    #             ref_img.affine,
-    #         )  # <-- NOT (ref_img, ref_img.affine)
+    #     ref_img = nib.load(args.ref_nifti)
+    #     logger.info(f"Reference image: shape={ref_img.shape}")
+    #     logger.info(f"Reference affine:\n{ref_img.affine}")
 
-    #         nii_base = resample_from_to(nii_base, target, order=1)
+    #     target = (ref_img.shape, ref_img.affine)
+
+    #     # Resample with debugging
+    #     nii_base_resampled = resample_from_to(nii_base, target, order=1)
+
+    #     # DEBUG: Check after resampling
+    #     resampled_data = nii_base_resampled.get_fdata()
+    #     logger.info(
+    #         f"After resampling: shape={resampled_data.shape}, min={resampled_data.min()}, max={resampled_data.max()}, mean={resampled_data.mean()}"
+    #     )
+
+    #     # Check if resampling killed the data
+    #     if resampled_data.max() == 0 or np.all(
+    #         resampled_data == resampled_data.flat[0]
+    #     ):
+    #         logger.warning("WARNING: Resampling resulted in blank image!")
+    #         logger.info("Trying alternative resampling...")
+
+    #         # Try different approach
+    #         from nilearn.image import resample_to_img
+
+    #         nii_base = resample_to_img(nii_base, ref_img, interpolation="linear")
+    #     else:
+    #         nii_base = nii_base_resampled
+
+    #         # Continue with other images...
     #         nii_heat = resample_from_to(nii_heat, target, order=1)
     #         if nii_mask is not None:
     #             nii_mask = resample_from_to(nii_mask, target, order=0)
     #         if nii_dream is not None:
     #             nii_dream = resample_from_to(nii_dream, target, order=1)
+
+    #     # Final check before saving
+    #     final_data = nii_base.get_fdata()
+    #     logger.info(
+    #         f"Final data before saving: min={final_data.min()}, max={final_data.max()}"
+    #     )
 
     #     # --- Save results ---
     #     out_dir = args.output_dir.resolve()
