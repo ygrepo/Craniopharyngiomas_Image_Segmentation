@@ -15,7 +15,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
+import re
 import numpy as np
 import SimpleITK as sitk
 
@@ -24,6 +24,8 @@ sys.path.insert(0, str(REPO_ROOT))
 from src.util import get_logger, setup_logging  # noqa: E402
 
 logger = get_logger(__name__)
+
+_TUPLE_RE = re.compile(r"^\(\s*\d+(?:\s*,\s*\d+)+\s*\)$")  # NEW
 
 
 def load_items(data: Any) -> List[Dict[str, Any]]:
@@ -142,6 +144,16 @@ def region_masks_from_labels(
     return masks
 
 
+def _union_mask_from_labels(img: sitk.Image, ids):  # NEW
+    """Binary OR of label==id for each id in ids (SITK, preserves spacing/origin)."""
+    m = None
+    for cid in ids:
+        part = sitk.Equal(img, int(cid))
+        m = part if m is None else sitk.Or(m, part)
+    # if nothing matched, return an always-false mask with same geometry
+    return m if m is not None else sitk.Equal(img, -1234567)
+
+
 def add_hd95_to_item(
     item: Dict[str, Any],
     class_ids: Optional[List[int]] = None,
@@ -217,6 +229,20 @@ def add_hd95_to_item(
                 regions_metrics[rname] = m
             m["HD95"] = val
 
+    # If the eval JSON already contains union entries under item['metrics'],
+    # compute HD95 for those too (as 'label' metrics, not the 'regions' block).
+    for k, sub in list(metrics.items()):
+        if not isinstance(sub, dict):
+            continue
+        if isinstance(k, str) and _TUPLE_RE.match(k):
+            ids = [int(x) for x in re.findall(r"\d+", k)]
+            try:
+                pred_bin = _union_mask_from_labels(pred_img, ids)
+                ref_bin = _union_mask_from_labels(ref_img, ids)
+                val = hd95_mm_from_binary(pred_bin, ref_bin)
+            except Exception:
+                val = float("nan")
+            sub["HD95"] = val
     item["metrics"] = metrics  # write-back
 
 

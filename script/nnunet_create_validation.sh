@@ -177,7 +177,7 @@ echo "[ok] Wrote metrics to: $OUT_JSON"
 
 # --- add HD95 per class to the JSON (writes summary_with_hd95.json) ---
 ADD_HD95_PY="src/nnunet_add_hd95_to_eval_json.py"   # path to the helper script
-OUT_JSON_HD95="${OUTP}/summary_with_hd95.json"
+OUT_JSON_HD95="${OUTP}/${DATASET_ID}_fold${FOLD}_summary_with_hd95.json"
 
 echo "[info] Adding HD95 to: ${OUT_JSON}"
 # Option A: specify exactly which classes to compute (BraTS: 1,2,3)
