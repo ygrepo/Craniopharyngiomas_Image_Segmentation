@@ -10,6 +10,7 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 ENV_PREFIX="/projects/gbm_modeling/.conda/envs/mri"
 conda activate "${ENV_PREFIX}"
 PYTHON="${ENV_PREFIX}/bin/python"
+PYTHON="/Users/yvesgreatti/.pyenv/shims/python"
 MAIN="src/nnunet_collect_training_stats.py"
 
 LOG_DIR="logs"
@@ -36,8 +37,8 @@ exit_code=$?
 set -e
 
 if [[ ${exit_code} -eq 0 ]]; then
-  echo "OK: ${combo} finished at $(date)" | tee -a "${log_file}"
+  echo "OK: script finished at $(date)" | tee -a "${log_file}"
 else
-  echo "ERROR: ${combo} failed with exit code ${exit_code} at $(date)" | tee -a "${log_file}"
+  echo "ERROR: script failed with exit code ${exit_code} at $(date)" | tee -a "${log_file}"
   exit ${exit_code}
 fi
