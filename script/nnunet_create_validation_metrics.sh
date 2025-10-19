@@ -64,13 +64,12 @@ MAIN="src/nnunet_eval_to_csv.py"
 DJ="${RAW}/dataset.json"
 
 "${PYTHON}" "${MAIN}" \
-  --in_fn "${IN_JSON_HD95}" \
+  --in_fn "${DJ}" \
   --out_cases_fn "${OUT_CASE_FN}" \
   --out_summary_fn "${OUT_SUMMARY_FN}" \
   --counts_out_fn "${OUT_COUNTS_FN}" \
   --std_type "${STD_TYPE}" \
   --hd95_quantiles "${HD95_QUANTILES}" \
-  --dataset_json "${DJ}" \
   --rename_hd95_mm --round 3
   
 # awk -F, 'NR==1 || $2=="label"' "${OUT_CASE_FN}" > "${OUT_CASE_FN%.csv}_labels.csv"
