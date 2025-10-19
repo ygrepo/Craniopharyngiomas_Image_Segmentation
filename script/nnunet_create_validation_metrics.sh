@@ -3,19 +3,19 @@
 set -euo pipefail
 
 # --------- Config (edit if needed) ----------
-# DATASET_ID=501
-# DATASET_NAME=BraTS2017_4ch
-# FOLD=0
-# CFG=3d_fullres
-# TR=nnUNetTrainer
-# PLANS_ID=nnUNetPlans
-
-DATASET_ID=502
+DATASET_ID=501
 DATASET_NAME=BraTS2017_4ch
 FOLD=0
 CFG=3d_fullres
 TR=nnUNetTrainer
-PLANS_ID=nnUNetResEncUNetMPlans
+PLANS_ID=nnUNetPlans
+
+# DATASET_ID=502
+# DATASET_NAME=BraTS2017_4ch
+# FOLD=0
+# CFG=3d_fullres
+# TR=nnUNetTrainer
+# PLANS_ID=nnUNetResEncUNetMPlans
 
 
 # -------------------------------------------
@@ -72,13 +72,5 @@ DJ="${RAW}/dataset.json"
   --hd95_quantiles "${HD95_QUANTILES}" \
   --granularity labels \
   --rename_hd95_mm --round 3
-  
-# awk -F, 'NR==1 || $2=="label"' "${OUT_CASE_FN}" > "${OUT_CASE_FN%.csv}_labels.csv"
-# awk -F, 'NR==1 || $1=="label"' "${OUT_SUMMARY_FN}" > "${OUT_SUMMARY_FN%.csv}_labels.csv"
-
-# awk -F, 'NR==1 || $2=="region"' "${OUT_CASE_FN}" > "${OUT_CASE_FN%.csv}_regions.csv"
-# awk -F, 'NR==1 || $1=="region"' "${OUT_SUMMARY_FN}" > "${OUT_SUMMARY_FN%.csv}_regions.csv"
-
-
 echo "[ok] Wrote: ${OUT_SUMMARY_FN}"
 echo "[ok] Wrote: ${OUT_CASE_FN}"
