@@ -80,84 +80,204 @@ def _extract_dices(body: str):
 
 
 def parse_one_file(path: str, rows: Dict[int, Dict[str, Any]]):
-    with open(path, "r", errors="replace") as f:
-        for line in f:
-            s = line.strip()
-            if not s:
-                continue
+    """
+    Robust parser that:
+      - Tracks the current epoch explicitly (no ep=max(rows) heuristic).
+      - Works with/without timestamp prefixes.
+      - Skips blank/spacer lines safely.
+      - Extracts Dice triplets from np.floatXX(...) or raw numbers.
+      - Updates ts_last/src_file consistently on every matched line.
+    """
+    current_epoch = None
+    try:
+        with open(path, "r", errors="replace") as f:
+            for line in f:
+                s = line.strip()
+                if not s:
+                    # skip empty lines
+                    continue
 
-            # epoch start
-            m = re_epoch.search(line) or re_epoch_nt.search(s)
-            if m:
-                epoch = int(m.group("epoch"))
-                ts = m.groupdict().get("ts", "")
-                rows.setdefault(
-                    epoch,
-                    {
-                        "epoch": epoch,
-                        "ts_first": ts,
-                        "ts_last": ts,
-                        "lr": "",
-                        "train_loss": "",
-                        "val_loss": "",
-                        "epoch_time_sec": "",
-                        "Necrotic_Dice": "",
-                        "Edema_Dice": "",
-                        "Enhancing_Dice": "",
-                        "EMA_DICE": "",
-                        "src_file": os.path.basename(path),
-                    },
-                )
-                continue
-
-            if not rows:
-                continue  # ignore lines before first epoch
-
-            ep = max(rows.keys())
-            r = rows[ep]
-
-            for regex, key in [
-                (re_lr, "lr"),
-                (re_lr_nt, "lr"),
-                (re_trainloss, "train_loss"),
-                (re_trainloss_nt, "train_loss"),
-                (re_valloss, "val_loss"),
-                (re_valloss_nt, "val_loss"),
-            ]:
-                m = regex.search(line)
+                # --- Epoch header (with or without timestamp) ---
+                m = re_epoch.search(line) or re_epoch_nt.search(s)
                 if m:
-                    r[key] = m.group(list(m.groupdict().keys())[-1])
-                    r["ts_last"] = m.groupdict().get("ts", r["ts_last"])
+                    current_epoch = int(m.group("epoch"))
+                    ts = m.groupdict().get("ts", "")
+                    r = rows.get(current_epoch)
+                    if r is None:
+                        rows[current_epoch] = {
+                            "epoch": current_epoch,
+                            "ts_first": ts,
+                            "ts_last": ts,
+                            "lr": "",
+                            "train_loss": "",
+                            "val_loss": "",
+                            "epoch_time_sec": "",
+                            "Necrotic_Dice": "",
+                            "Edema_Dice": "",
+                            "Enhancing_Dice": "",
+                            "EMA_DICE": "",
+                            "src_file": os.path.basename(path),
+                        }
+                    else:
+                        # epoch already seen in another file pass; update last seen info
+                        if not r.get("ts_first") and ts:
+                            r["ts_first"] = ts
+                        if ts:
+                            r["ts_last"] = ts
+                        r["src_file"] = os.path.basename(path)
+                    continue
+
+                # Ignore any metric lines before the first epoch
+                if current_epoch is None:
+                    continue
+
+                r = rows[current_epoch]
+
+                # --- Learning rate ---
+                m = re_lr.search(line) or re_lr_nt.search(s)
+                if m:
+                    r["lr"] = m.group("lr")
+                    ts = m.groupdict().get("ts", r["ts_last"])
+                    if ts:
+                        r["ts_last"] = ts
                     r["src_file"] = os.path.basename(path)
-                    break
+                    continue
 
-            m = re_dice_line.search(line) or re_dice_line_nt.search(s)
-            if m:
-                d1, d2, d3 = _extract_dices(m.group("body"))
-                r.update(
-                    {
-                        "Necrotic_Dice": d1,
-                        "Edema_Dice": d2,
-                        "Enhancing_Dice": d3,
-                        "ts_last": m.groupdict().get("ts", r["ts_last"]),
-                        "src_file": os.path.basename(path),
-                    }
-                )
-                continue
+                # --- Train loss ---
+                m = re_trainloss.search(line) or re_trainloss_nt.search(s)
+                if m:
+                    r["train_loss"] = m.group("loss")
+                    ts = m.groupdict().get("ts", r["ts_last"])
+                    if ts:
+                        r["ts_last"] = ts
+                    r["src_file"] = os.path.basename(path)
+                    continue
 
-            m = re_epoch_time.search(line) or re_epoch_time_nt.search(s)
-            if m:
-                r["epoch_time_sec"] = m.group("sec")
-                r["ts_last"] = m.groupdict().get("ts", r["ts_last"])
-                r["src_file"] = os.path.basename(path)
-                continue
+                # --- Val loss ---
+                m = re_valloss.search(line) or re_valloss_nt.search(s)
+                if m:
+                    r["val_loss"] = m.group("loss")
+                    ts = m.groupdict().get("ts", r["ts_last"])
+                    if ts:
+                        r["ts_last"] = ts
+                    r["src_file"] = os.path.basename(path)
+                    continue
 
-            m = re_ema.search(line) or re_ema_nt.search(s)
-            if m:
-                r["EMA_DICE"] = m.group("ema")
-                r["ts_last"] = m.groupdict().get("ts", r["ts_last"])
-                r["src_file"] = os.path.basename(path)
-                continue
+                # --- Dice triplet ---
+                m = re_dice_line.search(line) or re_dice_line_nt.search(s)
+                if m:
+                    d1, d2, d3 = _extract_dices(m.group("body"))
+                    r["Necrotic_Dice"] = d1
+                    r["Edema_Dice"] = d2
+                    r["Enhancing_Dice"] = d3
+                    ts = m.groupdict().get("ts", r["ts_last"])
+                    if ts:
+                        r["ts_last"] = ts
+                    r["src_file"] = os.path.basename(path)
+                    continue
+
+                # --- Epoch time ---
+                m = re_epoch_time.search(line) or re_epoch_time_nt.search(s)
+                if m:
+                    r["epoch_time_sec"] = m.group("sec")
+                    ts = m.groupdict().get("ts", r["ts_last"])
+                    if ts:
+                        r["ts_last"] = ts
+                    r["src_file"] = os.path.basename(path)
+                    continue
+
+                # --- EMA pseudo Dice (with/without "Yayy! New best ...") ---
+                m = re_ema.search(line) or re_ema_nt.search(s)
+                if m:
+                    r["EMA_DICE"] = m.group("ema")
+                    ts = m.groupdict().get("ts", r["ts_last"])
+                    if ts:
+                        r["ts_last"] = ts
+                    r["src_file"] = os.path.basename(path)
+                    continue
+    except FileNotFoundError:
+        logger.warning(f"[warn] not found: {path}")
+
+
+# def parse_one_file(path: str, rows: Dict[int, Dict[str, Any]]):
+#     with open(path, "r", errors="replace") as f:
+#         for line in f:
+#             s = line.strip()
+#             if not s:
+#                 continue
+
+#             # epoch start
+#             m = re_epoch.search(line) or re_epoch_nt.search(s)
+#             if m:
+#                 epoch = int(m.group("epoch"))
+#                 ts = m.groupdict().get("ts", "")
+#                 rows.setdefault(
+#                     epoch,
+#                     {
+#                         "epoch": epoch,
+#                         "ts_first": ts,
+#                         "ts_last": ts,
+#                         "lr": "",
+#                         "train_loss": "",
+#                         "val_loss": "",
+#                         "epoch_time_sec": "",
+#                         "Necrotic_Dice": "",
+#                         "Edema_Dice": "",
+#                         "Enhancing_Dice": "",
+#                         "EMA_DICE": "",
+#                         "src_file": os.path.basename(path),
+#                     },
+#                 )
+#                 continue
+
+#             if not rows:
+#                 continue  # ignore lines before first epoch
+
+#             ep = max(rows.keys())
+#             r = rows[ep]
+
+#             for regex, key in [
+#                 (re_lr, "lr"),
+#                 (re_lr_nt, "lr"),
+#                 (re_trainloss, "train_loss"),
+#                 (re_trainloss_nt, "train_loss"),
+#                 (re_valloss, "val_loss"),
+#                 (re_valloss_nt, "val_loss"),
+#             ]:
+#                 m = regex.search(line)
+#                 if m:
+#                     r[key] = m.group(list(m.groupdict().keys())[-1])
+#                     r["ts_last"] = m.groupdict().get("ts", r["ts_last"])
+#                     r["src_file"] = os.path.basename(path)
+#                     break
+
+#             m = re_dice_line.search(line) or re_dice_line_nt.search(s)
+#             if m:
+#                 d1, d2, d3 = _extract_dices(m.group("body"))
+#                 r.update(
+#                     {
+#                         "Necrotic_Dice": d1,
+#                         "Edema_Dice": d2,
+#                         "Enhancing_Dice": d3,
+#                         "ts_last": m.groupdict().get("ts", r["ts_last"]),
+#                         "src_file": os.path.basename(path),
+#                     }
+#                 )
+#                 continue
+
+#             m = re_epoch_time.search(line) or re_epoch_time_nt.search(s)
+#             if m:
+#                 r["epoch_time_sec"] = m.group("sec")
+#                 r["ts_last"] = m.groupdict().get("ts", r["ts_last"])
+#                 r["src_file"] = os.path.basename(path)
+#                 continue
+
+#             m = re_ema.search(line) or re_ema_nt.search(s)
+#             if m:
+#                 r["EMA_DICE"] = m.group("ema")
+#                 r["ts_last"] = m.groupdict().get("ts", r["ts_last"])
+#                 r["src_file"] = os.path.basename(path)
+#                 continue
 
 
 def main():
