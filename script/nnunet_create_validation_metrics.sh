@@ -70,6 +70,7 @@ DJ="${RAW}/dataset.json"
   --counts_out_fn "${OUT_COUNTS_FN}" \
   --std_type "${STD_TYPE}" \
   --hd95_quantiles "${HD95_QUANTILES}" \
+  --granularity labels \
   --rename_hd95_mm --round 3
   
 # awk -F, 'NR==1 || $2=="label"' "${OUT_CASE_FN}" > "${OUT_CASE_FN%.csv}_labels.csv"
