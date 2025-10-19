@@ -64,7 +64,7 @@ MAIN="src/nnunet_eval_to_csv.py"
 DJ="${RAW}/dataset.json"
 
 "${PYTHON}" "${MAIN}" \
-  --in_fn "${DJ}" \
+  --in_fn "${IN_JSON_HD95}" \
   --out_cases_fn "${OUT_CASE_FN}" \
   --out_summary_fn "${OUT_SUMMARY_FN}" \
   --counts_out_fn "${OUT_COUNTS_FN}" \
