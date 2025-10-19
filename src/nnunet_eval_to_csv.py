@@ -253,10 +253,14 @@ def _add_region_rows(
 
 
 def parse_rows(
-    items: List[Dict[str, Any]], label_map: Optional[Dict[int, str]]
+    items: List[Dict[str, Any]], label_map: Optional[Dict[int, str]] = None
 ) -> List[Dict[str, Any]]:
-    """Turn eval items into long-format rows, 1 row per (case, class or region)."""
+    """
+    Turn the eval items into long-format rows, 1 row per (case, class or region).
+    Handles both 'label' and 'region' metrics.
+    """
     rows: List[Dict[str, Any]] = []
+
     for it in items:
         pred = it.get("prediction_file") or it.get("prediction") or it.get("pred") or ""
         ref = it.get("reference_file") or it.get("gt") or it.get("reference") or ""
@@ -264,14 +268,51 @@ def parse_rows(
             it.get("case_id")
             or os.path.splitext(os.path.basename(pred or ref or ""))[0]
         )
-        metrics_block = it.get("metrics", {})
-        if not isinstance(metrics_block, dict):
+        metrics_dict = it.get("metrics", {})
+        if not isinstance(metrics_dict, dict):
             continue
 
-        # labels (numeric keys)
-        _add_label_rows(rows, metrics_block, case_id, pred, ref, label_map)
-        # regions (under "regions")
-        _add_region_rows(rows, metrics_block.get("regions"), case_id, pred, ref)
+        # Two top-level groups: "label" and "region"
+        for group_name, group_metrics in metrics_dict.items():
+            if not isinstance(group_metrics, dict):
+                continue
+            group_type = "label" if group_name.lower() == "label" else "region"
+
+            for cls_k, m in group_metrics.items():
+                # label mode (integer class id)
+                if group_type == "label":
+                    try:
+                        cls_id = int(cls_k)
+                        class_name = (
+                            label_map.get(cls_id, f"class_{cls_id}")
+                            if label_map
+                            else f"class_{cls_id}"
+                        )
+                    except Exception:
+                        cls_id = cls_k
+                        class_name = str(cls_k)
+                else:
+                    # region mode (e.g. 'whole_tumor')
+                    cls_id = ""
+                    class_name = cls_k
+
+                row = {
+                    "case_id": case_id,
+                    "class_type": group_type,  # label or region
+                    "class_id": cls_id,
+                    "class_name": class_name,
+                    "pred_path": pred,
+                    "ref_path": ref,
+                }
+                if isinstance(m, dict):
+                    # Normalize metrics, excluding redundant IoU keys
+                    normed = _norm_case_metrics(m)
+                    for k in list(normed.keys()):
+                        if k.lower() in ("iou", "io u", "iou_score", "iou_mean"):
+                            normed.pop(k, None)
+                    row.update(normed)
+
+                rows.append(row)
 
     if not rows:
         raise ValueError("No rows parsed from JSON.")
