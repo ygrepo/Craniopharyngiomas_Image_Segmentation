@@ -48,7 +48,7 @@ echo "[info] RES =$RES"
 # --- prediction output ---
 OUTP="${RES}/fold_${FOLD}/predictions/validation"
 mkdir -p "$OUTP"
-IN_JSON_HD95="${OUTP}/summary_with_hd95.json"
+IN_JSON_HD95="${OUTP}/${DATASET_ID}_fold${FOLD}_summary_with_hd95.json"
 OUT_CASE_FN="${OUTP}/${DATASET_ID}_validation_metrics_cases.csv"
 OUT_SUMMARY_FN="${OUTP}/${DATASET_ID}_validation_metrics_summary.csv"
 OUT_COUNTS_FN="${OUTP}/${DATASET_ID}_validation_metrics_counts.csv"
