@@ -48,10 +48,10 @@ echo "[info] RES =$RES"
 # --- prediction output ---
 OUTP="${RES}/fold_${FOLD}/predictions/validation"
 mkdir -p "$OUTP"
-IN_JSON_HD95="${OUTP}/summary_with_hd95.json"
-OUT_CASE_FN="${OUTP}/validation_metrics_cases.csv"
-OUT_SUMMARY_FN="${OUTP}/validation_metrics_summary.csv"
-OUT_COUNTS_FN="${OUTP}/validation_metrics_counts.csv"
+IN_JSON_HD95="${OUTP}/${DATASET_ID}_summary_with_hd95.json"
+OUT_CASE_FN="${OUTP}/${DATASET_ID}_validation_metrics_cases.csv"
+OUT_SUMMARY_FN="${OUTP}/${DATASET_ID}_validation_metrics_summary.csv"
+OUT_COUNTS_FN="${OUTP}/${DATASET_ID}_validation_metrics_counts.csv"
 
 HD95_QUANTILES="90,95"
 STD_TYPE="population"
@@ -69,8 +69,8 @@ MAIN="src/nnunet_eval_to_csv.py"
   --hd95_quantiles "${HD95_QUANTILES}" \
   --label_map "${LABEL_MAP}"
 
-awk -F, 'NR==1 || $2=="label"' "${OUT_CASE_FN}" > "${OUT_CASE_FN%.csv}_labels.csv"
-awk -F, 'NR==1 || $1=="label"' "${OUT_SUMMARY_FN}" > "${OUT_SUMMARY_FN%.csv}_labels.csv"
+awk -F, 'NR==1 || $2=="label"' "${OUT_CASE_FN}" > "${DATASET_ID}_${OUT_CASE_FN%.csv}_labels.csv"
+awk -F, 'NR==1 || $1=="label"' "${OUT_SUMMARY_FN}" > "${DATASET_ID}_${OUT_SUMMARY_FN%.csv}_labels.csv"
 
 # awk -F, 'NR==1 || $2=="region"' "${OUT_CASE_FN}" > "${OUT_CASE_FN%.csv}_regions.csv"
 # awk -F, 'NR==1 || $1=="region"' "${OUT_SUMMARY_FN}" > "${OUT_SUMMARY_FN%.csv}_regions.csv"
