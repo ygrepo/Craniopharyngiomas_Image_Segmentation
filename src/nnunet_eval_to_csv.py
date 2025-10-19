@@ -58,6 +58,7 @@ ALIASES = {
     "n_pred": {"n_pred", "N_pred", "N_Pred"},
     "n_ref": {"n_ref", "N_ref", "N_Ref"},
 }
+IOU_ALIASES = {x for x in ALIASES["iou"] if x != "Jaccard"}
 
 
 # -------------------------- helpers -------------------------- #
@@ -133,8 +134,12 @@ def _norm_case_metrics(md: Dict[str, Any]) -> Dict[str, Optional[float]]:
 
     # Keep any additional custom metrics present in md
     for k, v in md.items():
-        if k not in out:
-            out[k] = v
+        if k in out:
+            continue
+        if k in IOU_ALIASES:
+            continue
+        out[k] = v
+
     return out
 
 
@@ -330,10 +335,18 @@ def write_cases_csv(
     return [k for k in header if k not in fixed]
 
 
+def _label_name(cid: Any, label_map: Optional[Dict[int, str]]) -> Optional[str]:
+    try:
+        return label_map.get(int(cid)) if label_map else None
+    except Exception:
+        return None
+
+
 def write_summary_csv(
     rows: List[Dict[str, Any]],
     metric_cols: List[str],
     out_path: Path,
+    label_map: Optional[Dict[int, str]],
     round_ndigits: Optional[int],
     std_type: str = "population",
     hd95_quantiles: Optional[str] = None,
@@ -393,13 +406,18 @@ def write_summary_csv(
 
     for key, grp in sorted(by_group.items(), key=lambda kv: kv[0]):
         ctype, cid_or_name = key
-        out: Dict[str, Any] = {
-            "class_type": ctype,
-            "class_id": (
-                cid_or_name if ctype == "label" and isinstance(cid_or_name, int) else ""
-            ),
-            "class_name": ("" if ctype == "label" else cid_or_name),
-        }
+        if ctype == "label":
+            out: Dict[str, Any] = {
+                "class_type": "label",
+                "class_id": (cid_or_name if isinstance(cid_or_name, int) else ""),
+                "class_name": _label_name(cid_or_name, label_map),  # None if not found
+            }
+        else:
+            out: Dict[str, Any] = {
+                "class_type": "region",
+                "class_id": "",
+                "class_name": cid_or_name,  # region key (e.g., whole_tumor)
+            }
 
         # scores
         for c in score_cols:
@@ -550,6 +568,7 @@ def main():
         rows,
         metric_cols,
         out_summary,
+        label_map=label_map,
         round_ndigits=args.round,
         std_type=args.std_type,
         hd95_quantiles=args.hd95_quantiles,
