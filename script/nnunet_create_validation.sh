@@ -19,14 +19,13 @@ set -euo pipefail
 # TR=nnUNetTrainer
 # PLANS_ID=nnUNetPlans
 
+
 DATASET_ID=502
 DATASET_NAME=BraTS2017_4ch
 FOLD=0
 CFG=3d_fullres
 TR=nnUNetTrainer
 PLANS_ID=nnUNetResEncUNetMPlans
-
-# -------------------------------------------
 
 # --- env setup ---
 module purge
@@ -38,14 +37,14 @@ ENV_PREFIX="/projects/gbm_modeling/.conda/envs/mri"
 conda activate "${ENV_PREFIX}"
 PYTHON="${ENV_PREFIX}/bin/python"
 
-# Set nnUNet paths (this defines $nnUNet_raw, $nnUNet_preprocessed, $nnUNet_results)
+# Set nnUNet paths (defines $nnUNet_raw, $nnUNet_preprocessed, $nnUNet_results)
 source script/set_unet_path.sh
 
 # --- derive paths from envs ---
 RAW="${nnUNet_raw}/Dataset${DATASET_ID}_${DATASET_NAME}"
 RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
 
-# PREP: CLI arg wins; else use env-based default
+# PREP: CLI arg wins; else env-based default
 if [[ $# -ge 1 ]]; then
   PREP="$1"
 else
@@ -56,15 +55,15 @@ DJ="${RAW}/dataset.json"
 PL="${RES}/plans.json"
 
 # --- sanity checks ---
-[[ -d "${nnUNet_raw:-}" ]] || { echo "ERROR: nnUNet_raw not set"; exit 1; }
-[[ -d "${nnUNet_preprocessed:-}" ]] || { echo "ERROR: nnUNet_preprocessed not set"; exit 1; }
-[[ -d "${nnUNet_results:-}" ]] || { echo "ERROR: nnUNet_results not set"; exit 1; }
+[[ -d "${nnUNet_raw:-}"           ]] || { echo "ERROR: nnUNet_raw not set"; exit 1; }
+[[ -d "${nnUNet_preprocessed:-}"  ]] || { echo "ERROR: nnUNet_preprocessed not set"; exit 1; }
+[[ -d "${nnUNet_results:-}"       ]] || { echo "ERROR: nnUNet_results not set"; exit 1; }
 
-[[ -d "$RAW" ]] || { echo "ERROR: RAW dataset dir missing: $RAW"; exit 1; }
-[[ -f "$DJ"  ]] || { echo "ERROR: dataset.json missing: $DJ"; exit 1; }
+[[ -d "$RAW"  ]] || { echo "ERROR: RAW dataset dir missing: $RAW"; exit 1; }
+[[ -f "$DJ"   ]] || { echo "ERROR: dataset.json missing: $DJ"; exit 1; }
 [[ -d "$PREP" ]] || { echo "ERROR: PREP dir missing: $PREP"; exit 1; }
 
-[[ -f "$PL" ]] || { echo "ERROR: plans.json missing: $PL"; exit 1; }
+[[ -f "$PL"   ]] || { echo "ERROR: plans.json missing: $PL"; exit 1; }
 [[ -d "$RAW/imagesTr" && -d "$RAW/labelsTr" ]] || { echo "ERROR: imagesTr/labelsTr missing under $RAW"; exit 1; }
 [[ -f "${RES}/fold_${FOLD}/checkpoint_best.pth" ]] || { echo "ERROR: checkpoint_best.pth missing under ${RES}/fold_${FOLD}"; exit 1; }
 
@@ -74,17 +73,27 @@ echo "[info] RES =$RES"
 echo "[info] DJ  =$DJ"
 echo "[info] PL  =$PL"
 
-# --- extract fold-0 validation IDs ---
-python - <<'PY' "$PREP"
+# --- extract fold-${FOLD} validation IDs (fix: don't rely on shell var expansion inside heredoc) ---
+OUT_IDS="val_ids_${DATASET_ID}_fold${FOLD}.txt"
+"${PYTHON}" - "$PREP" "$OUT_IDS" <<'PY'
 import json, os, sys
+
 prep = sys.argv[1]
+out  = sys.argv[2]
 spl = os.path.join(prep, "splits_final.json")
-with open(spl) as f:
+if not os.path.isfile(spl):
+    raise SystemExit(f"ERROR: splits_final.json not found: {spl}")
+
+with open(spl, "r") as f:
     splits = json.load(f)
+
+if not isinstance(splits, list) or len(splits) == 0 or "val" not in splits[0]:
+    raise SystemExit("ERROR: splits_final.json has unexpected structure")
+
 val_ids = sorted(set(splits[0]["val"]))
-with open("val_ids_${DATASET_ID}_fold${FOLD}.txt","w") as g:
+with open(out, "w") as g:
     g.write("\n".join(val_ids))
-print(f"[ok] Wrote {len(val_ids)} IDs to val_ids_${DATASET_ID}_fold${FOLD}.txt")
+print(f"[ok] Wrote {len(val_ids)} IDs to {out}")
 PY
 
 # --- build subset (symlinks) ---
@@ -93,8 +102,8 @@ VALI="${VAL_ROOT}/imagesTr"; mkdir -p "$VALI"
 VALL="${VAL_ROOT}/labelsTr"; mkdir -p "$VALL"
 
 n_linked=0
-while read -r ID; do
-  # link channels
+while IFS= read -r ID && [[ -n "${ID}" ]]; do
+  # link channels (BraTS2017 = 4ch)
   for ch in 0000 0001 0002 0003; do
     src="${RAW}/imagesTr/${ID}_${ch}.nii.gz"
     dst="${VALI}/${ID}_${ch}.nii.gz"
@@ -113,7 +122,10 @@ while read -r ID; do
   else
     echo "[warn] missing label: $lab_src"
   fi
-done < val_ids_${DATASET_ID}_fold${FOLD}.txt
+done < "$OUT_IDS"
+
+echo "[ok] Linked $n_linked image channels into $VALI"
+echo "[ok] Labels linked into $VALL"
 
 n_cases=$(ls -1 "$VALI"/*_0000.nii.gz 2>/dev/null | wc -l | awk '{print $1}')
 echo "[info] Symlinked $n_cases validation cases (counted by *_0000.nii.gz)."
