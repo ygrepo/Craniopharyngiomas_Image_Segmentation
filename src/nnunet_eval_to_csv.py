@@ -256,14 +256,19 @@ def parse_rows(
     items: List[Dict[str, Any]], label_map: Optional[Dict[int, str]] = None
 ) -> List[Dict[str, Any]]:
     """
-    Turn the eval items into long-format rows, 1 row per (case, class or region).
-    Handles both 'label' and 'region' metrics.
+    Parse nnU-Net region-based JSONs that have both label metrics and nested regions.
     """
     rows: List[Dict[str, Any]] = []
 
+    label_combo_map = {
+        "(1, 2, 3)": "whole_tumor",
+        "(2, 3)": "tumor_core",
+        "3": "enhancing_tumor",
+    }
+
     for it in items:
-        pred = it.get("prediction_file") or it.get("prediction") or it.get("pred") or ""
-        ref = it.get("reference_file") or it.get("gt") or it.get("reference") or ""
+        pred = it.get("prediction_file") or ""
+        ref = it.get("reference_file") or ""
         case_id = (
             it.get("case_id")
             or os.path.splitext(os.path.basename(pred or ref or ""))[0]
@@ -272,46 +277,50 @@ def parse_rows(
         if not isinstance(metrics_dict, dict):
             continue
 
-        # Two top-level groups: "label" and "region"
-        for group_name, group_metrics in metrics_dict.items():
-            if not isinstance(group_metrics, dict):
+        # --- label metrics ---
+        for cls_key, mdict in metrics_dict.items():
+            if cls_key == "regions":
                 continue
-            group_type = "label" if group_name.lower() == "label" else "region"
+            if not isinstance(mdict, dict):
+                continue
 
-            for cls_k, m in group_metrics.items():
-                # label mode (integer class id)
-                if group_type == "label":
-                    try:
-                        cls_id = int(cls_k)
-                        class_name = (
-                            label_map.get(cls_id, f"class_{cls_id}")
-                            if label_map
-                            else f"class_{cls_id}"
-                        )
-                    except Exception:
-                        cls_id = cls_k
-                        class_name = str(cls_k)
-                else:
-                    # region mode (e.g. 'whole_tumor')
-                    cls_id = ""
-                    class_name = cls_k
+            cname = label_combo_map.get(cls_key, str(cls_key))
+            row = {
+                "case_id": case_id,
+                "class_type": "label",
+                "class_id": cls_key,
+                "class_name": cname,
+                "pred_path": pred,
+                "ref_path": ref,
+            }
+            normed = _norm_case_metrics(mdict)
+            # drop IoU entirely
+            for k in list(normed.keys()):
+                if k.lower() in {"iou", "io u", "iou_score", "iou_mean"}:
+                    normed.pop(k, None)
+            row.update(normed)
+            rows.append(row)
 
+        # --- region metrics ---
+        regions = metrics_dict.get("regions", {})
+        if isinstance(regions, dict):
+            for reg_name, reg_metrics in regions.items():
                 row = {
                     "case_id": case_id,
-                    "class_type": group_type,  # label or region
-                    "class_id": cls_id,
-                    "class_name": class_name,
+                    "class_type": "region",
+                    "class_id": "",
+                    "class_name": reg_name,
                     "pred_path": pred,
                     "ref_path": ref,
                 }
-                if isinstance(m, dict):
-                    # Normalize metrics, excluding redundant IoU keys
-                    normed = _norm_case_metrics(m)
-                    for k in list(normed.keys()):
-                        if k.lower() in ("iou", "io u", "iou_score", "iou_mean"):
-                            normed.pop(k, None)
-                    row.update(normed)
-
+                if isinstance(reg_metrics, dict):
+                    row.update(
+                        {
+                            k: float(v)
+                            for k, v in reg_metrics.items()
+                            if isinstance(v, (float, int))
+                        }
+                    )
                 rows.append(row)
 
     if not rows:
