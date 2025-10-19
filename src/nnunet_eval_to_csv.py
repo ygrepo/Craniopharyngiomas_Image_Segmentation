@@ -394,6 +394,25 @@ def _label_name(cid: Any, label_map: Optional[Dict[int, str]]) -> Optional[str]:
         return None
 
 
+def _group_sort_key(item):
+    # item is ( (class_type, cid_or_name), group_rows )
+    (ctype, cid) = item[0]
+    # order class types: labels first, then regions
+    ctype_rank = 0 if ctype == "label" else 1
+    if ctype == "label":
+        # prefer numeric ordering for labels
+        if isinstance(cid, int):
+            return (ctype_rank, 0, cid, "")
+        # cid may be a string like "3" or "(1, 2, 3)" – try int, else fallback to string
+        try:
+            return (ctype_rank, 0, int(cid), "")
+        except Exception:
+            return (ctype_rank, 1, str(cid))
+    else:
+        # regions: order alphabetically by name
+        return (ctype_rank, 0, str(cid).lower())
+
+
 def write_summary_csv(
     rows: List[Dict[str, Any]],
     metric_cols: List[str],
@@ -456,7 +475,7 @@ def write_summary_csv(
 
     out_rows: List[Dict[str, Any]] = []
 
-    for key, grp in sorted(by_group.items(), key=lambda kv: kv[0]):
+    for key, grp in sorted(by_group.items(), key=_group_sort_key):
         ctype, cid_or_name = key
         if ctype == "label":
             out: Dict[str, Any] = {
