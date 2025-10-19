@@ -81,6 +81,15 @@ DROP_KEYS |= (
     | ALIASES["n_ref"]
 )
 
+IDENTIFIER_KEYS = {
+    "case_id",
+    "class_type",
+    "class_id",
+    "class_name",
+    "pred_path",
+    "ref_path",
+}
+
 
 # -------------------------- helpers -------------------------- #
 def _first_present(d: Dict[str, Any], names: Sequence[str]) -> Optional[float]:
@@ -371,7 +380,9 @@ def _round_inplace(row: Dict[str, Any], ndigits: Optional[int]) -> None:
     if ndigits is None:
         return
     for k, v in list(row.items()):
-        # round floats only
+        # never round identifiers / paths / names
+        if k in IDENTIFIER_KEYS:
+            continue
         try:
             fv = float(v)
         except Exception:
