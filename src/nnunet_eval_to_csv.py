@@ -134,11 +134,10 @@ def _norm_case_metrics(md: Dict[str, Any]) -> Dict[str, Optional[float]]:
 
     # Keep any additional custom metrics present in md
     for k, v in md.items():
-        if k in out:
-            continue
-        if k in IOU_ALIASES:
-            continue
-        out[k] = v
+        if k in ALIASES["iou"]:
+            continue  # drop IoU duplicates
+        if k not in out:
+            out[k] = v
 
     return out
 
@@ -206,15 +205,18 @@ def _add_label_rows(
     for cls_k, m in metrics_per_class.items():
         try:
             cls_id = int(cls_k)
-        except Exception:
-            continue
-        if cls_id == 0:
-            continue
+            class_type = "label"
+            class_name = label_map.get(cls_id, "") if label_map else ""
+        except ValueError:
+            cls_id = ""
+            class_type = "region"
+            class_name = cls_k
+
         row = {
             "case_id": case_id,
-            "class_type": "label",
+            "class_type": class_type,
             "class_id": cls_id,
-            "class_name": (label_map.get(cls_id, "") if label_map else ""),
+            "class_name": class_name,
             "pred_path": pred,
             "ref_path": ref,
         }
