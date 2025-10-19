@@ -61,6 +61,9 @@ ALIASES = {
 IOU_ALIASES = {x for x in ALIASES["iou"] if x != "Jaccard"}
 
 
+_TUPLE_RE = re.compile(r"^\(\s*\d+(?:\s*,\s*\d+)+\s*\)$")
+
+
 # -------------------------- helpers -------------------------- #
 def _first_present(d: Dict[str, Any], names: Sequence[str]) -> Optional[float]:
     """Return first matching key's float value, else None."""
@@ -225,102 +228,115 @@ def _add_label_rows(
         case_rows.append(row)
 
 
-def _add_region_rows(
-    case_rows: List[Dict[str, Any]],
-    regions_block: Any,
-    case_id: str,
-    pred: str,
-    ref: str,
-) -> None:
-    """
-    Regions live under metrics["regions"] as a dict of region_name -> metrics dict.
-    We emit rows with class_type='region', class_id='', class_name=region_name.
-    """
-    if not isinstance(regions_block, dict):
-        return
-    for rname, m in regions_block.items():
-        row = {
-            "case_id": case_id,
-            "class_type": "region",
-            "class_id": "",  # regions are not numeric classes
-            "class_name": rname,  # keep region key as name
-            "pred_path": pred,
-            "ref_path": ref,
-        }
-        if isinstance(m, dict):
-            row.update({str(k): v for k, v in _norm_case_metrics(m).items()})
-        case_rows.append(row)
+def _combo_name_from_tuple_key(k: str) -> str:
+    # Map tuple-like label keys to canonical region names (BraTS convention)
+    try:
+        nums = [int(x) for x in re.findall(r"\d+", k)]
+        s = set(nums)
+        if s == {1, 2, 3}:
+            return "whole_tumor"
+        if s == {2, 3}:
+            return "tumor_core"
+        if s == {3}:
+            return "enhancing_tumor"
+        # fallback name (unlikely for BraTS)
+        return f"labels_{'_'.join(str(n) for n in sorted(s))}"
+    except Exception:
+        return str(k)
 
 
 def parse_rows(
     items: List[Dict[str, Any]], label_map: Optional[Dict[int, str]] = None
 ) -> List[Dict[str, Any]]:
     """
-    Parse nnU-Net region-based JSONs that have both label metrics and nested regions.
+    Robustly parse nnU-Net eval JSONs that may contain:
+      - label metrics under numeric keys "1","2","3"
+      - label metrics under tuple-like keys "(1, 2, 3)","(2, 3)","3"
+      - region metrics nested under metrics["regions"] (e.g., whole_tumor/tumor_core)
     """
     rows: List[Dict[str, Any]] = []
-
-    label_combo_map = {
-        "(1, 2, 3)": "whole_tumor",
-        "(2, 3)": "tumor_core",
-        "3": "enhancing_tumor",
-    }
-
     for it in items:
-        pred = it.get("prediction_file") or ""
-        ref = it.get("reference_file") or ""
+        pred = it.get("prediction_file") or it.get("prediction") or it.get("pred") or ""
+        ref = it.get("reference_file") or it.get("gt") or it.get("reference") or ""
         case_id = (
             it.get("case_id")
             or os.path.splitext(os.path.basename(pred or ref or ""))[0]
         )
+
         metrics_dict = it.get("metrics", {})
         if not isinstance(metrics_dict, dict):
             continue
 
-        # --- label metrics ---
+        # ---- LABEL-SIDE (flat at metrics level) ----
         for cls_key, mdict in metrics_dict.items():
             if cls_key == "regions":
                 continue
             if not isinstance(mdict, dict):
                 continue
 
-            cname = label_combo_map.get(cls_key, str(cls_key))
+            # Determine if this is a pure numeric class id or a tuple-like union
+            cid: Any = ""
+            cname: str = ""
+            if isinstance(cls_key, int) or (
+                isinstance(cls_key, str) and cls_key.isdigit()
+            ):
+                # Numeric label: 1/2/3
+                cid = int(cls_key)
+                cname = (
+                    label_map.get(cid) if label_map else f"class_{cid}"
+                ) or f"class_{cid}"
+            elif isinstance(cls_key, str) and _TUPLE_RE.match(cls_key):
+                # Tuple-like union (e.g., "(1, 2, 3)")
+                cid = ""  # no numeric class_id for unions
+                cname = _combo_name_from_tuple_key(cls_key)
+            else:
+                # Anything else: treat as a named label key
+                cid = ""
+                cname = str(cls_key)
+
             row = {
                 "case_id": case_id,
-                "class_type": "label",
-                "class_id": cls_key,
+                "class_type": "label",  # still "label" (these are measured from label maps)
+                "class_id": cid,
                 "class_name": cname,
                 "pred_path": pred,
                 "ref_path": ref,
             }
             normed = _norm_case_metrics(mdict)
-            # drop IoU entirely
+            # Drop any IoU aliases that slipped through
             for k in list(normed.keys()):
-                if k.lower() in {"iou", "io u", "iou_score", "iou_mean"}:
+                if k in IOU_ALIASES or k.lower() in {
+                    "iou",
+                    "io u",
+                    "iou_score",
+                    "iou_mean",
+                }:
                     normed.pop(k, None)
             row.update(normed)
             rows.append(row)
 
-        # --- region metrics ---
+        # ---- REGION-SIDE (nested) ----
         regions = metrics_dict.get("regions", {})
         if isinstance(regions, dict):
-            for reg_name, reg_metrics in regions.items():
+            for rname, rmetrics in regions.items():
                 row = {
                     "case_id": case_id,
                     "class_type": "region",
                     "class_id": "",
-                    "class_name": reg_name,
+                    "class_name": rname,
                     "pred_path": pred,
                     "ref_path": ref,
                 }
-                if isinstance(reg_metrics, dict):
-                    row.update(
-                        {
-                            k: float(v)
-                            for k, v in reg_metrics.items()
-                            if isinstance(v, (float, int))
-                        }
-                    )
+                if isinstance(rmetrics, dict):
+                    # keep numeric fields only; region blocks may only have HD95
+                    for k, v in rmetrics.items():
+                        if (
+                            isinstance(v, (int, float))
+                            and k not in IOU_ALIASES
+                            and k.lower()
+                            not in {"iou", "io u", "iou_score", "iou_mean"}
+                        ):
+                            row[k] = float(v)
                 rows.append(row)
 
     if not rows:
@@ -428,27 +444,28 @@ def write_summary_csv(
       - Counts: sums
     """
 
-    # group rows by (class_type, key)
+    # --- group key ---
     def class_key(r):
-        if r.get("class_type") == "region":
-            return ("region", r.get("class_name", ""))
-        # label: prefer numeric id
+        ctype = r.get("class_type")
+        if ctype == "region":
+            return ("region", str(r.get("class_name", "")))
+        # label:
         cid = r.get("class_id")
         try:
             cid = int(cid)
+            return ("label", cid)
         except Exception:
-            pass
-        return ("label", cid)
+            # unions or named labels: group by name string
+            return ("label", str(r.get("class_name", "")))
 
     by_group: Dict[Any, List[Dict[str, Any]]] = {}
     for r in rows:
         by_group.setdefault(class_key(r), []).append(r)
 
-    # split columns
+    # --- split columns ---
     score_cols: List[str] = []
     count_cols: List[str] = []
     skip_cols = {"class_id", "class_name", "class_type"}
-
     for c in metric_cols:
         if c in skip_cols:
             continue
@@ -456,39 +473,52 @@ def write_summary_csv(
             count_cols.append(c)
         elif is_numeric_col(c, rows):
             score_cols.append(c)
-        else:
-            score_cols.append(c)
 
-    # parse requested quantiles for HD95
+    # --- quantiles for HD95 ---
     q_vals: List[float] = []
     if hd95_quantiles:
+        parts = []
         for tok in hd95_quantiles.split(","):
             tok = tok.strip()
-            if tok:
-                try:
-                    q = float(tok)
-                    if 0 < q < 100:
-                        q_vals.append(q)
-                except Exception:
-                    pass
-        q_vals = sorted(set(q_vals))
+            if not tok:
+                continue
+            try:
+                q = float(tok)
+                if 0 < q < 100:
+                    parts.append(q)
+            except Exception:
+                pass
+        q_vals = sorted(set(parts))
+
+    # --- stable sort: labels (numeric id asc, then named) first; regions alpha after ---
+    def _group_sort_key(item):
+        (ctype, cid_or_name) = item[0]
+        ctype_rank = 0 if ctype == "label" else 1
+        if ctype == "label" and isinstance(cid_or_name, int):
+            return (ctype_rank, 0, cid_or_name, "")
+        return (ctype_rank, 1, str(cid_or_name).lower())
 
     out_rows: List[Dict[str, Any]] = []
-
     for key, grp in sorted(by_group.items(), key=_group_sort_key):
         ctype, cid_or_name = key
         if ctype == "label":
-            out: Dict[str, Any] = {
-                "class_type": "label",
-                "class_id": (cid_or_name if isinstance(cid_or_name, int) else ""),
-                "class_name": _label_name(cid_or_name, label_map),  # None if not found
-            }
+            if isinstance(cid_or_name, int):
+                class_id = cid_or_name
+                class_name = (
+                    label_map.get(class_id) if label_map else f"class_{class_id}"
+                ) or f"class_{class_id}"
+            else:
+                class_id = ""
+                class_name = str(cid_or_name)
         else:
-            out: Dict[str, Any] = {
-                "class_type": "region",
-                "class_id": "",
-                "class_name": cid_or_name,  # region key (e.g., whole_tumor)
-            }
+            class_id = ""
+            class_name = str(cid_or_name)
+
+        out: Dict[str, Any] = {
+            "class_type": ctype,
+            "class_id": class_id,
+            "class_name": class_name,
+        }
 
         # scores
         for c in score_cols:
@@ -510,8 +540,7 @@ def write_summary_csv(
         for c in count_cols:
             vals = [to_float(r.get(c)) for r in grp]
             vals = [int(v) for v in vals if v is not None]
-            total = sum(vals) if vals else ""
-            out[f"{c}_sum"] = total
+            out[f"{c}_sum"] = sum(vals) if vals else ""
 
         _round_inplace(out, round_ndigits)
         out_rows.append(out)
