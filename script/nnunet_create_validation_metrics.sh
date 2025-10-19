@@ -69,8 +69,8 @@ MAIN="src/nnunet_eval_to_csv.py"
   --hd95_quantiles "${HD95_QUANTILES}" \
   --label_map "${LABEL_MAP}"
 
-awk -F, 'NR==1 || $2=="label"' "${OUT_CASE_FN}" > "${OUT_CASE_FN%.csv}_labels.csv"
-awk -F, 'NR==1 || $1=="label"' "${OUT_SUMMARY_FN}" > "${OUT_SUMMARY_FN%.csv}_labels.csv"
+# awk -F, 'NR==1 || $2=="label"' "${OUT_CASE_FN}" > "${OUT_CASE_FN%.csv}_labels.csv"
+# awk -F, 'NR==1 || $1=="label"' "${OUT_SUMMARY_FN}" > "${OUT_SUMMARY_FN%.csv}_labels.csv"
 
 # awk -F, 'NR==1 || $2=="region"' "${OUT_CASE_FN}" > "${OUT_CASE_FN%.csv}_regions.csv"
 # awk -F, 'NR==1 || $1=="region"' "${OUT_SUMMARY_FN}" > "${OUT_SUMMARY_FN%.csv}_regions.csv"
