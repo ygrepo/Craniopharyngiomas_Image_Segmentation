@@ -296,7 +296,7 @@ def reorient_like(
 
     Returns: (data_reoriented, affine_reoriented)
     """
-    logger.info(f"Reorienting {data_3d.shape} to match reference nifti {ref_img}")
+    logger.info(f"Reorienting {data_3d.shape} to match reference nifti {ref_img.shape}")
     # Current orientation from our affine
     cur_ornt = io_orientation(affine)
 
@@ -325,6 +325,36 @@ def reorient_like(
     # Update affine so that new voxel indices map correctly to the same world space
     aff_re = affine @ inv_ornt_aff(xform, data_3d.shape)
     return data_re, aff_re
+
+
+# Normalize intensities for better visualization in Slicer
+def normalize_for_slicer(nii_img: nib.Nifti1Image, name="image") -> nib.Nifti1Image:
+    data = nii_img.get_fdata()
+    logger.info(
+        f"{name} before normalization: min={data.min():.3f}, max={data.max():.3f}"
+    )
+
+    # Clip extreme outliers (optional)
+    p1, p99 = np.percentile(data[data != 0], [1, 99])  # Ignore zeros
+    data_clipped = np.clip(data, p1, p99)
+
+    # Normalize to 0-255 range for better Slicer display
+    if data_clipped.max() > data_clipped.min():
+        data_normalized = (
+            (data_clipped - data_clipped.min())
+            / (data_clipped.max() - data_clipped.min())
+            * 255
+        )
+    else:
+        data_normalized = data_clipped
+
+    logger.info(
+        f"{name} after normalization: min={data_normalized.min():.3f}, max={data_normalized.max():.3f}"
+    )
+
+    return nib.Nifti1Image(
+        data_normalized.astype(np.float32), nii_img.affine, nii_img.header
+    )
 
 
 def find_case_files(case_dir: Path, modalities: List[str]) -> List[Path]:

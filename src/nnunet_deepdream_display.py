@@ -39,7 +39,6 @@ from src.util import (
     load_props_from_pkl,
     get_spacing_origin_from_props,
     affine_from_spacing_origin,
-    save_nifti_3d,
     build_heat_and_mask,
     normalize_robust,
     pick_vis_channel,
@@ -47,7 +46,7 @@ from src.util import (
     normalize_heat_abs,
     coerce_same_shape,
     load_volume_npy_b2nd,
-    reorient_like,
+    normalize_for_slicer,
 )
 from src.plot_util import save_image
 
@@ -410,6 +409,11 @@ def main():
     out_dir = args.output_dir.resolve()
     prefix = (args.delta_path or args.dream_path or Path("deepdream")).stem
 
+    # Apply normalization
+    nii_base = normalize_for_slicer(nii_base, "base")
+    nii_heat = normalize_for_slicer(nii_heat, "heat")
+
+
     nii_base.to_filename(out_dir / f"{prefix}_image.nii.gz")
     nii_heat.to_filename(out_dir / f"{prefix}_deepdream_heat_abs.nii.gz")
     if nii_mask is not None:
@@ -418,105 +422,7 @@ def main():
     if nii_dream is not None:
         nii_dream.to_filename(out_dir / f"{prefix}_dream.nii.gz")
 
-    logger.info("[ok] Slicer-ready NIfTI exports written to %s", out_dir)
-
-    # if args.save_slicer:
-    #     props = load_props_from_pkl(args.props_path)
-    #     spacing, origin = get_spacing_origin_from_props(props)
-    #     affine = affine_from_spacing_origin(spacing, origin)
-
-    #     # Align shapes
-    #     delta_3d, base_all = coerce_same_shape(delta_3d, base_all)
-
-    #     # DEBUG: Check data before processing
-    #     logger.info(
-    #         f"base_all before processing: shape={base_all.shape}, min={base_all.min()}, max={base_all.max()}, mean={base_all.mean()}"
-    #     )
-
-    #     heat_3d, mask_3d = build_heat_and_mask(
-    #         delta_3d,
-    #         abs_pct=float(args.abs_pct),
-    #         bin_pct=(None if float(args.mask_pct) < 0 else float(args.mask_pct)),
-    #     )
-
-    #     # Build nifti objects in nnUNet (RAS) space
-    #     nii_base = Nifti1Image(base_all.astype(np.float32), affine)
-    #     nii_heat = Nifti1Image(heat_3d.astype(np.float32), affine)
-
-    #     # DEBUG: Check NIfTI data before resampling
-    #     logger.info(
-    #         f"nii_base before resampling: shape={nii_base.shape}, data range={nii_base.get_fdata().min()}-{nii_base.get_fdata().max()}"
-    #     )
-    #     logger.info(f"Original affine:\n{nii_base.affine}")
-
-    #     nii_mask = (
-    #         Nifti1Image(mask_3d.astype(np.uint8), affine)
-    #         if mask_3d is not None
-    #         else None
-    #     )
-    #     nii_dream = None
-    #     if dream_arr is not None:
-    #         dream_3d, _ = coerce_same_shape(
-    #             pick_channel_like(dream_arr, vis_ch), base_all
-    #         )
-    #         nii_dream = Nifti1Image(dream_3d.astype(np.float32), affine)
-
-    #     ref_img = nib.load(args.ref_nifti)
-    #     logger.info(f"Reference image: shape={ref_img.shape}")
-    #     logger.info(f"Reference affine:\n{ref_img.affine}")
-
-    #     target = (ref_img.shape, ref_img.affine)
-
-    #     # Resample with debugging
-    #     nii_base_resampled = resample_from_to(nii_base, target, order=1)
-
-    #     # DEBUG: Check after resampling
-    #     resampled_data = nii_base_resampled.get_fdata()
-    #     logger.info(
-    #         f"After resampling: shape={resampled_data.shape}, min={resampled_data.min()}, max={resampled_data.max()}, mean={resampled_data.mean()}"
-    #     )
-
-    #     # Check if resampling killed the data
-    #     if resampled_data.max() == 0 or np.all(
-    #         resampled_data == resampled_data.flat[0]
-    #     ):
-    #         logger.warning("WARNING: Resampling resulted in blank image!")
-    #         logger.info("Trying alternative resampling...")
-
-    #         # Try different approach
-    #         from nilearn.image import resample_to_img
-
-    #         nii_base = resample_to_img(nii_base, ref_img, interpolation="linear")
-    #     else:
-    #         nii_base = nii_base_resampled
-
-    #         # Continue with other images...
-    #         nii_heat = resample_from_to(nii_heat, target, order=1)
-    #         if nii_mask is not None:
-    #             nii_mask = resample_from_to(nii_mask, target, order=0)
-    #         if nii_dream is not None:
-    #             nii_dream = resample_from_to(nii_dream, target, order=1)
-
-    #     # Final check before saving
-    #     final_data = nii_base.get_fdata()
-    #     logger.info(
-    #         f"Final data before saving: min={final_data.min()}, max={final_data.max()}"
-    #     )
-
-    #     # --- Save results ---
-    #     out_dir = args.output_dir.resolve()
-    #     prefix = (args.delta_path or args.dream_path or Path("deepdream")).stem
-
-    #     nii_base.to_filename(out_dir / f"{prefix}_image.nii.gz")
-    #     nii_heat.to_filename(out_dir / f"{prefix}_deepdream_heat_abs.nii.gz")
-    #     if nii_mask is not None:
-    #         pct_int = int(round(float(args.mask_pct)))
-    #         nii_mask.to_filename(out_dir / f"{prefix}_deepdream_mask_p{pct_int}.nii.gz")
-    #     if nii_dream is not None:
-    #         nii_dream.to_filename(out_dir / f"{prefix}_dream.nii.gz")
-
-    #     logger.info("[ok] Slicer-ready NIfTI exports written to %s", out_dir)
-
+    logger.info("[ok] Slicer-ready NIfTI exports written to %s", out_dir)s
 
 if __name__ == "__main__":
     main()
