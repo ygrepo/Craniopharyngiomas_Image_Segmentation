@@ -3,19 +3,19 @@
 set -euo pipefail
 
 # --------- Config (edit if needed) ----------
-DATASET_ID=501
-DATASET_NAME=BraTS2017_4ch
-FOLD=0
-CFG=3d_fullres
-TR=nnUNetTrainer
-PLANS_ID=nnUNetPlans
-
-# DATASET_ID=502
+# DATASET_ID=501
 # DATASET_NAME=BraTS2017_4ch
 # FOLD=0
 # CFG=3d_fullres
 # TR=nnUNetTrainer
-# PLANS_ID=nnUNetResEncUNetMPlans
+# PLANS_ID=nnUNetPlans
+
+DATASET_ID=502
+DATASET_NAME=BraTS2017_4ch
+FOLD=0
+CFG=3d_fullres
+TR=nnUNetTrainer
+PLANS_ID=nnUNetResEncUNetMPlans
 
 
 # -------------------------------------------
