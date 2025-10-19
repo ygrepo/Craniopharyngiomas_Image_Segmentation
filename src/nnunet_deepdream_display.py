@@ -413,7 +413,6 @@ def main():
     nii_base = normalize_for_slicer(nii_base, "base")
     nii_heat = normalize_for_slicer(nii_heat, "heat")
 
-
     nii_base.to_filename(out_dir / f"{prefix}_image.nii.gz")
     nii_heat.to_filename(out_dir / f"{prefix}_deepdream_heat_abs.nii.gz")
     if nii_mask is not None:
@@ -422,7 +421,8 @@ def main():
     if nii_dream is not None:
         nii_dream.to_filename(out_dir / f"{prefix}_dream.nii.gz")
 
-    logger.info("[ok] Slicer-ready NIfTI exports written to %s", out_dir)s
+    logger.info("[ok] Slicer-ready NIfTI exports written to %s", out_dir)
+
 
 if __name__ == "__main__":
     main()
