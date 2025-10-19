@@ -62,6 +62,24 @@ IOU_ALIASES = {x for x in ALIASES["iou"] if x != "Jaccard"}
 
 
 _TUPLE_RE = re.compile(r"^\(\s*\d+(?:\s*,\s*\d+)+\s*\)$")
+# Keep any additional custom metrics present in md,
+# but DROP any alias keys that map to canonical ones.
+DROP_KEYS = set()
+# drop all dice/iou aliases except the canonical we already wrote
+DROP_KEYS |= ALIASES["dice"] - {"Dice"}
+DROP_KEYS |= ALIASES["iou"] - {"Jaccard"}
+# drop ppv/npv aliases (we already wrote PPV/NPV)
+DROP_KEYS |= ALIASES["ppv"] - {"PPV"}
+DROP_KEYS |= ALIASES["npv"] - {"NPV"}
+# drop count aliases (we already wrote tp/tn/fp/fn/n_pred/n_ref)
+DROP_KEYS |= (
+    ALIASES["tp"]
+    | ALIASES["tn"]
+    | ALIASES["fp"]
+    | ALIASES["fn"]
+    | ALIASES["n_pred"]
+    | ALIASES["n_ref"]
+)
 
 
 # -------------------------- helpers -------------------------- #
@@ -137,8 +155,13 @@ def _norm_case_metrics(md: Dict[str, Any]) -> Dict[str, Optional[float]]:
 
     # Keep any additional custom metrics present in md
     for k, v in md.items():
-        if k in ALIASES["iou"]:
-            continue  # drop IoU duplicates
+        # skip anything that’s an alias of a canonical field
+        if k in DROP_KEYS:
+            continue
+        # also skip loose iou variants by name, just in case
+        kl = str(k).lower()
+        if kl in {"iou", "io u", "iou_score", "iou_mean"}:
+            continue
         if k not in out:
             out[k] = v
 
