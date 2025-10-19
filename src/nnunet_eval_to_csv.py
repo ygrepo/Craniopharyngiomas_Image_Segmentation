@@ -20,6 +20,7 @@ Usage
 -----
 python export_eval_to_csv.py \
   -i nnUNet_results/.../summary_with_hd95.json \
+  --granularity labels|regions|both \
   --round 4 --rename-hd95-mm
 """
 
@@ -33,13 +34,14 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
-import re
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 from src.util import get_logger, setup_logging  # noqa: E402
 
 logger = get_logger(__name__)
+
+# -------------------------- config -------------------------- #
 
 # Keys treated as counts (per case, per class/region)
 COUNT_KEYS = {"tp", "tn", "fp", "fn", "n_pred", "n_ref"}
@@ -60,18 +62,13 @@ ALIASES = {
 }
 IOU_ALIASES = {x for x in ALIASES["iou"] if x != "Jaccard"}
 
-
-_TUPLE_RE = re.compile(r"^\(\s*\d+(?:\s*,\s*\d+)+\s*\)$")
 # Keep any additional custom metrics present in md,
 # but DROP any alias keys that map to canonical ones.
 DROP_KEYS = set()
-# drop all dice/iou aliases except the canonical we already wrote
 DROP_KEYS |= ALIASES["dice"] - {"Dice"}
 DROP_KEYS |= ALIASES["iou"] - {"Jaccard"}
-# drop ppv/npv aliases (we already wrote PPV/NPV)
 DROP_KEYS |= ALIASES["ppv"] - {"PPV"}
 DROP_KEYS |= ALIASES["npv"] - {"NPV"}
-# drop count aliases (we already wrote tp/tn/fp/fn/n_pred/n_ref)
 DROP_KEYS |= (
     ALIASES["tp"]
     | ALIASES["tn"]
@@ -90,14 +87,15 @@ IDENTIFIER_KEYS = {
     "ref_path",
 }
 
-
 # -------------------------- helpers -------------------------- #
+
+
 def _first_present(d: Dict[str, Any], names: Sequence[str]) -> Optional[float]:
-    """Return first matching key's float value, else None."""
-    for k in d.keys():
-        if k in names:
+    """Return first matching key's float value, respecting alias priority order."""
+    for name in names:
+        if name in d:
             try:
-                return float(d[k])
+                return float(d[name])
             except Exception:
                 return None
     return None
@@ -164,10 +162,8 @@ def _norm_case_metrics(md: Dict[str, Any]) -> Dict[str, Optional[float]]:
 
     # Keep any additional custom metrics present in md
     for k, v in md.items():
-        # skip anything that’s an alias of a canonical field
         if k in DROP_KEYS:
             continue
-        # also skip loose iou variants by name, just in case
         kl = str(k).lower()
         if kl in {"iou", "io u", "iou_score", "iou_mean"}:
             continue
@@ -203,8 +199,8 @@ def to_float(x):
         return None
 
 
-# Keep only columns that have at least one numeric value across all rows
 def is_numeric_col(col: str, rows: List[Dict[str, Any]]) -> bool:
+    """Keep only columns that have at least one numeric value across all rows."""
     for r in rows:
         if to_float(r.get(col)) is not None:
             return True
@@ -216,7 +212,7 @@ def load_items(data: Any) -> List[Dict[str, Any]]:
     if isinstance(data, list):
         return data
     if isinstance(data, dict):
-        for k in ("results", "cases", "items", "per_case"):
+        for k in ("results", "cases", "items", "per_case", "metric_per_case"):
             v = data.get(k)
             if isinstance(v, list):
                 return v
@@ -228,116 +224,50 @@ def load_items(data: Any) -> List[Dict[str, Any]]:
     raise ValueError("Unrecognized JSON structure for nnU-Net evaluation output.")
 
 
-def _add_label_rows(
-    case_rows: List[Dict[str, Any]],
-    metrics_per_class: Dict[str, Any],
-    case_id: str,
-    pred: str,
-    ref: str,
-    label_map: Optional[Dict[int, str]],
-) -> None:
-    # numeric keys only (labels); skip 0 by convention
-    for cls_k, m in metrics_per_class.items():
-        try:
-            cls_id = int(cls_k)
-            class_type = "label"
-            class_name = label_map.get(cls_id, "") if label_map else ""
-        except ValueError:
-            cls_id = ""
-            class_type = "region"
-            class_name = cls_k
+def _case_id_from_paths(pred_path: str, ref_path: str) -> str:
+    def _stem(p: str) -> str:
+        b = os.path.basename(p or "")
+        if b.endswith(".nii.gz"):
+            return b[:-7]
+        return os.path.splitext(b)[0]
 
-        row = {
-            "case_id": case_id,
-            "class_type": class_type,
-            "class_id": cls_id,
-            "class_name": class_name,
-            "pred_path": pred,
-            "ref_path": ref,
-        }
-        if isinstance(m, dict):
-            row.update({str(k): v for k, v in _norm_case_metrics(m).items()})
-        case_rows.append(row)
+    s = _stem(pred_path) or _stem(ref_path)
+    return s
 
 
-def _combo_name_from_tuple_key(k: str) -> str:
-    # Map tuple-like label keys to canonical region names (BraTS convention)
-    try:
-        nums = [int(x) for x in re.findall(r"\d+", k)]
-        s = set(nums)
-        if s == {1, 2, 3}:
-            return "whole_tumor"
-        if s == {2, 3}:
-            return "tumor_core"
-        if s == {3}:
-            return "enhancing_tumor"
-        # fallback name (unlikely for BraTS)
-        return f"labels_{'_'.join(str(n) for n in sorted(s))}"
-    except Exception:
-        return str(k)
+# -------------------------- row builders (no mappings) -------------------------- #
 
 
-def parse_rows(
-    items: List[Dict[str, Any]], label_map: Optional[Dict[int, str]] = None
-) -> List[Dict[str, Any]]:
+def parse_rows_labels(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Robustly parse nnU-Net eval JSONs that may contain:
-      - label metrics under numeric keys "1","2","3"
-      - label metrics under tuple-like keys "(1, 2, 3)","(2, 3)","3"
-      - region metrics nested under metrics["regions"] (e.g., whole_tumor/tumor_core)
+    Emit rows for EVERY key under metrics (except the 'regions' block),
+    using the raw key string as class_id; no mapping/renaming applied.
     """
     rows: List[Dict[str, Any]] = []
     for it in items:
         pred = it.get("prediction_file") or it.get("prediction") or it.get("pred") or ""
         ref = it.get("reference_file") or it.get("gt") or it.get("reference") or ""
-        case_id = (
-            it.get("case_id")
-            or os.path.splitext(os.path.basename(pred or ref or ""))[0]
-        )
+        case_id = it.get("case_id") or _case_id_from_paths(pred, ref)
 
-        metrics_dict = it.get("metrics", {})
+        metrics_dict = it.get("metrics", {}) or {}
         if not isinstance(metrics_dict, dict):
             continue
 
-        # ---- LABEL-SIDE (flat at metrics level) ----
         for cls_key, mdict in metrics_dict.items():
-            if cls_key == "regions":
+            if cls_key == "regions" or not isinstance(mdict, dict):
                 continue
-            if not isinstance(mdict, dict):
-                continue
-
-            # Determine if this is a pure numeric class id or a tuple-like union
-            cid: Any = ""
-            cname: str = ""
-            if isinstance(cls_key, int) or (
-                isinstance(cls_key, str) and cls_key.isdigit()
-            ):
-                # Numeric label: 1/2/3
-                cid = int(cls_key)
-                cname = (
-                    label_map.get(cid) if label_map else f"class_{cid}"
-                ) or f"class_{cid}"
-            elif isinstance(cls_key, str) and _TUPLE_RE.match(cls_key):
-                # Tuple-like union (e.g., "(1, 2, 3)")
-                cid = ""  # no numeric class_id for unions
-                cname = _combo_name_from_tuple_key(cls_key)
-            else:
-                # Anything else: treat as a named label key
-                cid = ""
-                cname = str(cls_key)
-
             row = {
                 "case_id": case_id,
-                "class_type": "label",  # still "label" (these are measured from label maps)
-                "class_id": cid,
-                "class_name": cname,
+                "class_type": "label",
+                "class_id": str(cls_key),
+                "class_name": "",  # intentionally empty — no mappings
                 "pred_path": pred,
                 "ref_path": ref,
             }
             normed = _norm_case_metrics(mdict)
             # Drop any IoU aliases that slipped through
             for k in list(normed.keys()):
-                if k in IOU_ALIASES or k.lower() in {
+                if k in IOU_ALIASES or str(k).lower() in {
                     "iou",
                     "io u",
                     "iou_score",
@@ -346,41 +276,50 @@ def parse_rows(
                     normed.pop(k, None)
             row.update(normed)
             rows.append(row)
-
-        # ---- REGION-SIDE (nested) ----
-        regions = metrics_dict.get("regions", {})
-        if isinstance(regions, dict):
-            for rname, rmetrics in regions.items():
-                row = {
-                    "case_id": case_id,
-                    "class_type": "region",
-                    "class_id": "",
-                    "class_name": rname,
-                    "pred_path": pred,
-                    "ref_path": ref,
-                }
-                if isinstance(rmetrics, dict):
-                    # keep numeric fields only; region blocks may only have HD95
-                    for k, v in rmetrics.items():
-                        if (
-                            isinstance(v, (int, float))
-                            and k not in IOU_ALIASES
-                            and k.lower()
-                            not in {"iou", "io u", "iou_score", "iou_mean"}
-                        ):
-                            row[k] = float(v)
-                rows.append(row)
-
-    if not rows:
-        raise ValueError("No rows parsed from JSON.")
     return rows
+
+
+def parse_rows_regions(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Emit rows from metrics['regions'] ONLY, taking region keys exactly as present.
+    """
+    rows: List[Dict[str, Any]] = []
+    for it in items:
+        pred = it.get("prediction_file") or it.get("prediction") or it.get("pred") or ""
+        ref = it.get("reference_file") or it.get("gt") or it.get("reference") or ""
+        case_id = it.get("case_id") or _case_id_from_paths(pred, ref)
+
+        metrics_dict = it.get("metrics", {}) or {}
+        if not isinstance(metrics_dict, dict):
+            continue
+
+        reg_block = metrics_dict.get("regions")
+        if not isinstance(reg_block, dict):
+            continue
+
+        for rname, mdict in reg_block.items():
+            if not isinstance(mdict, dict):
+                continue
+            row = {
+                "case_id": case_id,
+                "class_type": "region",
+                "class_id": "",  # regions have no numeric id here
+                "class_name": str(rname),  # use raw key as-is
+                "pred_path": pred,
+                "ref_path": ref,
+            }
+            row.update(_norm_case_metrics(mdict))
+            rows.append(row)
+    return rows
+
+
+# -------------------------- writers -------------------------- #
 
 
 def _round_inplace(row: Dict[str, Any], ndigits: Optional[int]) -> None:
     if ndigits is None:
         return
     for k, v in list(row.items()):
-        # never round identifiers / paths / names
         if k in IDENTIFIER_KEYS:
             continue
         try:
@@ -398,7 +337,6 @@ def write_cases_csv(
     rename_hd95_mm: bool,
 ) -> List[str]:
     """Write per-case/per-class-or-region CSV. Returns the list of metric-like columns included."""
-    # union header
     header_keys = set()
     for r in rows:
         header_keys.update(r.keys())
@@ -437,37 +375,10 @@ def write_cases_csv(
     return [k for k in header if k not in fixed]
 
 
-def _label_name(cid: Any, label_map: Optional[Dict[int, str]]) -> Optional[str]:
-    try:
-        return label_map.get(int(cid)) if label_map else None
-    except Exception:
-        return None
-
-
-def _group_sort_key(item):
-    # item is ( (class_type, cid_or_name), group_rows )
-    (ctype, cid) = item[0]
-    # order class types: labels first, then regions
-    ctype_rank = 0 if ctype == "label" else 1
-    if ctype == "label":
-        # prefer numeric ordering for labels
-        if isinstance(cid, int):
-            return (ctype_rank, 0, cid, "")
-        # cid may be a string like "3" or "(1, 2, 3)" – try int, else fallback to string
-        try:
-            return (ctype_rank, 0, int(cid), "")
-        except Exception:
-            return (ctype_rank, 1, str(cid))
-    else:
-        # regions: order alphabetically by name
-        return (ctype_rank, 0, str(cid).lower())
-
-
 def write_summary_csv(
     rows: List[Dict[str, Any]],
     metric_cols: List[str],
     out_path: Path,
-    label_map: Optional[Dict[int, str]],
     round_ndigits: Optional[int],
     std_type: str = "population",
     hd95_quantiles: Optional[str] = None,
@@ -483,14 +394,8 @@ def write_summary_csv(
         ctype = r.get("class_type")
         if ctype == "region":
             return ("region", str(r.get("class_name", "")))
-        # label:
-        cid = r.get("class_id")
-        try:
-            cid = int(cid)
-            return ("label", cid)
-        except Exception:
-            # unions or named labels: group by name string
-            return ("label", str(r.get("class_name", "")))
+        # labels: use raw class_id string as-is
+        return ("label", str(r.get("class_id", "")))
 
     by_group: Dict[Any, List[Dict[str, Any]]] = {}
     for r in rows:
@@ -524,29 +429,20 @@ def write_summary_csv(
                 pass
         q_vals = sorted(set(parts))
 
-    # --- stable sort: labels (numeric id asc, then named) first; regions alpha after ---
+    # --- stable sort: labels alpha by raw id; regions alpha by name ---
     def _group_sort_key(item):
-        (ctype, cid_or_name) = item[0]
-        ctype_rank = 0 if ctype == "label" else 1
-        if ctype == "label" and isinstance(cid_or_name, int):
-            return (ctype_rank, 0, cid_or_name, "")
-        return (ctype_rank, 1, str(cid_or_name).lower())
+        (ctype, ident) = item[0]
+        return (0 if ctype == "label" else 1, str(ident).lower())
 
     out_rows: List[Dict[str, Any]] = []
     for key, grp in sorted(by_group.items(), key=_group_sort_key):
-        ctype, cid_or_name = key
+        ctype, ident = key
         if ctype == "label":
-            if isinstance(cid_or_name, int):
-                class_id = cid_or_name
-                class_name = (
-                    label_map.get(class_id) if label_map else f"class_{class_id}"
-                ) or f"class_{class_id}"
-            else:
-                class_id = ""
-                class_name = str(cid_or_name)
+            class_id = ident
+            class_name = ""
         else:
             class_id = ""
-            class_name = str(cid_or_name)
+            class_name = ident
 
         out: Dict[str, Any] = {
             "class_type": ctype,
@@ -595,11 +491,14 @@ def write_summary_csv(
             w.writerow({k: r.get(k, "") for k in score_headers})
 
 
+# -------------------------- CLI / main -------------------------- #
+
+
 def parse_args():
     ap = argparse.ArgumentParser(
         description=(
             "Convert nnU-Net v2 evaluation JSON to CSV "
-            "(adds/derives PPV/NPV/Jaccard; preserves counts; supports labels + regions)."
+            "(adds/derives PPV/NPV/Jaccard; preserves counts; supports labels/regions without mappings)."
         )
     )
     ap.add_argument(
@@ -607,6 +506,12 @@ def parse_args():
         "--in_fn",
         required=True,
         help="Path to evaluation JSON (e.g., summary_with_hd95.json or summary.json)",
+    )
+    ap.add_argument(
+        "--granularity",
+        choices=["labels", "regions", "both", "auto"],
+        default="auto",
+        help="Emit rows from label keys, regions block, both, or auto-detect (regions if present, else labels).",
     )
     ap.add_argument(
         "--out_cases_fn",
@@ -624,7 +529,7 @@ def parse_args():
         "--counts_out_fn",
         type=Path,
         default=None,
-        help="Optional separate CSV for counts totals.",
+        help="Optional separate CSV for counts totals (not implemented).",
     )
     ap.add_argument(
         "--round",
@@ -649,12 +554,6 @@ def parse_args():
         help="Comma-separated quantiles (e.g., '90,95') to add for HD95 as HD95_pXX.",
     )
     ap.add_argument(
-        "--label_map",
-        default=None,
-        choices=["brats", None, "none"],
-        help="Add a class_name column for labels (currently only 'brats' supported).",
-    )
-    ap.add_argument(
         "--log_file",
         type=Path,
         default=None,
@@ -669,16 +568,10 @@ def parse_args():
     return ap.parse_args()
 
 
-# -------------------------- main -------------------------- #
 def main():
     args = parse_args()
     setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
     logger.info(f"Args: {args}")
-
-    # Prepare class-name map for labels if requested
-    label_map = None
-    if args.label_map and str(args.label_map).lower() in {"brats"}:
-        label_map = {1: "necrotic", 2: "edema", 3: "enhancing"}
 
     in_path = Path(args.in_fn)
     logger.info(f"Input JSON: {in_path}")
@@ -686,15 +579,33 @@ def main():
         data = json.load(f)
 
     items = load_items(data)
-    rows = parse_rows(items, label_map)
 
-    base = in_path.with_suffix("")  # drop .json
+    # choose rows according to granularity (no mappings)
+    if args.granularity == "auto":
+        # Prefer regions if any 'regions' blocks are present; otherwise use labels
+        has_regions = any(
+            isinstance((it.get("metrics", {}) or {}).get("regions"), dict)
+            for it in items
+        )
+        gran = "regions" if has_regions else "labels"
+    else:
+        gran = args.granularity
+
+    rows: List[Dict[str, Any]] = []
+    if gran in ("labels", "both"):
+        rows.extend(parse_rows_labels(items))
+    if gran in ("regions", "both"):
+        rows.extend(parse_rows_regions(items))
+
+    if not rows:
+        raise SystemExit(
+            "No rows parsed from JSON (check that your file has 'metrics' blocks)."
+        )
+
+    base = in_path.with_suffix("")
     out_cases = args.out_cases_fn or Path(str(base) + "_cases.csv")
     metric_cols = write_cases_csv(
-        rows,
-        out_cases,
-        round_ndigits=args.round,
-        rename_hd95_mm=args.rename_hd95_mm,
+        rows, out_cases, round_ndigits=args.round, rename_hd95_mm=args.rename_hd95_mm
     )
 
     out_summary = args.out_summary_fn or Path(str(base) + "_summary.csv")
@@ -702,7 +613,6 @@ def main():
         rows,
         metric_cols,
         out_summary,
-        label_map=label_map,
         round_ndigits=args.round,
         std_type=args.std_type,
         hd95_quantiles=args.hd95_quantiles,

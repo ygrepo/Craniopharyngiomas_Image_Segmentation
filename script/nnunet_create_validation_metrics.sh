@@ -45,6 +45,9 @@ RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__
 
 echo "[info] RES =$RES"
 
+RAW="${nnUNet_raw}/Dataset${DATASET_ID}_${DATASET_NAME}"
+echo "[info] RAW =$RAW"
+
 # --- prediction output ---
 OUTP="${RES}/fold_${FOLD}/predictions/validation"
 mkdir -p "$OUTP"
@@ -57,8 +60,8 @@ HD95_QUANTILES="90,95"
 STD_TYPE="population"
 # STD_TYPE="sample"
 
-LABEL_MAP="brats"
 MAIN="src/nnunet_eval_to_csv.py"
+DJ="${RAW}/dataset.json"
 
 "${PYTHON}" "${MAIN}" \
   --in_fn "${IN_JSON_HD95}" \
@@ -67,8 +70,9 @@ MAIN="src/nnunet_eval_to_csv.py"
   --counts_out_fn "${OUT_COUNTS_FN}" \
   --std_type "${STD_TYPE}" \
   --hd95_quantiles "${HD95_QUANTILES}" \
-  --label_map "${LABEL_MAP}"
-
+  --dataset_json "${DJ}" \
+  --rename_hd95_mm --round 3
+  
 # awk -F, 'NR==1 || $2=="label"' "${OUT_CASE_FN}" > "${OUT_CASE_FN%.csv}_labels.csv"
 # awk -F, 'NR==1 || $1=="label"' "${OUT_SUMMARY_FN}" > "${OUT_SUMMARY_FN%.csv}_labels.csv"
 
@@ -78,4 +82,3 @@ MAIN="src/nnunet_eval_to_csv.py"
 
 echo "[ok] Wrote: ${OUT_SUMMARY_FN}"
 echo "[ok] Wrote: ${OUT_CASE_FN}"
-echo "[ok] Wrote: ${OUT_COUNTS_FN}"
