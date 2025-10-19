@@ -81,7 +81,6 @@ def _extract_dices(body: str):
 
 def parse_one_file(path: str, rows: Dict[int, Dict[str, Any]]):
     with open(path, "r", errors="replace") as f:
-        logger.info(f"Parsing {path}...")
         for line in f:
             s = line.strip()
             if not s:
@@ -165,19 +164,38 @@ def main():
     ap = argparse.ArgumentParser(description="Export nnU-Net v2 logs to CSV.")
     ap.add_argument("-i", "--input_dir", required=True, help="Log file or directory.")
     ap.add_argument("-o", "--output_fn", default=None)
+    ap.add_argument(
+        "--log_level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="Logging level.",
+    )
+    ap.add_argument(
+        "--log_file",
+        type=Path,
+        default=None,
+        help="Log file path (in addition to console).",
+    )
+    ap.add_argument(
+        "--pattern", default="training_log*.txt", help="Glob if input is a directory."
+    )
     args = ap.parse_args()
-    setup_logging(None, "INFO")
+    setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
+
     logger.info(f"Args: {args}")
 
     in_path = args.input_dir
-    files = (
-        [in_path]
-        if os.path.isfile(in_path)
-        else sorted(glob(os.path.join(in_path, "training_log*.txt")))
-    )
+    if os.path.isdir(in_path):
+        files = sorted(glob(os.path.join(in_path, args.pattern)))
+        default_out = os.path.join(in_path, "training_metrics.csv")
+    else:
+        files = [in_path]
+        default_out = os.path.splitext(in_path)[0] + "_metrics.csv"
+
+    out_csv = args.output_fn or default_out
     if not files:
-        sys.exit("No matching log files found.")
-    out_csv = args.output_fn or os.path.splitext(in_path)[0] + "_metrics.csv"
+        logger.error("[error] no log files found.", file=sys.stderr)
+        sys.exit(1)
 
     rows = {}
     for fp in files:
@@ -185,7 +203,8 @@ def main():
         parse_one_file(fp, rows)
 
     if not rows:
-        sys.exit("No epochs parsed.")
+        logger.error("[error] no epochs parsed.", file=sys.stderr)
+        sys.exit(1)
 
     fieldnames = [
         "epoch",
