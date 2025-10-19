@@ -3,12 +3,21 @@
 set -euo pipefail
 
 # --------- Config (edit if needed) ----------
-DATASET_ID=501
+# DATASET_ID=501
+# DATASET_NAME=BraTS2017_4ch
+# FOLD=0
+# CFG=3d_fullres
+# TR=nnUNetTrainer
+# PLANS_ID=nnUNetPlans
+
+DATASET_ID=502
 DATASET_NAME=BraTS2017_4ch
 FOLD=0
 CFG=3d_fullres
 TR=nnUNetTrainer
-PLANS_ID=nnUNetPlans
+PLANS_ID=nnUNetResEncUNetMPlans
+
+
 # -------------------------------------------
 
 # --- env setup ---
@@ -46,7 +55,7 @@ OUT_COUNTS_FN="${OUTP}/validation_metrics_counts.csv"
 
 HD95_QUANTILES="90,95"
 STD_TYPE="population"
-#STD_TYPE="sample"
+# STD_TYPE="sample"
 
 LABEL_MAP="brats"
 MAIN="src/nnunet_eval_to_csv.py"
@@ -59,6 +68,13 @@ MAIN="src/nnunet_eval_to_csv.py"
   --std_type "${STD_TYPE}" \
   --hd95_quantiles "${HD95_QUANTILES}" \
   --label_map "${LABEL_MAP}"
+
+# awk -F, 'NR==1 || $2=="label"' "${OUT_CASE_FN}" > "${OUT_CASE_FN%.csv}_labels.csv"
+# awk -F, 'NR==1 || $1=="label"' "${OUT_SUMMARY_FN}" > "${OUT_SUMMARY_FN%.csv}_labels.csv"
+
+awk -F, 'NR==1 || $2=="region"' "${OUT_CASE_FN}" > "${OUT_CASE_FN%.csv}_regions.csv"
+awk -F, 'NR==1 || $1=="region"' "${OUT_SUMMARY_FN}" > "${OUT_SUMMARY_FN%.csv}_regions.csv"
+
 
 echo "[ok] Wrote: ${OUT_SUMMARY_FN}"
 echo "[ok] Wrote: ${OUT_CASE_FN}"
