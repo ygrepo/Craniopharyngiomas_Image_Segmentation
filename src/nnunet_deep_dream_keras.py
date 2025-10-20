@@ -340,83 +340,85 @@ class DeepDreamBraTS:
 
     #     return result
 
+    def run_deep_dream(
+        self,
+        input_data: torch.Tensor,
+        layer_regex: str = r"encoder",
+        target_idx: int = 0,
+        iterations: int = 20,
+        step_size: float = 0.01,
+        filter_index: Optional[int] = None,
+        octave_scale: float = 1.4,
+        num_octaves: int = 3,
+    ) -> torch.Tensor:
+        # 1) pick target layer
+        target_layer = pick_target_layer(self.model, layer_regex, target_idx=target_idx)
 
-def run_deep_dream(
-    self,
-    input_data: torch.Tensor,
-    layer_regex: str = r"encoder",
-    target_idx: int = 0,
-    iterations: int = 20,
-    step_size: float = 0.01,
-    filter_index: Optional[int] = None,
-    octave_scale: float = 1.4,
-    num_octaves: int = 3,
-) -> torch.Tensor:
-    # 1) pick target layer
-    target_layer = pick_target_layer(self.model, layer_regex, target_idx=target_idx)
-
-    # 2) shape/device bookkeeping
-    if input_data.dim() == 4:  # [B, C, H, W]
-        original_shape = input_data.shape[-2:]
-        is_3d = False
-        interp_mode = "bilinear"
-        nd = 2
-    elif input_data.dim() == 5:  # [B, C, D, H, W]
-        original_shape = input_data.shape[-3:]
-        is_3d = True
-        interp_mode = "trilinear"
-        nd = 3
-    else:
-        raise ValueError(f"Unsupported input dimensions: {input_data.shape}")
-
-    logger.info(f"Input shape: {input_data.shape}, is_3d={is_3d}")
-    input_tensor = input_data.to(self.device)
-
-    # 3) build octaves: [largest (=original), smaller, smallest]
-    octaves = []
-    for i in range(num_octaves):
-        if i == 0:
-            octaves.append(input_tensor)
+        # 2) shape/device bookkeeping
+        if input_data.dim() == 4:  # [B, C, H, W]
+            original_shape = input_data.shape[-2:]
+            is_3d = False
+            interp_mode = "bilinear"
+            nd = 2
+        elif input_data.dim() == 5:  # [B, C, D, H, W]
+            original_shape = input_data.shape[-3:]
+            is_3d = True
+            interp_mode = "trilinear"
+            nd = 3
         else:
-            logger.info(f"Downsampling octave {i}")
-            scale = octave_scale ** (-i)
-            new_spatial = [max(1, int(s * scale)) for s in original_shape]
-            scaled = F.interpolate(
-                input_tensor, size=new_spatial, mode=interp_mode, align_corners=False
+            raise ValueError(f"Unsupported input dimensions: {input_data.shape}")
+
+        logger.info(f"Input shape: {input_data.shape}, is_3d={is_3d}")
+        input_tensor = input_data.to(self.device)
+
+        # 3) build octaves: [largest (=original), smaller, smallest]
+        octaves = []
+        for i in range(num_octaves):
+            if i == 0:
+                octaves.append(input_tensor)
+            else:
+                logger.info(f"Downsampling octave {i}")
+                scale = octave_scale ** (-i)
+                new_spatial = [max(1, int(s * scale)) for s in original_shape]
+                scaled = F.interpolate(
+                    input_tensor,
+                    size=new_spatial,
+                    mode=interp_mode,
+                    align_corners=False,
+                )
+                octaves.append(scaled)
+
+        # 4) process smallest -> largest
+        #    IMPORTANT: init detail to smallest shape to avoid first-iter mismatch
+        detail = torch.zeros_like(octaves[-1])
+
+        for i, octave_base in enumerate(reversed(octaves)):
+            logger.info(f"Upsampling and dreaming octave {i}")
+
+            # resize detail to current octave if needed (robust guard)
+            cur_spatial = octave_base.shape[-nd:]
+            if detail.shape[-nd:] != cur_spatial:
+                detail = F.interpolate(
+                    detail, size=cur_spatial, mode=interp_mode, align_corners=False
+                )
+
+            # add detail and dream at this scale
+            input_octave = octave_base + detail
+            dreamed = self.deep_dream_loop(
+                input_octave, target_layer, iterations, step_size, filter_index
             )
-            octaves.append(scaled)
 
-    # 4) process smallest -> largest
-    #    IMPORTANT: init detail to smallest shape to avoid first-iter mismatch
-    detail = torch.zeros_like(octaves[-1])
+            # update detail contributed at this scale
+            detail = dreamed - octave_base
 
-    for i, octave_base in enumerate(reversed(octaves)):
-        logger.info(f"Upsampling and dreaming octave {i}")
-
-        # resize detail to current octave if needed (robust guard)
-        cur_spatial = octave_base.shape[-nd:]
-        if detail.shape[-nd:] != cur_spatial:
+        # 5) upsample accumulated detail back to original size and add
+        if detail.shape[-nd:] != tuple(original_shape):
             detail = F.interpolate(
-                detail, size=cur_spatial, mode=interp_mode, align_corners=False
+                detail, size=original_shape, mode=interp_mode, align_corners=False
             )
 
-        # add detail and dream at this scale
-        input_octave = octave_base + detail
-        dreamed = self.deep_dream_loop(
-            input_octave, target_layer, iterations, step_size, filter_index
-        )
-
-        # update detail contributed at this scale
-        detail = dreamed - octave_base
-
-    # 5) upsample accumulated detail back to original size and add
-    if detail.shape[-nd:] != tuple(original_shape):
-        detail = F.interpolate(
-            detail, size=original_shape, mode=interp_mode, align_corners=False
-        )
-
-    result = input_tensor + detail
-    return result
+        result = input_tensor + detail
+        return result
 
 
 # -------------------------- main -------------------------- #
