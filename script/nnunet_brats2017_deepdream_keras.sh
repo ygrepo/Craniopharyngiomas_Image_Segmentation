@@ -49,13 +49,15 @@ DATASET_ID=502
 DATASET_NAME=BraTS2017_4ch
 FOLD=0
 PLANS_ID=nnUNetResEncUNetMPlans
-CONFIGURATION="nnUNetPlans_3d_fullres"
+TR="nnUNetTrainer"
+CONFIGURATION="3d_fullres"
 
+RES="nnUNet_results/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CONFIGURATION}"
 PREP="nnUNet_preprocessed/Dataset${DATASET_ID}_${DATASET_NAME}"
 DATA_DIR="${PREP}/${CONFIGURATION}"
 
 $PYTHON "$MAIN" \
-    --model_dir "nnUNet_results/Dataset501_BraTS2017_4ch/${TRAINER_NAME}__${PLANS_ID}__${CONFIGURATION}/" \
+    --model_dir "${RES}" \
     --preprocessed_dir "${DATA_DIR}" \
     --case_id "Brats17_CBICA_AAG_1" \
     --fold 0 \
