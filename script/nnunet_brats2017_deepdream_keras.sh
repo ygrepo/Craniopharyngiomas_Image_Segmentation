@@ -1,8 +1,8 @@
 #!/bin/bash
-#   unet_brats2017_deepdream.sh    —  Predict 3D mask using nnU-Net v2.
-#SBATCH --job-name=unet_brats2017_deepdream
-#SBATCH --output=logs/unet_brats2017_deepdream_%A_%a.out
-#SBATCH --error=logs/unet_brats2017_deepdream_%A_%a.err
+#   nnunet_brats2017_deepdream_keras.sh    —  Predict 3D mask using nnU-Net v2.
+#SBATCH --job-name=nnunet_brats2017_deepdream_keras
+#SBATCH --output=logs/nnunet_brats2017_deepdream_keras_%A_%a.out
+#SBATCH --error=logs/nnunet_brats2017_deepdream_keras_%A_%a.err
 #SBATCH --time=04:00:00
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
@@ -55,13 +55,17 @@ CONFIGURATION="3d_fullres"
 RES="nnUNet_results/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CONFIGURATION}"
 PREP="nnUNet_preprocessed/Dataset${DATASET_ID}_${DATASET_NAME}"
 DATA_DIR="${PREP}/nnUNetPlans_${CONFIGURATION}"
-
+OUTPUT_DIR="output/deepdream_keras"
+mkdir -p "$OUTPUT_DIR"
 $PYTHON "$MAIN" \
     --model_dir "${RES}" \
     --preprocessed_dir "${DATA_DIR}" \
     --case_id "Brats17_CBICA_AAG_1" \
     --fold 0 \
     --checkpoint "checkpoint_final.pth" \
+    --output_dir "$OUTPUT_DIR" \
+    --slice_idx 40 \
+    --modality_idx 1 \
     --log_file "$LOG_DIR/nnunet_deepdream_keras.log" \
     --log_level "$LOG_LEVEL"
 
