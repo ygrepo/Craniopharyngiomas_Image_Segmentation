@@ -44,7 +44,7 @@ def load_nnunet_preprocessed_case(
     # The pickle file typically contains:
     # - 'data': the preprocessed image array [C, D, H, W]
     # - 'properties': metadata about preprocessing
-
+    logger.info(f"Data dict keys: {data_dict}")
     if isinstance(data_dict, dict):
         if "data" in data_dict:
             image_data = data_dict["data"]
