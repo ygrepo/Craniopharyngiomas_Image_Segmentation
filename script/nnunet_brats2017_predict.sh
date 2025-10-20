@@ -61,8 +61,8 @@ RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__
 
 # Predict Single fold (e.g., fold 0)
 nnUNetv2_predict \
-  -i ${RAW} /imagesTs/ \
-  -o ${RES}/predictions/fold_0/test \
+  -i ${RAW}/imagesTs/ \
+  -o ${RES}/fold_${FOLD}/predictions/test \
   -d ${DATASET_ID} \
   -c ${CFG} \
   -f ${FOLD} \
