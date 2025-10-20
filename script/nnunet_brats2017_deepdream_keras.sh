@@ -56,6 +56,8 @@ RES="nnUNet_results/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${C
 PREP="nnUNet_preprocessed/Dataset${DATASET_ID}_${DATASET_NAME}"
 DATA_DIR="${PREP}/nnUNetPlans_${CONFIGURATION}"
 OUTPUT_DIR="output/deepdream_keras"
+export TORCHDYNAMO_DISABLE=1
+
 mkdir -p "$OUTPUT_DIR"
 $PYTHON "$MAIN" \
     --model_dir "${RES}" \

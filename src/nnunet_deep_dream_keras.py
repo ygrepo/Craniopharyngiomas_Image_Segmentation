@@ -14,6 +14,7 @@ import torch.nn.functional as F
 import nibabel as nib
 import json
 from tqdm import tqdm
+import math
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -105,6 +106,41 @@ def visualize_results(
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
 
     plt.show()
+
+
+def _next_multiple(n: int, m: int) -> int:
+    return int(math.ceil(n / m) * m)
+
+
+def _pad_to_multiples(x: torch.Tensor, factors: tuple[int, ...], nd: int):
+    spatial = list(x.shape[-nd:])
+    target = [_next_multiple(s, f) for s, f in zip(spatial, factors)]
+    pads = []
+    for s, t in zip(spatial[::-1], target[::-1]):  # F.pad uses reverse spatial order
+        diff = t - s
+        left = diff // 2
+        right = diff - left
+        pads.extend([left, right])
+    if any(pads):
+        x = F.pad(x, pads, mode="reflect")
+    return x, pads
+
+
+def _crop_from_pads(x: torch.Tensor, pads: list[int], nd: int):
+    if not any(pads):
+        return x
+    slc = [slice(None), slice(None)]
+    if nd == 2:
+        wL, wR, hL, hR = pads
+        slc += [slice(hL, x.shape[-2] - hR), slice(wL, x.shape[-1] - wR)]
+    else:
+        wL, wR, hL, hR, dL, dR = pads
+        slc += [
+            slice(dL, x.shape[-3] - dR),
+            slice(hL, x.shape[-2] - hR),
+            slice(wL, x.shape[-1] - wR),
+        ]
+    return x[tuple(slc)]
 
 
 class DeepDreamBraTS:
@@ -228,6 +264,7 @@ class DeepDreamBraTS:
     def run_deep_dream(
         self,
         input_data: torch.Tensor,
+        meta: dict,
         layer_regex: str = r"encoder",
         target_idx: int = 0,
         iterations: int = 20,
@@ -236,6 +273,11 @@ class DeepDreamBraTS:
         octave_scale: float = 1.4,
         num_octaves: int = 3,
     ) -> torch.Tensor:
+
+        logger.info("Running deep dream...")
+        logger.info(
+            f"target_idx: {target_idx}, filter_index: {filter_index}, num_octaves: {num_octaves}, octave_scale: {octave_scale}"
+        )
         # 1) pick target layer
         target_layer = pick_target_layer(self.model, layer_regex, target_idx=target_idx)
 
@@ -276,6 +318,14 @@ class DeepDreamBraTS:
         # 4) process smallest -> largest
         #    IMPORTANT: init detail to smallest shape to avoid first-iter mismatch
         detail = torch.zeros_like(octaves[-1])
+        cfg = meta["configuration_manager"]
+        pool_ks = cfg.pool_op_kernel_sizes
+        nd = cfg.network_num_spatial_dimensions
+        factors = tuple(
+            int(np.prod([stage[d] for stage in pool_ks])) for d in range(nd)
+        )
+        interp_mode = "trilinear" if nd == 3 else "bilinear"
+
         for i, octave_base in enumerate(
             tqdm(reversed(octaves), desc="Processing octaves")
         ):
@@ -290,13 +340,15 @@ class DeepDreamBraTS:
 
             # add detail and dream at this scale
             input_octave = octave_base + detail
+            input_padded, pads = _pad_to_multiples(input_octave, factors, nd)
             dreamed = self.deep_dream_loop(
-                input_tensor=input_octave,
+                input_tensor=input_padded,
                 layer=target_layer,
                 iterations=iterations,
                 step_size=step_size,
                 filter_index=filter_index,
             )
+            dreamed = _crop_from_pads(dreamed, pads, nd)
 
             # update detail contributed at this scale
             detail = dreamed - octave_base
@@ -357,7 +409,7 @@ def parse_args():
     ap.add_argument(
         "--iterations",
         type=int,
-        default=20,
+        default=50,
         help="Number of gradient ascent iterations",
     )
     ap.add_argument(
@@ -412,7 +464,7 @@ if __name__ == "__main__":
     # Load model
     logger.info("Loading nnU-Net model...")
     model, meta = load_model_from_results(
-        args.model_dir, args.fold, None, args.checkpoint
+        args.model_dir, args.fold, None, args.checkpoint, compile_network=False
     )
     device = next(model.parameters()).device
     logger.info(f"Model on device: {device}")
@@ -425,9 +477,9 @@ if __name__ == "__main__":
     # Initialize deep dream
     deep_dream = DeepDreamBraTS(model, meta)
     # Run deep dream
-    logger.info("Running deep dream...")
     dreamed_tensor = deep_dream.run_deep_dream(
         input_tensor,
+        meta,
         layer_regex=args.layer_regex,
         target_idx=args.target_idx,
         iterations=args.iterations,
