@@ -44,7 +44,7 @@ PYTHON="${ENV_PREFIX}/bin/python"
 
 MAIN="src/nnunet_deep_dream_keras.py"
 TRAINER_NAME="nnUNetTrainer"
-CONFIGURATION="3d_fullres"
+CONFIGURATION="nnUNetPlans_3d_fullres"
 
 $PYTHON "$MAIN" \
     --model_dir "nnUNet_results/Dataset501_BraTS2017_4ch/${TRAINER_NAME}__nnUNetPlans__${CONFIGURATION}/" \
