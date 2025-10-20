@@ -24,6 +24,7 @@ from src.util import (
     setup_logging,
     load_volume,
     pick_target_layer,
+    save_b2nd_to_nifti_for_slicer,
 )
 
 logger = get_logger(__name__)
@@ -471,6 +472,17 @@ if __name__ == "__main__":
         preprocessed_data_dir, args.case_id, device
     )
 
+    # Save results
+    output_dir = args.output_dir.resolve()
+
+    save_b2nd_to_nifti_for_slicer(
+        input_tensor,
+        data_meta["properties"],
+        output_dir,
+        args.case_id,
+        save_4d=False,
+    )
+
     # Initialize deep dream
     deep_dream = DeepDreamBraTS(model, meta)
     # Run deep dream
@@ -485,14 +497,14 @@ if __name__ == "__main__":
         num_octaves=args.num_octaves,
     )
 
-    # Save results
-    output_path = args.output_dir / f"{args.case_id}_deep_dream.nii.gz"
     dreamed_np = dreamed_tensor[0].cpu().numpy()  # Remove batch dimension
 
     # Save as NIfTI
     nii_img = nib.Nifti1Image(dreamed_np.transpose(1, 2, 3, 0), affine=np.eye(4))
-    nib.save(nii_img, str(output_path))
-    logger.info(f"Saved deep dream result to: {output_path}")
+    nib.save(nii_img, str(output_dir / f"{args.case_id}_deep_dream.nii.gz"))
+    logger.info(
+        f"Saved deep dream result to: {output_dir / f'{args.case_id}_deep_dream.nii.gz'}"
+    )
 
     # Visualize
     viz_path = args.output_dir / f"{args.case_id}_visualization.png"

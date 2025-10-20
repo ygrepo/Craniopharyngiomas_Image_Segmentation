@@ -190,6 +190,93 @@ def save_nifti_image(
     save_nifti(out, out_path)
 
 
+# --- if you already have these helpers in your repo, use them instead ---
+def affine_from_spacing_origin(spacing, origin):
+    """
+    Build a simple RAS affine from voxel spacing (dz, dy, dx) and origin (z0, y0, x0).
+    Assumes volumes are in nnU-Net preprocessed RAS with axes (D, H, W) == (Z, Y, X).
+    """
+    dz, dy, dx = map(float, spacing)
+    z0, y0, x0 = map(float, origin)
+    A = np.eye(4, dtype=np.float32)
+    A[0, 0] = dx
+    A[1, 1] = dy
+    A[2, 2] = dz
+    A[0, 3] = x0
+    A[1, 3] = y0
+    A[2, 3] = z0
+    return A
+
+
+def get_spacing_origin_from_props(props):
+    """
+    Try common nnU-Net v2 keys found in props .pkl.
+    Falls back to ones you may have logged earlier.
+    """
+    # Prefer the spacing actually used by the preprocessed tensor
+    spacing = (
+        props.get("spacing_after_resampling")
+        or props.get("spacing")  # beware: sometimes original spacing
+        or props.get("itk_spacing")
+    )
+    origin = (
+        props.get("itk_origin")  # usually present
+        or props.get("origin")  # fallback
+        or (0.0, 0.0, 0.0)
+    )
+    if spacing is None:
+        raise KeyError(
+            "Could not find spacing in props (looked for spacing_after_resampling/spacing/itk_spacing)."
+        )
+    return spacing, origin
+
+
+# -----------------------------------------------------------------------
+
+
+def save_b2nd_to_nifti_for_slicer(
+    vol_t: torch.Tensor,  # [1, C, D, H, W], float32
+    props: dict,
+    out_dir: Path,
+    case_id: str,
+    save_4d: bool = False,  # True -> one 4D NIfTI; False -> 4 separate 3D files
+    modality_names=("FLAIR", "T1", "T1CE", "T2"),
+):
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1) tensor -> numpy with channels first (C, D, H, W)
+    arr = vol_t[0].detach().cpu().numpy().astype(np.float32)  # (C, D, H, W)
+
+    # 2) Affine in RAS using spacing/origin from props
+    spacing, origin = get_spacing_origin_from_props(props)  # (dz, dy, dx), (z0, y0, x0)
+    affine = affine_from_spacing_origin(spacing, origin)
+
+    # 3) Save either 4D (X,Y,Z,C) or per-channel 3D (X,Y,Z)
+    if save_4d:
+        # nnU-Net tensor (C,D,H,W) → NIfTI (X,Y,Z,C) == (W,H,D,C)
+        data_4d = np.transpose(arr, (3, 2, 1, 0))
+        img = nib.Nifti1Image(data_4d, affine)
+        # make sure both qform/sform are consistent
+        img.set_qform(affine, code=1)
+        img.set_sform(affine, code=1)
+        out_path = out_dir / f"{case_id}_4ch.nii.gz"
+        nib.save(img, str(out_path))
+        print(f"[OK] Saved 4D to {out_path}")
+    else:
+        for c in range(arr.shape[0]):
+            # single channel (D,H,W) → (X,Y,Z) == (W,H,D)
+            data_3d = np.transpose(arr[c], (2, 1, 0))
+            img = nib.Nifti1Image(data_3d, affine)
+            img.set_qform(affine, code=1)
+            img.set_sform(affine, code=1)
+            # use BraTS naming 0000..0003 so Slicer/nnU-Net conventions are obvious
+            suffix = f"{c:04d}"
+            name = modality_names[c] if c < len(modality_names) else suffix
+            out_path = out_dir / f"{case_id}_{suffix}.nii.gz"
+            nib.save(img, str(out_path))
+            print(f"[OK] Saved {name} to {out_path}")
+
+
 def pick_vis_channel(volume: np.ndarray) -> tuple[np.ndarray, int]:
     """
     Returns:
