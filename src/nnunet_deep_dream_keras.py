@@ -151,13 +151,13 @@ class DeepDreamBraTS:
         self.meta = meta
         self.device = next(model.parameters()).device
 
-    def compute_loss(
+    def compute_score(
         self,
         input_tensor: torch.Tensor,
         layer: nn.Module,
         filter_index: Optional[int] = None,
     ) -> torch.Tensor:
-        """Compute loss for deep dream based on layer activations."""
+        """Compute score for deep dream based on layer activations."""
 
         # Hook to capture activations
         activations = {}
@@ -180,15 +180,15 @@ class DeepDreamBraTS:
                 # Focus on specific filter/channel
                 if filter_index >= activation.shape[1]:
                     filter_index = activation.shape[1] - 1
-                loss = -activation[:, filter_index].mean()
+                score = activation[:, filter_index].mean()
             else:
                 # Use all activations
-                loss = -activation.norm()
+                score = activation.norm()
 
         finally:
             handle.remove()
 
-        return loss
+        return score
 
     def gradient_ascent_step(
         self,
@@ -198,32 +198,18 @@ class DeepDreamBraTS:
         step_size: float = 0.01,
     ) -> torch.Tensor:
         """Perform one gradient ascent step."""
-
-        input_tensor.requires_grad_(True)
-
-        # Zero gradients
-        if input_tensor.grad is not None:
-            input_tensor.grad.zero_()
-
-        # Compute loss
-        loss = self.compute_loss(input_tensor, layer, filter_index)
-
-        # Backward pass
-        loss.backward()
+        x = input_tensor.detach().requires_grad_(True)
+        # Compute score
+        score = self.compute_score(x, layer, filter_index)
+        (-score).backward()  # descent on (-score) == ascent on score
 
         # Gradient ascent step
         with torch.no_grad():
-            # Normalize gradients
-            grad = input_tensor.grad
-            grad = grad / (torch.sqrt(torch.mean(grad**2)) + 1e-5)
-
-            # Update input
-            input_tensor += step_size * grad
-
-            # Optional: clip values to reasonable range for medical images
-            input_tensor.clamp_(-3, 3)  # Adjust based on your normalization
-
-        return input_tensor.detach()
+            g = x.grad
+            g = g / (torch.sqrt(torch.mean(g**2)) + 1e-5)
+            x += step_size * g  # ascent on score
+            x.clamp_(-3, 3)
+        return x.detach()
 
     def deep_dream_loop(
         self,
@@ -253,18 +239,18 @@ class DeepDreamBraTS:
             )
 
             if i % log_every == 0:
-                loss = self.compute_loss(input_tensor, layer, filter_index)
-                val = float(loss.detach().item())
+                score_t = self.compute_score(input_tensor, layer, filter_index)
+                score = -float(score_t.detach().item())
+                loss = -score
                 if show_progress:
-                    pbar.set_postfix(loss=f"{val:.4f}")
-                logger.info(f"Iteration {i}, Loss: {val:.4f}")
+                    pbar.set_postfix(score=f"{score:.4f}")
+                logger.info(f"Iter {i}, Score={score:.4f}, Loss={loss:.4f}")
 
         return input_tensor
 
     def run_deep_dream(
         self,
         input_data: torch.Tensor,
-        meta: dict,
         layer_regex: str = r"encoder",
         target_idx: int = 0,
         iterations: int = 20,
@@ -293,19 +279,20 @@ class DeepDreamBraTS:
 
         logger.info(f"Input shape: {input_data.shape}, is_3d={is_3d}")
         input_tensor = input_data.to(self.device)
-        cfg = meta["configuration_manager"]
-        pm = meta["plans_manager"]
-        cfg_name = meta["configuration_name"]
+        cfg = self.meta["configuration_manager"]
+        pm = self.meta["plans_manager"]
+        cfg_name = self.meta["configuration_name"]
 
         # 1) Get pool kernels (prefer cfg, else pull from plans)
         pool_ks = getattr(cfg, "pool_op_kernel_sizes", None)
+        logger.info(f"pool_ks: {pool_ks}")
         if pool_ks is None:
             # nnU-Net v2 stores this under plans -> configurations -> <cfg>
             pool_ks = pm.plans["configurations"][cfg_name]["pool_op_kernel_sizes"]
 
         # 2) Number of spatial dims (2 for 2D, 3 for 3D)
         nd = len(pool_ks[0])  # or: nd = len(getattr(cfg, "patch_size", pool_ks[0]))
-
+        logger.info(f"nd: {nd}")
         # 4) Interp mode from nd
         interp_mode = "trilinear" if nd == 3 else "bilinear"
         logger.info(f"interp_mode: {interp_mode}")
@@ -489,7 +476,6 @@ if __name__ == "__main__":
     # Run deep dream
     dreamed_tensor = deep_dream.run_deep_dream(
         input_tensor,
-        meta,
         layer_regex=args.layer_regex,
         target_idx=args.target_idx,
         iterations=args.iterations,
