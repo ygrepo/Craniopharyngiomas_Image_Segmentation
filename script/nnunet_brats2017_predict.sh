@@ -58,7 +58,6 @@ PLANS_ID=nnUNetResEncUNetMPlans
 RAW="${nnUNet_raw}/Dataset${DATASET_ID}_${DATASET_NAME}"
 RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
 
-
 # Predict Single fold (e.g., fold 0)
 nnUNetv2_predict \
   -i ${RAW}/imagesTs/ \
@@ -66,5 +65,7 @@ nnUNetv2_predict \
   -d ${DATASET_ID} \
   -c ${CFG} \
   -f ${FOLD} \
+  -tr ${TR} \
+  -p ${PLANS_ID} \
   -chk ${RES}/fold_${FOLD}/checkpoint_best.pth \
   -device cuda
