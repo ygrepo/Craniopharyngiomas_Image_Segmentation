@@ -285,18 +285,30 @@ class DeepDreamBraTS:
         if input_data.dim() == 4:  # [B, C, H, W]
             original_shape = input_data.shape[-2:]
             is_3d = False
-            interp_mode = "bilinear"
-            nd = 2
         elif input_data.dim() == 5:  # [B, C, D, H, W]
             original_shape = input_data.shape[-3:]
             is_3d = True
-            interp_mode = "trilinear"
-            nd = 3
         else:
             raise ValueError(f"Unsupported input dimensions: {input_data.shape}")
 
         logger.info(f"Input shape: {input_data.shape}, is_3d={is_3d}")
         input_tensor = input_data.to(self.device)
+        cfg = meta["configuration_manager"]
+        pm = meta["plans_manager"]
+        cfg_name = meta["configuration_name"]
+
+        # 1) Get pool kernels (prefer cfg, else pull from plans)
+        pool_ks = getattr(cfg, "pool_op_kernel_sizes", None)
+        if pool_ks is None:
+            # nnU-Net v2 stores this under plans -> configurations -> <cfg>
+            pool_ks = pm.plans["configurations"][cfg_name]["pool_op_kernel_sizes"]
+
+        # 2) Number of spatial dims (2 for 2D, 3 for 3D)
+        nd = len(pool_ks[0])  # or: nd = len(getattr(cfg, "patch_size", pool_ks[0]))
+
+        # 4) Interp mode from nd
+        interp_mode = "trilinear" if nd == 3 else "bilinear"
+        logger.info(f"interp_mode: {interp_mode}")
 
         # 3) build octaves: [largest (=original), smaller, smallest]
         octaves = []
@@ -318,13 +330,11 @@ class DeepDreamBraTS:
         # 4) process smallest -> largest
         #    IMPORTANT: init detail to smallest shape to avoid first-iter mismatch
         detail = torch.zeros_like(octaves[-1])
-        cfg = meta["configuration_manager"]
         pool_ks = cfg.pool_op_kernel_sizes
-        nd = cfg.network_num_spatial_dimensions
+        # 3) Total down/up factor per axis = product over stages
         factors = tuple(
             int(np.prod([stage[d] for stage in pool_ks])) for d in range(nd)
         )
-        interp_mode = "trilinear" if nd == 3 else "bilinear"
 
         for i, octave_base in enumerate(
             tqdm(reversed(octaves), desc="Processing octaves")
