@@ -54,7 +54,7 @@ CONFIGURATION="3d_fullres"
 
 RES="nnUNet_results/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CONFIGURATION}"
 PREP="nnUNet_preprocessed/Dataset${DATASET_ID}_${DATASET_NAME}"
-DATA_DIR="${PREP}/${CONFIGURATION}"
+DATA_DIR="${PREP}/nnUNetPlans_${CONFIGURATION}"
 
 $PYTHON "$MAIN" \
     --model_dir "${RES}" \
