@@ -108,15 +108,6 @@ def parse_args():
         help="BraTS case ID (e.g., Brats17_TCIA_001_1)",
     )
     ap.add_argument(
-        "--trainer_name",
-        type=str,
-        default="nnUNetTrainer",
-        help="Trainer name for finding preprocessed directory",
-    )
-    ap.add_argument(
-        "--configuration", type=str, default="3d_fullres", help="Configuration name"
-    )
-    ap.add_argument(
         "--log_file",
         type=Path,
         default="logs/nnunet_deepdream_keras.log",
@@ -135,9 +126,9 @@ if __name__ == "__main__":
     args = parse_args()
     setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
     logger.info(f"Args: {args}")
-    preprocessed_data_dir = (
-        args.preprocessed_dir / args.trainer_name / args.configuration
-    )
+    preprocessed_data_dir = args.preprocessed_dir.resolve()
+    logger.info(f"Preprocessed data dir: {preprocessed_data_dir}")
+
     input_tensor, data_meta = load_nnunet_preprocessed_case(
         preprocessed_data_dir, args.case_id
     )

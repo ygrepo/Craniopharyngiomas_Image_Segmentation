@@ -43,12 +43,20 @@ source script/set_unet_path.sh
 PYTHON="${ENV_PREFIX}/bin/python"
 
 MAIN="src/nnunet_deep_dream_keras.py"
-TRAINER_NAME="nnUNetTrainer"
+
+
+DATASET_ID=502
+DATASET_NAME=BraTS2017_4ch
+FOLD=0
+PLANS_ID=nnUNetResEncUNetMPlans
 CONFIGURATION="nnUNetPlans_3d_fullres"
 
+PREP="nnUNet_preprocessed/Dataset${DATASET_ID}_${DATASET_NAME}"
+DATA_DIR="${PREP}/${CONFIGURATION}"
+
 $PYTHON "$MAIN" \
-    --model_dir "nnUNet_results/Dataset501_BraTS2017_4ch/${TRAINER_NAME}__nnUNetPlans__${CONFIGURATION}/" \
-    --preprocessed_dir "nnUNet_preprocessed/Dataset501_BraTS2017_4ch/" \
+    --model_dir "nnUNet_results/Dataset501_BraTS2017_4ch/${TRAINER_NAME}__${PLANS_ID}__${CONFIGURATION}/" \
+    --preprocessed_dir "${DATA_DIR}" \
     --case_id "Brats17_CBICA_AAG_1" \
     --fold 0 \
     --checkpoint "checkpoint_final.pth" \
