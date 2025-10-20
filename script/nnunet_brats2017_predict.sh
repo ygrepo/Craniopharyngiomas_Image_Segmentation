@@ -39,13 +39,32 @@ source script/set_unet_path.sh
 
 # Choose a GPU id if needed:
 #export CUDA_VISIBLE_DEVICES=0
+# DATASET_ID=501
+# DATASET_NAME=BraTS2017_4ch
+# FOLD=0
+# CFG=3d_fullres
+# TR=nnUNetTrainer
+# PLANS_ID=nnUNetPlans
+
+
+DATASET_ID=502
+DATASET_NAME=BraTS2017_4ch
+FOLD=0
+CFG=3d_fullres
+TR=nnUNetTrainer
+PLANS_ID=nnUNetResEncUNetMPlans
+
+# --- derive paths from envs ---
+RAW="${nnUNet_raw}/Dataset${DATASET_ID}_${DATASET_NAME}"
+RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
+
 
 # Predict Single fold (e.g., fold 0)
 nnUNetv2_predict \
-  -i /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_raw/Dataset501_BraTS2017_4ch/imagesTs/ \
-  -o /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/predictions/fold_0/test \
-  -d 501 \
-  -c 3d_fullres \
-  -f 0 \
-  -chk checkpoint_best.pth \
+  -i ${RAW} /imagesTs/ \
+  -o ${RES}/predictions/fold_0/test \
+  -d ${DATASET_ID} \
+  -c ${CFG} \
+  -f ${FOLD} \
+  -chk ${RES}/fold_${FOLD}/checkpoint_best.pth \
   -device cuda
