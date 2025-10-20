@@ -7,7 +7,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from typing import Tuple, Dict, Optional, Any
+from typing import Tuple, Dict, Optional, Any, Union, List
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -61,45 +61,212 @@ def load_nnunet_preprocessed_case(
     return vol_t, metadata
 
 
+# Utility function to generate slice lists
+def generate_slice_list(
+    volume_shape: tuple, method: str = "evenly_spaced", num_slices: int = 5, **kwargs
+) -> List[int]:
+    """
+    Generate a list of slice indices for visualization.
+
+    Args:
+        volume_shape: Shape of the 3D volume (D, H, W)
+        method: Method to select slices
+            - "evenly_spaced": Evenly distributed slices
+            - "middle_range": Slices around the middle
+            - "custom": Custom list provided in kwargs['slices']
+        num_slices: Number of slices to select
+        **kwargs: Additional parameters for specific methods
+
+    Returns:
+        List of slice indices
+    """
+
+    depth = volume_shape[0]
+
+    if method == "evenly_spaced":
+        return list(np.linspace(0, depth - 1, num_slices, dtype=int))
+
+    elif method == "middle_range":
+        middle = depth // 2
+        half_range = num_slices // 2
+        start = max(0, middle - half_range)
+        end = min(depth, middle + half_range + 1)
+        return list(range(start, end))
+
+    elif method == "custom":
+        return kwargs.get("slices", [depth // 2])
+
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+
 def visualize_results(
     original: torch.Tensor,
     dreamed: torch.Tensor,
-    slice_idx: Optional[int] = None,
+    slice_idx: Optional[Union[int, List[int]]] = None,
     modality_idx: int = 0,
     save_path: Optional[Path] = None,
+    max_cols: int = 4,
 ):
-    """Visualize deep dream results."""
+    """
+    Visualize deep dream results for single slice or multiple slices.
+
+    Args:
+        original: Original tensor [B, C, D, H, W]
+        dreamed: Deep dream result tensor [B, C, D, H, W]
+        slice_idx: Single slice index, list of indices, or None for middle slice
+        modality_idx: Which modality/channel to visualize
+        save_path: Path to save the visualization
+        max_cols: Maximum number of columns in multi-slice view
+    """
 
     # Convert to numpy and remove batch dimension
     orig_np = original[0, modality_idx].cpu().numpy()
     dream_np = dreamed[0, modality_idx].cpu().numpy()
 
-    if orig_np.ndim == 3:  # 3D volume
-        if slice_idx is None:
-            slice_idx = orig_np.shape[0] // 2
+    if orig_np.ndim == 2:  # 2D image
+        # For 2D, ignore slice_idx and show single comparison
+        _visualize_single_slice(orig_np, dream_np, None, save_path)
+        return
+
+    # Handle 3D volume
+    if slice_idx is None:
+        slice_idx = orig_np.shape[0] // 2
+
+    if isinstance(slice_idx, int):
+        # Single slice
+        _visualize_single_slice(orig_np, dream_np, slice_idx, save_path)
+    else:
+        # Multiple slices
+        _visualize_multiple_slices(orig_np, dream_np, slice_idx, save_path, max_cols)
+
+
+def _visualize_single_slice(
+    orig_np: np.ndarray,
+    dream_np: np.ndarray,
+    slice_idx: Optional[int],
+    save_path: Optional[Path],
+):
+    """Visualize a single slice (original behavior)."""
+
+    if orig_np.ndim == 3 and slice_idx is not None:
         orig_slice = orig_np[slice_idx]
         dream_slice = dream_np[slice_idx]
-    else:  # 2D image
+        title_suffix = f" (Slice {slice_idx})"
+    else:
         orig_slice = orig_np
         dream_slice = dream_np
+        title_suffix = ""
 
     # Create visualization
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     axes[0].imshow(orig_slice, cmap="gray")
-    axes[0].set_title("Original")
+    axes[0].set_title(f"Original{title_suffix}")
     axes[0].axis("off")
 
     axes[1].imshow(dream_slice, cmap="gray")
-    axes[1].set_title("Deep Dream")
+    axes[1].set_title(f"Deep Dream{title_suffix}")
     axes[1].axis("off")
 
     # Difference
     diff = dream_slice - orig_slice
     im = axes[2].imshow(diff, cmap="RdBu_r")
-    axes[2].set_title("Difference")
+    axes[2].set_title(f"Difference{title_suffix}")
     axes[2].axis("off")
     plt.colorbar(im, ax=axes[2])
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    plt.show()
+
+
+def _visualize_multiple_slices(
+    orig_np: np.ndarray,
+    dream_np: np.ndarray,
+    slice_indices: List[int],
+    save_path: Optional[Path],
+    max_cols: int = 4,
+):
+    """Visualize multiple slices in a grid layout."""
+
+    # Filter valid slice indices
+    max_slice = orig_np.shape[0] - 1
+    valid_slices = [s for s in slice_indices if 0 <= s <= max_slice]
+
+    if not valid_slices:
+        print(
+            f"No valid slice indices. Volume has {orig_np.shape[0]} slices (0-{max_slice})"
+        )
+        return
+
+    if len(valid_slices) != len(slice_indices):
+        invalid = [s for s in slice_indices if s not in valid_slices]
+        print(f"Warning: Invalid slice indices {invalid} ignored. Using {valid_slices}")
+
+    num_slices = len(valid_slices)
+
+    # Calculate grid layout
+    cols = min(max_cols, num_slices)
+    rows = (num_slices + cols - 1) // cols
+
+    # Create figure with 3 rows per slice (original, dream, difference)
+    fig_height = rows * 4 * 3  # 3 sub-rows per slice row
+    fig_width = cols * 5
+    fig, axes = plt.subplots(rows * 3, cols, figsize=(fig_width, fig_height))
+
+    # Handle single row/column cases
+    if rows * 3 == 1:
+        axes = axes.reshape(1, -1)
+    elif cols == 1:
+        axes = axes.reshape(-1, 1)
+
+    for idx, slice_idx in enumerate(valid_slices):
+        row = idx // cols
+        col = idx % cols
+
+        # Get slices
+        orig_slice = orig_np[slice_idx]
+        dream_slice = dream_np[slice_idx]
+        diff_slice = dream_slice - orig_slice
+
+        # Calculate subplot positions
+        orig_row = row * 3
+        dream_row = row * 3 + 1
+        diff_row = row * 3 + 2
+
+        # Original
+        ax_orig = axes[orig_row, col] if cols > 1 else axes[orig_row]
+        ax_orig.imshow(orig_slice, cmap="gray")
+        ax_orig.set_title(f"Original (Slice {slice_idx})")
+        ax_orig.axis("off")
+
+        # Dream
+        ax_dream = axes[dream_row, col] if cols > 1 else axes[dream_row]
+        ax_dream.imshow(dream_slice, cmap="gray")
+        ax_dream.set_title(f"Deep Dream (Slice {slice_idx})")
+        ax_dream.axis("off")
+
+        # Difference
+        ax_diff = axes[diff_row, col] if cols > 1 else axes[diff_row]
+        im = ax_diff.imshow(diff_slice, cmap="RdBu_r")
+        ax_diff.set_title(f"Difference (Slice {slice_idx})")
+        ax_diff.axis("off")
+
+        # Add colorbar for difference
+        plt.colorbar(im, ax=ax_diff, fraction=0.046, pad=0.04)
+
+    # Hide empty subplots
+    total_subplots = rows * cols * 3
+    used_subplots = len(valid_slices) * 3
+    for idx in range(used_subplots, total_subplots):
+        subplot_row = (idx // 3) // cols * 3 + (idx % 3)
+        subplot_col = (idx // 3) % cols
+        ax = axes[subplot_row, subplot_col] if cols > 1 else axes[subplot_row]
+        ax.axis("off")
 
     plt.tight_layout()
 
@@ -420,6 +587,12 @@ def parse_args():
         help="Specific filter to enhance (None for all)",
     )
     ap.add_argument(
+        "--filter_type",
+        type=str,
+        default="max",
+        help="Filter type (max/balanced)",
+    )
+    ap.add_argument(
         "--num_octaves",
         type=int,
         default=3,
@@ -429,7 +602,10 @@ def parse_args():
         "--octave_scale", type=float, default=1.4, help="Scale factor between octaves"
     )
     ap.add_argument(
-        "--slice_idx", type=int, default=None, help="Slice index for visualization"
+        "--slice_idx",
+        type=str,
+        default="40,60,80",
+        help="Comma-separated axial slice indices.",
     )
     ap.add_argument(
         "--modality_idx",
@@ -505,13 +681,14 @@ if __name__ == "__main__":
     logger.info(
         f"Saved deep dream result to: {output_dir / f'{args.case_id}_deep_dream.nii.gz'}"
     )
+    slice_idx = [int(z) for z in args.slice_idx.split(",") if z.strip().isdigit()]
 
     # Visualize
-    viz_path = args.output_dir / f"{args.case_id}_visualization.png"
+    viz_path = args.output_dir / f"{args.case_id}_visualization_2.png"
     visualize_results(
-        input_tensor,
-        dreamed_tensor,
-        slice_idx=args.slice_idx,
+        original=input_tensor,
+        dreamed=dreamed_tensor,
+        slice_idx=slice_idx,
         modality_idx=args.modality_idx,
         save_path=viz_path,
     )

@@ -66,7 +66,7 @@ $PYTHON "$MAIN" \
     --fold 0 \
     --checkpoint "checkpoint_final.pth" \
     --output_dir "$OUTPUT_DIR" \
-    --slice_idx 40 \
+    --slice_idx "40,60,80" \
     --modality_idx 1 \
     --log_file "$LOG_DIR/nnunet_deepdream_keras.log" \
     --log_level "$LOG_LEVEL"
