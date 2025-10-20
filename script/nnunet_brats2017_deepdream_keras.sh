@@ -60,8 +60,6 @@ $PYTHON "$MAIN" \
     --case_id "Brats17_CBICA_AAG_1" \
     --fold 0 \
     --checkpoint "checkpoint_final.pth" \
-    --trainer_name "${TRAINER_NAME}" \
-    --configuration "${CONFIGURATION}" \
     --log_file "$LOG_DIR/nnunet_deepdream_keras.log" \
     --log_level "$LOG_LEVEL"
 
