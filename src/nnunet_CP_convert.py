@@ -8,6 +8,7 @@ import random
 from collections import OrderedDict, defaultdict
 import argparse
 from tqdm import tqdm
+from typing import Optional, Tuple
 import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -40,20 +41,6 @@ def _strip_ext(p: Path) -> str:
     if s.endswith(".nii"):
         return s[:-4]
     return s
-
-
-def _case_and_modality(path: Path) -> tuple[str, str | None]:
-    """
-    Parse BraTS-like base names:
-      <case>_(flair|t1|t1ce|t2|seg)
-    Returns (case_id, tag or None)
-    """
-    base = _strip_ext(path)
-    m = re.match(r"^(.*)_(flair|t1|t1ce|t2|seg)$", base, flags=re.IGNORECASE)
-    if not m:
-        return (base, None)
-    # normalize tag to lowercase
-    return (m.group(1), m.group(2).lower())
 
 
 def _case_and_modality(path: Path) -> Tuple[str, Optional[str]]:
