@@ -216,7 +216,7 @@ def _visualize_multiple_slices(
     # Create figure with 3 rows per slice (original, dream, difference)
     fig_height = rows * 4 * 3  # 3 sub-rows per slice row
     fig_width = cols * 5
-    fig, axes = plt.subplots(rows * 3, cols, figsize=(fig_width, fig_height))
+    _, axes = plt.subplots(rows * 3, cols, figsize=(fig_width, fig_height))
 
     # Handle single row/column cases
     if rows * 3 == 1:

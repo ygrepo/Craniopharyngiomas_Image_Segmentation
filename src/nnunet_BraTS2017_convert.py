@@ -375,7 +375,7 @@ def main():
         "-d",
         type=int,
         default=502,
-        help="Dataset ID of the installed BraTS-21 model (logger.infoed by installer; often 002).",
+        help="Dataset ID of the installed BraTS-2017 model (logger.infoed by installer; often 002).",
     )
     ap.add_argument(
         "--log_level",
