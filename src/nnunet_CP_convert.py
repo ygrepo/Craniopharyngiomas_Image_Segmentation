@@ -70,7 +70,7 @@ def convert_to_nnUNet(
     on_error: str = "skip_case",  # "skip_case" | "skip_modality" | "raise"
 ) -> Path:
     """
-    Convert BraTS2017-style files to nnU-Net v2 raw structure.
+    Convert CP-style files to nnU-Net v2 raw structure.
 
     Input under src_root (any nesting):
       <case>_flair.nii(.gz)
@@ -82,7 +82,7 @@ def convert_to_nnUNet(
     Output under nnUNet_raw/Dataset{dataset_id}_{dataset_name}/:
       imagesTr/, labelsTr/, imagesTs/ (optional), dataset.json, summary.txt, skipped_cases.json
     """
-    logger.info("Starting BraTS→nnU-Net conversion")
+    logger.info("Starting CP→nnU-Net conversion")
 
     assert on_error in ("skip_case", "skip_modality", "raise")
 
@@ -104,6 +104,7 @@ def convert_to_nnUNet(
     groups: dict[str, dict[str, Path]] = defaultdict(dict)
     unknown: list[Path] = []
     for p in all_files:
+        logger.info(f"Processing {p}")
         cid, tag = _case_and_modality(p)  # expects <case>_(flair|t1|t1ce|t2|seg)
         if tag is None:
             unknown.append(p)
