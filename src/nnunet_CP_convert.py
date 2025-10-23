@@ -1,3 +1,4 @@
+from __future__ import annotations
 from pathlib import Path
 import nibabel as nib
 import numpy as np
@@ -19,6 +20,9 @@ from src.util import (
 )
 
 logger = get_logger(__name__)
+
+
+_EXT_RE = re.compile(r"(\.nii(\.gz)?|\.nrrd|\.mha|\.mhd)$", re.IGNORECASE)
 
 
 # ---------- BraTS {0,1,2,4} -> {0,1,2,3} ----------
@@ -50,6 +54,49 @@ def _case_and_modality(path: Path) -> tuple[str, str | None]:
         return (base, None)
     # normalize tag to lowercase
     return (m.group(1), m.group(2).lower())
+
+
+def _case_and_modality(path: Path) -> Tuple[str, Optional[str]]:
+    """
+    Parse BraTS-like names with extra tokens, e.g.:
+      89425108_T1_CE_3D_AX_ALIGNED.nrrd     -> ('89425108', 't1ce')
+      89425108_T2_AX_ALIGNED.nrrd           -> ('89425108', 't2')
+      89425108_T2_FLAIR_AX_ALIGNED.nrrd     -> ('89425108', 'flair')
+      89425108_Tumor.seg.nrrd               -> ('89425108', 'seg')
+    Returns (case_id, tag or None) where tag ∈ {'t1','t1ce','t2','flair','seg'}.
+    """
+    base = _EXT_RE.sub("", path.name)  # drop extension
+    base = re.sub(
+        r"\.seg$", "", base, flags=re.I
+    )  # drop trailing ".seg" token if present
+
+    if "_" not in base:
+        return (base, None)
+
+    case_id, rest = base.split("_", 1)
+    s = rest.lower()
+
+    # segmentation first (e.g., Tumor / seg)
+    if re.search(r"(?:^|_)(tumou?r|seg)(?:_|$)", s):
+        return (case_id, "seg")
+
+    # flair (avoid misclassifying 't2_flair' as t2)
+    if "flair" in s:
+        return (case_id, "flair")
+
+    # t1ce: t1ce / t1_ce / t1c / t1gd / t1_post / t1-contrast
+    if re.search(r"\bt1[_\- ]?(ce|c|gd|post|contrast)\b", s):
+        return (case_id, "t1ce")
+
+    # plain t2 (but not t2_flair which was handled above)
+    if re.search(r"(?:^|_)t2(?:_|$)", s):
+        return (case_id, "t2")
+
+    # plain t1
+    if re.search(r"(?:^|_)t1(?:_|$)", s):
+        return (case_id, "t1")
+
+    return (case_id, None)
 
 
 def convert_to_nnUNet(
@@ -100,7 +147,7 @@ def convert_to_nnUNet(
         )
 
     # ---- scan & group files by case_id ----
-    all_files = list(src_root.rglob("*.nii")) + list(src_root.rglob("*.nii.gz"))
+    all_files = list(src_root.rglob("*.nrrd"))
     groups: dict[str, dict[str, Path]] = defaultdict(dict)
     unknown: list[Path] = []
     for p in all_files:
