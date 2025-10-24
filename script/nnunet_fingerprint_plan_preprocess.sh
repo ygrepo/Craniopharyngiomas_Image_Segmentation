@@ -1,4 +1,4 @@
-!/bin/bash
+#!/bin/bash
 #SBATCH --job-name=nnunet_convert_CP_data
 #SBATCH --output=logs/nnunet_convert_CP_data_%j.out
 #SBATCH --error=logs/nnunet_convert_CP_data_%j.err
