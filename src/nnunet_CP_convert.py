@@ -65,16 +65,18 @@ def _case_and_modality(path: Path) -> Tuple[str, Optional[str]]:
         return (case_id, "flair")
 
     # t1ce: t1ce / t1_ce / t1c / t1gd / t1_post / t1-contrast
-    if re.search(r"\bt1[_\- ]?(ce|c|gd|post|contrast)\b", s):
+    if re.search(
+        r"(?<![a-z0-9])t1(?:[_\- ]*)(?:ce|c|gd|post|contrast)(?=$|[_\- ]|[^a-z0-9])", s
+    ):
         return (case_id, "t1ce")
 
     # plain t2 (but not t2_flair which was handled above)
     if re.search(r"(?:^|_)t2(?:_|$)", s):
         return (case_id, "t2")
 
-    # # plain t1
-    # if re.search(r"(?:^|_)t1(?:_|$)", s):
-    #     return (case_id, "t1")
+    # plain t1
+    if re.search(r"(?:^|_)t1(?:_|$)", s):
+        return (case_id, "t1")
 
     return (case_id, None)
 
