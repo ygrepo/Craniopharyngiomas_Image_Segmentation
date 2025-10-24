@@ -38,7 +38,7 @@ def remap_labels_to_0123(arr: np.ndarray) -> np.ndarray:
 
 def _case_and_modality(path: Path) -> Tuple[str, Optional[str]]:
     """
-    Parse BraTS-like names with extra tokens, e.g.:
+    Parse CP names with extra tokens, e.g.:
       89425108_T1_CE_3D_AX_ALIGNED.nrrd     -> ('89425108', 't1ce')
       89425108_T2_AX_ALIGNED.nrrd           -> ('89425108', 't2')
       89425108_T2_FLAIR_AX_ALIGNED.nrrd     -> ('89425108', 'flair')
@@ -169,6 +169,7 @@ def convert_to_nnUNet(
     # ---- write training cases (require all modalities + seg) ----
     for cid in tqdm(train_ids, desc="Writing training cases", unit="case"):
         have = groups[cid]
+        logger.debug(f"Have: {have}")
         missing = [m for m in modalities if m not in have] + (
             ["seg"] if "seg" not in have else []
         )
