@@ -43,13 +43,14 @@ MAIN="src/nnunet_CP_convert.py"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/nnunet_CP_data_convert_${TIMESTAMP}.log"
-
+DATASET_ID=503
 set +e
 $PYTHON "$MAIN" \
     --src_root "$DATA_DIR" \
     --dst_root "$OUTPUT_DIR" \
     --log_level "$LOG_LEVEL" \
-    --log_file "$LOG_FILE"
+    --log_file "$LOG_FILE" \
+    --dataset_id "$DATASET_ID"
 exit_code=$?
 set -e
 

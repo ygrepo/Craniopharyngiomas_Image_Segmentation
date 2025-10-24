@@ -125,42 +125,68 @@ def same_geometry(a: sitk.Image, b: sitk.Image) -> bool:
     )
 
 
-def sitk_to_nib(img_sitk: sitk.Image) -> nib.Nifti1Image:
-    """Convert SimpleITK image to nibabel image."""
-    logger.info("Converting SimpleITK to nibabel")
-    arr = sitk.GetArrayFromImage(img_sitk)  # z,y,x
-    arr = arr.astype(np.float32, copy=False)
-    # Build affine from SITK spacing/direction/origin
-    spacing = np.array(list(img_sitk.GetSpacing()))[::-1]  # x,y,z -> z,y,x
-    direction = np.array(list(img_sitk.GetDirection()))
-    direction = direction.reshape(3, 3)  # x,y,z basis
-    direction = direction[::-1, ::-1]  # reorder to z,y,x
-    origin = np.array(list(img_sitk.GetOrigin()))[::-1]
-    affine = np.eye(4, dtype=np.float32)
-    affine[:3, :3] = direction * spacing
-    affine[:3, 3] = origin
-    return nib.Nifti1Image(arr, affine)
+def _looks_like_nrrd(path: Path) -> bool:
+    return str(path).lower().endswith(".nrrd") or str(path).lower().endswith(
+        ".seg.nrrd"
+    )
 
 
-def safe_load_nifti(path_in: Path, dtype=np.float32) -> nib.Nifti1Image:
-    """Try nibabel; if header/IO error, fall back to SimpleITK."""
+def safe_load_image_any(path_in: Path, dtype=np.float32) -> nib.Nifti1Image:
+    """
+    Load an *image* volume from NRRD or NIfTI.
+    - NRRD: use SimpleITK -> convert to NIfTI (RAS).
+    - NIfTI: nibabel.
+    """
+    if _looks_like_nrrd(path_in):
+        try:
+            img = sitk.ReadImage(str(path_in))
+            return sitk_to_nib(img, dtype=dtype)
+        except Exception as e:
+            raise RuntimeError(f"Failed to read NRRD image {path_in}: {e}") from e
+
+    # NIfTI branch
     try:
-        logger.info(f"Loading: {path_in} (dtype={dtype})")
         nii = nib.load(str(path_in))
-        # Force read to catch IO errors early
+        # trigger read
         _ = nii.get_fdata(dtype=dtype)
         return nii
     except Exception as e:
-        warnings.warn(
-            f"[safe_load] nibabel failed on {path_in.name}: {e}. Trying SimpleITK…"
-        )
+        # Try SimpleITK as a last resort
         try:
             img = sitk.ReadImage(str(path_in))
-            return sitk_to_nib(img)
+            return sitk_to_nib(img, dtype=dtype)
         except Exception as e2:
+            raise RuntimeError(f"Failed to load {path_in} as NIfTI: {e2}") from e
+
+
+def safe_load_seg_any(path_in: Path, out_dtype=np.uint8) -> nib.Nifti1Image:
+    """
+    Load a *label* image (segmentation). Keeps integer labels, converts to RAS.
+    """
+    if _looks_like_nrrd(path_in):
+        try:
+            img = sitk.ReadImage(str(path_in))
+            # use nearest/label semantics; dtype will be set after the transpose
+            nii = sitk_to_nib(
+                img, dtype=np.float32
+            )  # temporary float to reuse code path
+        except Exception as e:
             raise RuntimeError(
-                f"Failed to load {path_in} with nibabel and SimpleITK: {e2}"
+                f"Failed to read NRRD segmentation {path_in}: {e}"
             ) from e
+    else:
+        nii = nib.load(str(path_in))
+
+    data = np.asanyarray(nii.get_fdata()).astype(np.float32, copy=False)
+
+    # Round if stored as float (NRRD labels often are)
+    if np.issubdtype(data.dtype, np.floating):
+        data = np.rint(data)
+
+    data = data.astype(out_dtype, copy=False)
+    out = nib.Nifti1Image(data, nii.affine, nii.header)
+    out.set_data_dtype(out_dtype)
+    return out
 
 
 def save_nifti_3d(
@@ -182,16 +208,58 @@ def save_nifti(img: nib.Nifti1Image, out_path: Path):
 def save_nifti_image(
     path_in: Path, out_path: Path, run_n4: bool, n4_shrink: int, n4_iters: int
 ):
-    nii = safe_load_nifti(path_in)
+    """
+    Load from NRRD or NIfTI; optionally N4-correct (on the numpy array); save as .nii.gz.
+    """
+    nii = safe_load_image_any(path_in, dtype=np.float32)
     data = nii.get_fdata().astype(np.float32, copy=False)
     if run_n4:
         data = n4_bias_correct_np(data, shrink=n4_shrink, n_iters=n4_iters)
     out = nib.Nifti1Image(data, nii.affine, nii.header)
+    out.set_data_dtype(np.float32)
     save_nifti(out, out_path)
 
 
+def _sitk_lps_to_ras_affine(img: sitk.Image) -> np.ndarray:
+    """
+    Build a 4x4 RAS affine from an ITK/SimpleITK image which is in LPS by convention.
+    """
+    # ITK/SimpleITK uses LPS by convention
+    spacing = np.array(list(img.GetSpacing()), dtype=float)  # (sx, sy, sz)
+    direction = np.array(img.GetDirection(), dtype=float).reshape(3, 3)  # LPS
+    origin = np.array(list(img.GetOrigin()), dtype=float)  # LPS
+
+    # Convert to RAS
+    lps_to_ras = np.diag([-1.0, -1.0, 1.0])
+    ras_R = lps_to_ras @ direction @ np.diag(spacing)
+    ras_t = lps_to_ras @ origin
+
+    # Build 4x4 affine
+    affine = np.eye(4, dtype=float)
+    affine[:3, :3] = ras_R
+    affine[:3, 3] = ras_t
+    return affine
+
+
+def sitk_to_nib(img: sitk.Image, dtype=np.float32) -> nib.Nifti1Image:
+    """
+    Convert a SimpleITK image (NRRD, MHA, etc.) to a nibabel NIfTI in RAS.
+    """
+    # SimpleITK returns arrays as (z, y, x). Nibabel expects (x, y, z) with matching affine.
+    arr_zyx = sitk.GetArrayFromImage(img)
+    if dtype is not None:
+        arr_zyx = arr_zyx.astype(dtype, copy=False)
+    # Reorder to (x, y, z)
+    data = np.transpose(arr_zyx, (2, 1, 0))
+    affine = _sitk_lps_to_ras_affine(img)
+    nii = nib.Nifti1Image(data, affine)
+    return nii
+
+
 # --- if you already have these helpers in your repo, use them instead ---
-def affine_from_spacing_origin(spacing, origin):
+def affine_from_spacing_origin(
+    spacing: tuple[float, float, float], origin: tuple[float, float, float]
+) -> np.ndarray:
     """
     Build a simple RAS affine from voxel spacing (dz, dy, dx) and origin (z0, y0, x0).
     Assumes volumes are in nnU-Net preprocessed RAS with axes (D, H, W) == (Z, Y, X).
@@ -208,26 +276,22 @@ def affine_from_spacing_origin(spacing, origin):
     return A
 
 
-def get_spacing_origin_from_props(props):
-    """
-    Try common nnU-Net v2 keys found in props .pkl.
-    Falls back to ones you may have logged earlier.
-    """
-    # Prefer the spacing actually used by the preprocessed tensor
-    spacing = (
+def get_spacing_origin_from_props(
+    props: dict,
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    # nnU-Net v2 common keys; fallbacks are safe
+    spacing = tuple(
         props.get("spacing_after_resampling")
-        or props.get("spacing")  # beware: sometimes original spacing
+        or props.get("spacing")
         or props.get("itk_spacing")
+        or (1.0, 1.0, 1.0)
     )
-    origin = (
-        props.get("itk_origin")  # usually present
-        or props.get("origin")  # fallback
-        or (0.0, 0.0, 0.0)
-    )
-    if spacing is None:
-        raise KeyError(
-            "Could not find spacing in props (looked for spacing_after_resampling/spacing/itk_spacing)."
-        )
+    origin = tuple(props.get("origin") or props.get("itk_origin") or (0.0, 0.0, 0.0))
+    # ensure 3 floats
+    logger.info(f"Origin: {origin} → {origin[:3]}")
+    logger.info(f"Spacing: {spacing} → {spacing[:3]}")
+    spacing = tuple(float(x) for x in spacing[:3])
+    origin = tuple(float(x) for x in origin[:3])
     return spacing, origin
 
 
@@ -358,36 +422,6 @@ def load_props_from_pkl(pkl_path: Path) -> dict:
         logger.info(f"Loading props from {pkl_path}")
         props = pickle.load(f)
     return props
-
-
-def get_spacing_origin_from_props(
-    props: dict,
-) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
-    # nnU-Net v2 common keys; fallbacks are safe
-    spacing = tuple(
-        props.get("spacing_after_resampling")
-        or props.get("spacing")
-        or props.get("itk_spacing")
-        or (1.0, 1.0, 1.0)
-    )
-    origin = tuple(props.get("origin") or props.get("itk_origin") or (0.0, 0.0, 0.0))
-    # ensure 3 floats
-    logger.info(f"Origin: {origin} → {origin[:3]}")
-    logger.info(f"Spacing: {spacing} → {spacing[:3]}")
-    spacing = tuple(float(x) for x in spacing[:3])
-    origin = tuple(float(x) for x in origin[:3])
-    return spacing, origin
-
-
-def affine_from_spacing_origin(
-    spacing: tuple[float, float, float], origin: tuple[float, float, float]
-) -> np.ndarray:
-    # RAS-ish diagonal; if your pipeline uses a specific orientation, swap signs/axes here
-    aff = np.eye(4, dtype=np.float32)
-    aff[0, 0], aff[1, 1], aff[2, 2] = spacing
-    aff[0, 3], aff[1, 3], aff[2, 3] = origin
-    logger.info(f"Affine:\n{aff}")
-    return aff
 
 
 def normalize_robust(img_3d: np.ndarray) -> np.ndarray:
