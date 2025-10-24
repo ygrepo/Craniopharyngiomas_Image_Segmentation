@@ -1,13 +1,23 @@
-#!/bin/bash
-#   nnunet_fingerprint_plan_preprocess.sh    —  Convert CP to nnU-Net format.
+!/bin/bash
 #SBATCH --job-name=nnunet_convert_CP_data
-#SBATCH --output=logs/nnunet_convert_CP_data_%A_%a.out
-#SBATCH --error=logs/nnunet_convert_CP_data_%A_%a.err
+#SBATCH --output=logs/nnunet_convert_CP_data_%j.out
+#SBATCH --error=logs/nnunet_convert_CP_data_%j.err
 #SBATCH --time=04:00:00
 #SBATCH --partition=cpu
-#SBATCH --ntasks=8
-#SBATCH --cpus-per-task=1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
+
+set -euo pipefail
+mkdir -p logs
+
+# Threading to match SLURM allocation
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
+export MKL_NUM_THREADS=${SLURM_CPUS_PER_TASK}
+export OPENBLAS_NUM_THREADS=${SLURM_CPUS_PER_TASK}
+export NUMEXPR_NUM_THREADS=${SLURM_CPUS_PER_TASK}
+export ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS=${SLURM_CPUS_PER_TASK}
 
 
 set -euo pipefail

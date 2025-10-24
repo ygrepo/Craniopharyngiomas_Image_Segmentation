@@ -17,6 +17,8 @@ from src.util import (
     get_logger,
     setup_logging,
     safe_load_seg_any,
+    load_sitk,
+    save_img_like_reference,
     save_nifti_image,
     save_nifti,
 )
@@ -171,7 +173,6 @@ def convert_to_nnUNet(
     # ---- write training cases (require all modalities + seg) ----
     for cid in tqdm(train_ids, desc="Writing training cases", unit="case"):
         have = groups[cid]
-        logger.debug(f"Have: {have.keys()}")
         missing = [m for m in modalities if m not in have.keys()] + (
             ["seg"] if "seg" not in have.keys() else []
         )
@@ -181,15 +182,22 @@ def convert_to_nnUNet(
             continue
 
         case_failed = False
+        # have: dict modality->Path for this cid; choose reference modality
+        ref_mod = "flair" if "flair" in have else next(iter(have.keys() - {"seg"}))
+        ref_sitk = load_sitk(have[ref_mod])
+        _log_geom(cid, "REF", ref_sitk, ref_sitk)  # logs once
+
         # images in fixed channel order
         for ch, m in enumerate(modalities):
             try:
-                save_nifti_image(
+                save_img_like_reference(
+                    ref_sitk,
                     have[m],
                     imgTr / f"{cid}_{ch:04d}.nii.gz",
-                    do_n4,
-                    n4_shrink,
-                    n4_iters,
+                    is_label=False,
+                    do_n4=do_n4,
+                    n4_shrink=n4_shrink,
+                    n4_iters=n4_iters,
                 )
             except Exception as e:
                 msg = f"{cid}:{m} -> {type(e).__name__}: {e}"
@@ -219,6 +227,13 @@ def convert_to_nnUNet(
 
         # labels
         try:
+            save_img_like_reference(
+                ref_sitk,
+                have["seg"],
+                labTr / f"{cid}.nii.gz",
+                is_label=True,
+                do_n4=False,
+            )
             seg_nii = safe_load_seg_any(have["seg"], out_dtype=np.uint8)
             seg = seg_nii.get_fdata().astype(np.uint8, copy=False)
             seg = remap_labels_to_0123(seg)

@@ -29,6 +29,7 @@ import scipy.ndimage as ndi
 import math
 import warnings
 
+
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 
 from nnunetv2.utilities.label_handling.label_handling import LabelManager
@@ -205,6 +206,35 @@ def save_nifti(img: nib.Nifti1Image, out_path: Path):
     nib.save(img, str(out_path))
 
 
+def _sanitize_nii_to_3d(nii: nib.Nifti1Image, *, is_label: bool) -> nib.Nifti1Image:
+    data = np.asanyarray(nii.get_fdata())
+    # Drop leading singleton axis if present (e.g., 1 x Z x Y x X or X x Y x Z x 1)
+    if data.ndim == 4 and 1 in (data.shape[0], data.shape[-1]):
+        # try removing a single length-1 axis anywhere
+        data = np.squeeze(data)
+    if data.ndim != 3:
+        raise RuntimeError(f"Expected 3D volume after squeeze, got shape {data.shape}")
+
+    # Clean NaNs/Infs in images (leave labels alone)
+    if not is_label:
+        mask_bad = ~np.isfinite(data)
+        if mask_bad.any():
+            data[mask_bad] = 0.0
+        data = data.astype(np.float32, copy=False)
+    else:
+        # labels: round & cast to uint8
+        if np.issubdtype(data.dtype, np.floating):
+            data = np.rint(data)
+        data = data.astype(np.uint8, copy=False)
+
+    out = nib.Nifti1Image(data, nii.affine, nii.header)
+    if is_label:
+        out.set_data_dtype(np.uint8)
+    else:
+        out.set_data_dtype(np.float32)
+    return out
+
+
 def save_nifti_image(
     path_in: Path, out_path: Path, run_n4: bool, n4_shrink: int, n4_iters: int
 ):
@@ -252,8 +282,7 @@ def sitk_to_nib(img: sitk.Image, dtype=np.float32) -> nib.Nifti1Image:
     # Reorder to (x, y, z)
     data = np.transpose(arr_zyx, (2, 1, 0))
     affine = _sitk_lps_to_ras_affine(img)
-    nii = nib.Nifti1Image(data, affine)
-    return nii
+    return nib.Nifti1Image(data, affine)
 
 
 # --- if you already have these helpers in your repo, use them instead ---
@@ -293,6 +322,85 @@ def get_spacing_origin_from_props(
     spacing = tuple(float(x) for x in spacing[:3])
     origin = tuple(float(x) for x in origin[:3])
     return spacing, origin
+
+
+def resample_to_ref_sitk(
+    moving: sitk.Image, reference: sitk.Image, is_label: bool
+) -> sitk.Image:
+    """Resample `moving` into `reference` geometry."""
+    logger.info(f"Resampling to reference geometry {reference.GetSize()}")
+    res = sitk.ResampleImageFilter()
+    res.SetReferenceImage(reference)
+    res.SetInterpolator(sitk.sitkNearestNeighbor if is_label else sitk.sitkLinear)
+    res.SetTransform(sitk.Transform())  # identity
+    res.SetDefaultPixelValue(0)
+    return res.Execute(moving)
+
+
+def load_sitk(path: Path) -> sitk.Image:
+    return sitk.ReadImage(str(path))
+
+
+def save_img_like_reference(
+    ref_sitk: sitk.Image,
+    mov_path: Path,
+    out_path: Path,
+    *,
+    is_label: bool,
+    do_n4: bool = False,
+    n4_shrink: int = 2,
+    n4_iters: int = 50,
+):
+    # load
+    mov = load_sitk(mov_path)
+
+    # --- log geometry (optional) ---
+    try:
+        sz_mov = tuple(int(v) for v in mov.GetSize())
+        sp_mov = tuple(float(v) for v in mov.GetSpacing())
+        sz_ref = tuple(int(v) for v in ref_sitk.GetSize())
+        sp_ref = tuple(float(v) for v in ref_sitk.GetSpacing())
+        logger.info(
+            f"[{mov_path.name}] size={sz_mov} spacing={sp_mov} | REF size={sz_ref} spacing={sp_ref}"
+        )
+        diffa = np.abs(np.array(sp_mov) - np.array(sp_ref))
+        diffr = diffa / np.maximum(np.array(sp_ref), 1e-8)
+        if np.any((diffr > 0.05) & (diffa > 0.2)):
+            logger.warning(
+                f"[{mov_path.name}] spacing differs from REF "
+                f"(abs={tuple(diffa.round(4))}, rel={tuple((100*diffr).round(1))}%)"
+            )
+    except Exception:
+        pass
+
+    # resample to reference geometry
+    mov_r = resample_to_ref_sitk(mov, ref_sitk, is_label=is_label)
+
+    # optional N4 (images only)
+    if do_n4 and not is_label:
+        logger.info(f"Running N4 with shrink={n4_shrink}, iters={n4_iters}")
+        n4 = sitk.N4BiasFieldCorrectionImageFilter()
+        n4.SetShrinkFactor(int(n4_shrink))
+        # pass as a list (per-resolution level); single level is fine
+        n4.SetMaximumNumberOfIterations([int(n4_iters)])
+        mov_r = n4.Execute(mov_r)
+
+    # convert to NIfTI (RAS) and enforce dtype
+    nii = sitk_to_nib(mov_r, dtype=(None if is_label else np.float32))
+    if is_label:
+        data = np.rint(nii.get_fdata()).astype(np.uint8, copy=False)
+        nii = nib.Nifti1Image(data, nii.affine, nii.header)
+        nii.set_data_dtype(np.uint8)
+
+    # save
+    nii = _sanitize_nii_to_3d(nii, is_label=is_label)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    nib.save(nii, str(out_path))
+
+    # sanity: ensure shape equals reference after resampling
+    ref_xyz = tuple(int(v) for v in ref_sitk.GetSize())  # (x,y,z)
+    if tuple(nii.shape) != ref_xyz:
+        logger.error(f"[{mov_path.name}] resampled shape {nii.shape} != ref {ref_xyz}")
 
 
 # -----------------------------------------------------------------------
