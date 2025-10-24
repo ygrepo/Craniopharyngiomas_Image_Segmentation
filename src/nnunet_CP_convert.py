@@ -169,9 +169,8 @@ def convert_to_nnUNet(
     # ---- write training cases (require all modalities + seg) ----
     for cid in tqdm(train_ids, desc="Writing training cases", unit="case"):
         have = groups[cid]
-        logger.debug(f"Have: {have}")
-        missing = [m for m in modalities if m not in have] + (
-            ["seg"] if "seg" not in have else []
+        missing = [m for m in modalities if m not in have.keys()] + (
+            ["seg"] if "seg" not in have.keys() else []
         )
         if missing:
             logger.warning(f"Skipping {cid} (train): missing {missing}")
