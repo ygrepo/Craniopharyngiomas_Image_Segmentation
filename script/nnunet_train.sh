@@ -1,8 +1,8 @@
 #!/bin/bash
-#   unet_brats2017_train.sh    —  Train 3D mask using nnU-Net v2.
-#SBATCH --job-name=unet_brats2017_train
-#SBATCH --output=logs/unet_brats2017_train_%A_%a.out
-#SBATCH --error=logs/unet_brats2017_train_%A_%a.err
+#   nnunet_train.sh    —  Train 3D mask using nnU-Net v2.
+#SBATCH --job-name=nnunet_train
+#SBATCH --output=logs/nnunet_train_%A_%a.out
+#SBATCH --error=logs/nnunet_train_%A_%a.err
 #SBATCH --time=72:00:00
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:4
@@ -53,7 +53,8 @@ PY
 
 # Train all 5 folds:
 export nnUNet_compile=1     # or set in your shell rc
-nnUNetv2_train 502 3d_fullres 0 -tr nnUNetTrainer -num_gpus 4 -p nnUNetResEncUNetMPlans --npz
+
+#nnUNetv2_train 502 3d_fullres 0 -tr nnUNetTrainer -num_gpus 4 -p nnUNetResEncUNetMPlans --npz
 #nnUNetv2_train 502 3d_fullres 0 -num_gpus 4 -p nnUNetResEncUNetMPlans --npz
 #nnUNetv2_train 501 3d_fullres 0 -num_gpus 2 -p nnUNetResEncUNetMPlans
 
@@ -62,3 +63,4 @@ nnUNetv2_train 502 3d_fullres 0 -tr nnUNetTrainer -num_gpus 4 -p nnUNetResEncUNe
 # nnUNetv2_train 501 3d_fullres 3
 # nnUNetv2_train 501 3d_fullres 4
 
+nnUNetv2_train 503 3d_fullres 0 -tr nnUNetTrainerEarlyStopping -num_gpus 4 -p nnUNetResEncUNetMPlans --npz
