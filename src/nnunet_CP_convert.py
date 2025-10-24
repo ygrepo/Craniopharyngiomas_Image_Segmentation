@@ -72,9 +72,9 @@ def _case_and_modality(path: Path) -> Tuple[str, Optional[str]]:
     if re.search(r"(?:^|_)t2(?:_|$)", s):
         return (case_id, "t2")
 
-    # plain t1
-    if re.search(r"(?:^|_)t1(?:_|$)", s):
-        return (case_id, "t1")
+    # # plain t1
+    # if re.search(r"(?:^|_)t1(?:_|$)", s):
+    #     return (case_id, "t1")
 
     return (case_id, None)
 
