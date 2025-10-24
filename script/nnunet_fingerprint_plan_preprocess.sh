@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=nnunet_convert_CP_data
-#SBATCH --output=logs/nnunet_convert_CP_data_%j.out
-#SBATCH --error=logs/nnunet_convert_CP_data_%j.err
+#SBATCH --output=logs/nnunet_fingerprint_plan_preprocess_%j.out
+#SBATCH --error=logs/nnunet_fingerprint_plan_preprocess_%j.err
 #SBATCH --time=04:00:00
 #SBATCH --partition=cpu
 #SBATCH --nodes=1
