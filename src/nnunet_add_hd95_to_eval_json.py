@@ -21,7 +21,7 @@ import SimpleITK as sitk
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
-from src.util import get_logger, setup_logging  # noqa: E402
+from src.util import get_logger, setup_logging, hd95_mm_from_binary
 
 logger = get_logger(__name__)
 
@@ -52,53 +52,53 @@ def binary_contour(img: sitk.Image) -> sitk.Image:
     )
 
 
-def hd95_mm_from_binary(pred_bin: sitk.Image, ref_bin: sitk.Image) -> float:
-    """
-    Symmetric 95% Hausdorff distance in mm between two binary masks (same geometry).
-    Uses SimpleITK SignedMaurerDistanceMap with useImageSpacing=True.
-    """
-    # --- Edge cases (correct foreground check) ---
-    sf = sitk.StatisticsImageFilter()
-    sf.Execute(pred_bin)
-    pred_any = sf.GetSum() > 0
-    sf.Execute(ref_bin)
-    ref_any = sf.GetSum() > 0
+# def hd95_mm_from_binary(pred_bin: sitk.Image, ref_bin: sitk.Image) -> float:
+#     """
+#     Symmetric 95% Hausdorff distance in mm between two binary masks (same geometry).
+#     Uses SimpleITK SignedMaurerDistanceMap with useImageSpacing=True.
+#     """
+#     # --- Edge cases (correct foreground check) ---
+#     sf = sitk.StatisticsImageFilter()
+#     sf.Execute(pred_bin)
+#     pred_any = sf.GetSum() > 0
+#     sf.Execute(ref_bin)
+#     ref_any = sf.GetSum() > 0
 
-    if not pred_any and not ref_any:
-        return 0.0
-    if (pred_any and not ref_any) or (ref_any and not pred_any):
-        return float("inf")
+#     if not pred_any and not ref_any:
+#         return 0.0
+#     if (pred_any and not ref_any) or (ref_any and not pred_any):
+#         return float("inf")
 
-    # Surfaces
-    surf_pred = sitk.BinaryContour(
-        pred_bin, fullyConnected=True, backgroundValue=0, foregroundValue=1
-    )
-    surf_ref = sitk.BinaryContour(
-        ref_bin, fullyConnected=True, backgroundValue=0, foregroundValue=1
-    )
+#     # Surfaces
+#     surf_pred = sitk.BinaryContour(
+#         pred_bin, fullyConnected=True, backgroundValue=0, foregroundValue=1
+#     )
+#     surf_ref = sitk.BinaryContour(
+#         ref_bin, fullyConnected=True, backgroundValue=0, foregroundValue=1
+#     )
 
-    # Distance maps (abs, in mm)
-    dm_ref = sitk.Abs(
-        sitk.SignedMaurerDistanceMap(
-            ref_bin, squaredDistance=False, useImageSpacing=True
-        )
-    )
-    dm_pred = sitk.Abs(
-        sitk.SignedMaurerDistanceMap(
-            pred_bin, squaredDistance=False, useImageSpacing=True
-        )
-    )
+#     # Distance maps (abs, in mm)
+#     dm_ref = sitk.Abs(
+#         sitk.SignedMaurerDistanceMap(
+#             ref_bin, squaredDistance=False, useImageSpacing=True
+#         )
+#     )
+#     dm_pred = sitk.Abs(
+#         sitk.SignedMaurerDistanceMap(
+#             pred_bin, squaredDistance=False, useImageSpacing=True
+#         )
+#     )
 
-    # Distances from each surface to the other
-    d_pred_to_ref = sitk.GetArrayFromImage(sitk.Mask(dm_ref, surf_pred))
-    d_ref_to_pred = sitk.GetArrayFromImage(sitk.Mask(dm_pred, surf_ref))
+#     # Distances from each surface to the other
+#     d_pred_to_ref = sitk.GetArrayFromImage(sitk.Mask(dm_ref, surf_pred))
+#     d_ref_to_pred = sitk.GetArrayFromImage(sitk.Mask(dm_pred, surf_ref))
 
-    a = d_pred_to_ref[d_pred_to_ref > 0]
-    b = d_ref_to_pred[d_ref_to_pred > 0]
-    if a.size == 0 and b.size == 0:
-        return 0.0
-    all_d = np.concatenate([a, b]) if a.size and b.size else (a if a.size else b)
-    return float(np.percentile(all_d.astype(np.float64), 95))
+#     a = d_pred_to_ref[d_pred_to_ref > 0]
+#     b = d_ref_to_pred[d_ref_to_pred > 0]
+#     if a.size == 0 and b.size == 0:
+#         return 0.0
+#     all_d = np.concatenate([a, b]) if a.size and b.size else (a if a.size else b)
+#     return float(np.percentile(all_d.astype(np.float64), 95))
 
 
 def load_region_spec(dj_path: Optional[str]) -> Optional[Dict[str, List[int]]]:
@@ -241,6 +241,7 @@ def add_hd95_to_item(
                 ref_bin = _union_mask_from_labels(ref_img, ids)
                 val = hd95_mm_from_binary(pred_bin, ref_bin)
             except Exception:
+                logger.warning(f"Failed to compute HD95 for {k}: {e}")
                 val = float("nan")
             sub["HD95"] = val
     item["metrics"] = metrics  # write-back

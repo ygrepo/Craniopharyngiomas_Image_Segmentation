@@ -1096,7 +1096,7 @@ def resample_to_reference(
     return res
 
 
-def hd95_mm_from_binary_robust(
+def hd95_mm_from_binary(
     pred_img: sitk.Image,
     ref_img: sitk.Image,
     *,

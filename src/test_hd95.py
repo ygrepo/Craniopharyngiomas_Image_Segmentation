@@ -10,7 +10,7 @@ import SimpleITK as sitk
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
-from src.util import get_logger, setup_logging, hd95_mm_from_binary_robust  # noqa: E402
+from src.util import get_logger, setup_logging, hd95_mm_from_binary  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -22,7 +22,7 @@ def main():
     pred = sitk.ReadImage(path)
     path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/70900351.nii.gz"
     gt = sitk.ReadImage(path)
-    logger.info(hd95_mm_from_binary_robust(pred, gt, one_empty_policy="inf"))
+    logger.info(hd95_mm_from_binary(pred, gt, one_empty_policy="inf"))
     # Expect ~0.0 (if they fully overlap) or a small positive value
     # If you get ∞, something is wrong.
 
@@ -30,7 +30,7 @@ def main():
     pred = sitk.ReadImage(path)
     path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/52435303.nii.gz"
     gt = sitk.ReadImage(path)
-    logger.info(hd95_mm_from_binary_robust(pred, gt, one_empty_policy="inf"))
+    logger.info(hd95_mm_from_binary(pred, gt, one_empty_policy="inf"))
 
 
 if __name__ == "__main__":
