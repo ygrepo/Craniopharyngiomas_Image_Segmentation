@@ -467,6 +467,46 @@ def class_key(r):
     return ("label", str(r.get("class_id", "")))
 
 
+def _quantile(vals: List[float], q: float) -> float:
+    """Linear interpolation quantile in [0,1]. Assumes vals is non-empty."""
+    s = sorted(vals)
+    n = len(s)
+    if n == 1:
+        return s[0]
+    # position in [0, n-1]
+    pos = (n - 1) * q
+    lo = int(math.floor(pos))
+    hi = int(math.ceil(pos))
+    if lo == hi:
+        return s[lo]
+    frac = pos - lo
+    return s[lo] * (1 - frac) + s[hi] * frac
+
+
+def _mean_ci95(vals: List[float], std_type: str) -> Tuple[float, float, float]:
+    """
+    Return (mean, ci_lo, ci_hi) using normal approx (z=1.96).
+    std_type: 'population' uses population SD, 'sample' uses sample SD.
+    """
+    n = len(vals)
+    if n == 0:
+        return float("nan"), float("nan"), float("nan")
+    mean = sum(vals) / n
+    if n == 1:
+        return mean, mean, mean
+    # SD consistent with your _std()
+    if std_type == "population":
+        m = mean
+        var = sum((v - m) ** 2 for v in vals) / n
+    else:
+        m = mean
+        var = sum((v - m) ** 2 for v in vals) / (n - 1)
+    sd = math.sqrt(var)
+    z = 1.96
+    half = z * (sd / math.sqrt(n)) if n > 0 else float("nan")
+    return mean, mean - half, mean + half
+
+
 def write_summary_csv(
     rows: List[Dict[str, Any]],
     metric_cols: List[str],
@@ -557,13 +597,22 @@ def write_summary_csv(
                 out[f"{c}_mean"] = sum(vals) / len(vals)
                 out[f"{c}_median"] = _median(vals)
                 out[f"{c}_std"] = _std(vals, std_type)
+                # IQR (Q1, Q3, IQR)
+                q1 = _quantile(vals, 0.25)
+                q3 = _quantile(vals, 0.75)
+                out[f"{c}_q1"] = q1
+                out[f"{c}_q3"] = q3
+                out[f"{c}_iqr"] = q3 - q1
                 if c.lower() == "hd95" and q_vals:
                     s = sorted(vals)
                     for q in q_vals:
                         k = int(round((q / 100.0) * (len(s) - 1)))
                         out[f"HD95_p{int(q)}"] = s[k]
             else:
-                out[f"{c}_mean"] = out[f"{c}_median"] = out[f"{c}_std"] = ""
+                # empty: fill blanks to keep headers consistent
+                out[f"{c}_mean"] = out[f"{c}_ci95_lo"] = out[f"{c}_ci95_hi"] = ""
+                out[f"{c}_median"] = out[f"{c}_std"] = ""
+                out[f"{c}_q1"] = out[f"{c}_q3"] = out[f"{c}_iqr"] = ""
 
         # ---------- COUNT SUMS ----------
         sums = {}
@@ -572,49 +621,6 @@ def write_summary_csv(
             vals = [int(v) for v in vals if v is not None]
             sums[c] = sum(vals) if vals else 0
             out[f"{c}_sum"] = sums[c] if vals else ""
-
-        # ---------- MICRO: dataset-level metrics from sums ----------
-        tp_s, tn_s, fp_s, fn_s = (
-            sums.get("tp", 0),
-            sums.get("tn", 0),
-            sums.get("fp", 0),
-            sums.get("fn", 0),
-        )
-        n_pred_s, n_ref_s = (sums.get("n_pred", 0), sums.get("n_ref", 0))
-        total = tp_s + tn_s + fp_s + fn_s
-
-        def safe_div(n, d):
-            return (n / d) if (d is not None and d > 0) else ""
-
-        micro_precision = safe_div(tp_s, tp_s + fp_s)
-        micro_npv = safe_div(tn_s, tn_s + fn_s)
-        micro_recall = safe_div(tp_s, tp_s + fn_s)
-        micro_specificity = safe_div(tn_s, tn_s + fp_s)
-        micro_bal_acc = (
-            0.5 * (micro_recall + micro_specificity)
-            if isinstance(micro_recall, float) and isinstance(micro_specificity, float)
-            else ""
-        )
-        micro_prevalence = safe_div(tp_s + fn_s, total)
-        micro_pred_pos_rate = safe_div(tp_s + fp_s, total)
-        micro_dice = safe_div(2 * tp_s, (2 * tp_s + fp_s + fn_s))
-        micro_jaccard = safe_div(tp_s, (tp_s + fp_s + fn_s))
-        micro_vol_bias = safe_div((n_pred_s - n_ref_s), n_ref_s)
-
-        out.update(
-            {
-                "micro_dice": micro_dice,
-                "micro_jaccard": micro_jaccard,
-                "micro_precision": micro_precision,
-                "micro_npv": micro_npv,
-                "micro_recall": micro_recall,
-                "micro_specificity": micro_specificity,
-                "micro_balanced_accuracy": micro_bal_acc,
-                "micro_prevalence": micro_prevalence,
-                "micro_pred_pos_rate": micro_pred_pos_rate,
-                "micro_volumetric_bias": micro_vol_bias,
-            }
-        )
 
         _round_inplace(out, round_ndigits)
         out_rows.append(out)
@@ -636,32 +642,22 @@ def write_summary_csv(
         "PredPosRate",
         "VolumetricBias",
         "HD95_mm",
-        "HD95",
     ]
     macro_present = [m for m in macro_order if m in score_cols]
     # group: each metric -> mean/median/std
     for c in macro_present:
-        headers += [f"{c}_mean", f"{c}_median", f"{c}_std"]
+        headers += [
+            f"{c}_mean",
+            f"{c}_ci95_lo",
+            f"{c}_ci95_hi",
+            f"{c}_median",
+            f"{c}_std",
+            f"{c}_q1",
+            f"{c}_q3",
+            f"{c}_iqr",
+        ]
         if c == "HD95" and q_vals:
             headers += [f"HD95_p{int(q)}" for q in q_vals]
-
-    # # micro block (fixed order; include if present on rows)
-    # micro_block = [
-    #     "micro_dice",
-    #     "micro_jaccard",
-    #     "micro_precision",
-    #     "micro_recall",
-    #     "micro_specificity",
-    #     "micro_balanced_accuracy",
-    #     "micro_prevalence",
-    #     "micro_pred_pos_rate",
-    #     "micro_npv",
-    #     "micro_volumetric_bias",
-    # ]
-    # # include only ones that actually appear
-    # present_micro = {k for r in out_rows for k in r.keys()}  # keys present
-    # micro_headers = [k for k in micro_block if k in present_micro]
-    # headers += micro_headers
 
     # counts block at the end
     for c in ("tp", "tn", "fp", "fn", "n_pred", "n_ref"):
