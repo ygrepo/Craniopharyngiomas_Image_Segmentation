@@ -1,14 +1,15 @@
 #!/bin/bash
-#   unet_brats2017_predict.sh    —  Predict 3D mask using nnU-Net v2.
-#SBATCH --job-name=unet_brats2017_predict
-#SBATCH --output=logs/unet_brats2017_predict_%A_%a.out
-#SBATCH --error=logs/unet_brats2017_predict_%A_%a.err
-#SBATCH --time=04:00:00
+#   nnunet_predict.sh    —  Predict 3D mask using nnU-Net v2.
+#SBATCH --job-name=nnunet_predict
+#SBATCH --output=logs/nnunet_predict_%A_%a.out
+#SBATCH --error=logs/nnunet_predict_%A_%a.err
+#SBATCH --time=72:00:00
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:4
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=128G
+
 
 set -euo pipefail
 
@@ -37,6 +38,18 @@ mkdir -p "$LOG_DIR"
 
 source script/set_unet_path.sh
 
+
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+export NCCL_DEBUG=WARN          # or INFO when debugging comms
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
+
+echo "SLURM_JOB_GPUS=${SLURM_JOB_GPUS}"
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
+python - <<'PY'
+import torch
+print("PyTorch sees", torch.cuda.device_count(), "GPUs")
+PY
+
 # Choose a GPU id if needed:
 #export CUDA_VISIBLE_DEVICES=0
 # DATASET_ID=501
@@ -47,11 +60,18 @@ source script/set_unet_path.sh
 # PLANS_ID=nnUNetPlans
 
 
-DATASET_ID=502
-DATASET_NAME=BraTS2017_4ch
+# DATASET_ID=502
+# DATASET_NAME=BraTS2017_4ch
+# FOLD=0
+# CFG=3d_fullres
+# TR=nnUNetTrainer
+# PLANS_ID=nnUNetResEncUNetMPlans
+
+DATASET_ID=503
+DATASET_NAME=CP
 FOLD=0
 CFG=3d_fullres
-TR=nnUNetTrainer
+TR=EmaDiceEarlyStopTrainer
 PLANS_ID=nnUNetResEncUNetMPlans
 
 # --- derive paths from envs ---
