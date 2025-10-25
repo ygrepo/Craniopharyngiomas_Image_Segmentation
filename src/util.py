@@ -1066,65 +1066,84 @@ def resolve_class_idx(meta, class_name, fallback_idx):
         return min(fallback_idx, len(regions) - 1)
 
 
+def same_geometry(a: sitk.Image, b: sitk.Image) -> bool:
+    return (
+        a.GetSize() == b.GetSize()
+        and a.GetSpacing() == b.GetSpacing()
+        and a.GetOrigin() == b.GetOrigin()
+        and a.GetDirection() == b.GetDirection()
+    )
+
+
+def resample_to_reference(
+    moving: sitk.Image,
+    reference: sitk.Image,
+    *,
+    interp=sitk.sitkNearestNeighbor,
+    default_value=0,
+    out_pixel=sitk.sitkUInt8,
+) -> sitk.Image:
+    """Resample `moving` onto `reference` grid (spacing/origin/direction/size)."""
+    logger.info(f"Resampling to reference geometry {reference.GetSize()}")
+    res = sitk.Resample(
+        moving,
+        reference,  # reference image defines target grid
+        sitk.Transform(),  # identity (assumes moving already roughly aligned)
+        interp,
+        default_value,
+        out_pixel,
+    )
+    return res
+
+
 def hd95_mm_from_binary_robust(
     pred_img: sitk.Image,
     ref_img: sitk.Image,
     *,
-    one_empty_policy: str = "inf",  # "inf" | "max" | "zero" | "nan"
-    binarize_threshold: float = 0.5,
+    one_empty_policy: str = "inf",
+    bin_thr: float = 0.5,
 ) -> float:
     """
-    Symmetric 95% Hausdorff distance (mm) between two masks with identical geometry.
-    Robust to label values, empty surfaces, and non-finite intermediates.
+    Computes symmetric HD95 (mm) for two masks, auto-resampling `pred_img` to `ref_img`
+    if geometry differs. Binarizes first; never returns NaN.
     """
-
-    # --- geometry guard
-    def _geom(img):
-        return (img.GetSize(), img.GetSpacing(), img.GetOrigin(), img.GetDirection())
-
-    if _geom(pred_img) != _geom(ref_img):
-        raise ValueError(
-            "pred_img and ref_img must have identical size/spacing/origin/direction"
+    # If geometry differs, resample pred to ref (binary-safe)
+    if not same_geometry(pred_img, ref_img):
+        pred_img = resample_to_reference(
+            pred_img,
+            ref_img,
+            interp=sitk.sitkNearestNeighbor,
+            default_value=0,
+            out_pixel=sitk.sitkUInt8,
         )
 
-    # --- binarize defensively (handles labelmaps or probabilities)
-    pred_bin = sitk.Cast(pred_img > binarize_threshold, sitk.sitkUInt8)
-    ref_bin = sitk.Cast(ref_img > binarize_threshold, sitk.sitkUInt8)
+    # Binarize (works for labelmaps or probabilities)
+    pred_bin = sitk.Cast(pred_img > bin_thr, sitk.sitkUInt8)
+    ref_bin = sitk.Cast(ref_img > bin_thr, sitk.sitkUInt8)
 
-    # --- quick foreground check via voxel counts
+    # Foreground checks
     sf = sitk.StatisticsImageFilter()
     sf.Execute(pred_bin)
     pred_sum = int(sf.GetSum())
     sf.Execute(ref_bin)
     ref_sum = int(sf.GetSum())
 
-    # Both empty → distance 0
     if pred_sum == 0 and ref_sum == 0:
         return 0.0
-
-    # Build surfaces WITHOUT assuming a specific foreground value
-    # LabelContour treats any nonzero label as foreground.
-    surf_pred = sitk.LabelContour(pred_bin, fullyConnected=True)
-    surf_ref = sitk.LabelContour(ref_bin, fullyConnected=True)
-
-    # Count surface voxels (array sum is fine for UInt8)
-    sp = int(sitk.GetArrayViewFromImage(surf_pred).sum())
-    sr = int(sitk.GetArrayViewFromImage(surf_ref).sum())
-    logger.info(f"Surface voxels: pred={sp} ref={sr}")
-
-    # If one mask is empty (or binarization wiped it), decide policy here.
     if (pred_sum == 0) ^ (ref_sum == 0):
         if one_empty_policy == "inf":
             return float("inf")
         if one_empty_policy == "max":
-            spacing = np.array(pred_bin.GetSpacing(), dtype=float)
-            size = np.array(pred_bin.GetSize(), dtype=float)
-            return float(
-                np.linalg.norm(spacing * np.maximum(size - 1, 0))
-            )  # image diagonal (mm)
+            sp = np.array(ref_bin.GetSpacing(), float)
+            sz = np.array(ref_bin.GetSize(), float)
+            return float(np.linalg.norm(sp * np.maximum(sz - 1, 0)))
         if one_empty_policy == "zero":
             return 0.0
         return float("nan")
+
+    # Surfaces (value-agnostic)
+    surf_pred = sitk.LabelContour(pred_bin, fullyConnected=True)
+    surf_ref = sitk.LabelContour(ref_bin, fullyConnected=True)
 
     # Distance maps (mm)
     dm_ref = sitk.Abs(
@@ -1138,22 +1157,18 @@ def hd95_mm_from_binary_robust(
         )
     )
 
-    logger.info(f"Distance map ref={dm_ref}, pred={dm_pred}")
-    # Sample distances from each surface to the opposite mask
-    d_pred_to_ref = sitk.GetArrayFromImage(sitk.Mask(dm_ref, surf_pred))
-    d_ref_to_pred = sitk.GetArrayFromImage(sitk.Mask(dm_pred, surf_ref))
+    # Sample distances
+    a = sitk.GetArrayFromImage(sitk.Mask(dm_ref, surf_pred))
+    b = sitk.GetArrayFromImage(sitk.Mask(dm_pred, surf_ref))
 
-    # Keep finite distances; keep zeros (touching/identical surfaces)
-    a = d_pred_to_ref[np.isfinite(d_pred_to_ref) & (d_pred_to_ref >= 0)]
-    b = d_ref_to_pred[np.isfinite(d_ref_to_pred) & (d_ref_to_pred >= 0)]
+    # Keep finite, allow zeros
+    a = a[np.isfinite(a) & (a >= 0)]
+    b = b[np.isfinite(b) & (b >= 0)]
 
-    # If both sides have no samples (identical solid object with no surface? extremely rare), say 0
     if a.size == 0 and b.size == 0:
         return 0.0
-
     all_d = a if b.size == 0 else b if a.size == 0 else np.concatenate([a, b])
-
     if all_d.size == 0:
-        return 0.0  # last-resort guard; never NaN
+        return 0.0
 
     return float(np.nanpercentile(all_d.astype(np.float64), 95))
