@@ -391,6 +391,13 @@ def write_summary_csv(
       - Counts: sums
     """
 
+    logger.info(f"Writing summary to {out_path}")
+    logger.info(f"Metric columns: {metric_cols}")
+    logger.info(f"HD95 quantiles: {hd95_quantiles}")
+    logger.info(f"Std type: {std_type}")
+    logger.info(f"Rounding: {round_ndigits}")
+    logger.info(f"Rows: {len(rows)}")
+
     # --- group key ---
     def class_key(r):
         ctype = r.get("class_type")
