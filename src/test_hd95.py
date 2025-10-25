@@ -17,6 +17,7 @@ logger = get_logger(__name__)
 
 def main():
     setup_logging(None, "DEBUG")
+    logger.info("Hello world!")
     # Replace with the exact pair that showed ∞ in your sheet
     path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset503_CP/EmaDiceEarlyStopTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/predictions/validation/70900351.nii.gz"
     pred = sitk.ReadImage(path)
