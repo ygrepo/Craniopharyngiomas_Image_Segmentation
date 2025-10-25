@@ -229,81 +229,6 @@ def _norm_case_metrics(md: Dict[str, Any]) -> Dict[str, Optional[float]]:
     return out
 
 
-# def _norm_case_metrics(md: Dict[str, Any]) -> Dict[str, Optional[float]]:
-#     """
-#     Normalize a single (case, class/region) metrics dict to canonical keys:
-#       Dice, Jaccard, PPV, NPV, HD95, tp, tn, fp, fn, n_pred, n_ref
-#     Derive Jaccard (IoU) from counts or Dice; derive PPV/NPV from counts if needed.
-#     Non-canonical keys are preserved in the row.
-#     """
-
-#     logger.debug(f"Normalizing metrics: {md}")
-#     out: Dict[str, Optional[float]] = {}
-
-#     # canonical scores
-#     dice = _first_present(md, ALIASES["dice"])
-#     iou = _first_present(md, ALIASES["iou"])
-#     ppv = _first_present(md, ALIASES["ppv"])
-#     npv = _first_present(md, ALIASES["npv"])
-#     hd95 = _first_present(md, ALIASES["hd95"])
-#     logger.debug(f"Scores: Dice={dice}, IoU={iou}, PPV={ppv}, NPV={npv}, HD95={hd95}")
-
-#     # counts
-#     tp = _first_present(md, ALIASES["tp"])
-#     tn = _first_present(md, ALIASES["tn"])
-#     fp = _first_present(md, ALIASES["fp"])
-#     fn = _first_present(md, ALIASES["fn"])
-#     n_pred = _first_present(md, ALIASES["n_pred"])
-#     n_ref = _first_present(md, ALIASES["n_ref"])
-
-#     # derive Jaccard if missing
-#     if iou is None:
-#         if tp is not None and fp is not None and fn is not None:
-#             denom = tp + fp + fn
-#             iou = (tp / denom) if denom and denom > 0 else 0.0
-#         elif dice is not None and dice < 2.0:
-#             try:
-#                 iou = dice / (2.0 - dice) if (2.0 - dice) != 0 else 0.0
-#             except Exception:
-#                 iou = None
-
-#     # derive PPV/NPV if missing
-#     if ppv is None and tp is not None and fp is not None:
-#         denom = tp + fp
-#         ppv = (tp / denom) if denom and denom > 0 else 0.0
-#     if npv is None and tn is not None and fn is not None:
-#         denom = tn + fn
-#         npv = (tn / denom) if denom and denom > 0 else 0.0
-
-#     out.update(
-#         {
-#             "Dice": dice,
-#             "Jaccard": iou,  # canonical: Jaccard == IoU
-#             "PPV": ppv,
-#             "NPV": npv,
-#             "HD95_mm": hd95,
-#             "tp": tp,
-#             "tn": tn,
-#             "fp": fp,
-#             "fn": fn,
-#             "n_pred": n_pred,
-#             "n_ref": n_ref,
-#         }
-#     )
-
-#     # Keep any additional custom metrics present in md
-#     for k, v in md.items():
-#         if k in DROP_KEYS:
-#             continue
-#         kl = str(k).lower()
-#         if kl in {"iou", "io u", "iou_score", "iou_mean"}:
-#             continue
-#         if k not in out:
-#             out[k] = v
-
-#     return out
-
-
 def _median(vals: List[float]) -> float:
     s = sorted(vals)
     n = len(s)
@@ -501,19 +426,6 @@ def write_cases_csv(
         "n_ref",
     ]
 
-    # preferred = [
-    #     "Dice",
-    #     "Jaccard",
-    #     "PPV",
-    #     "NPV",
-    #     "HD95",
-    #     "tp",
-    #     "tn",
-    #     "fp",
-    #     "fn",
-    #     "n_pred",
-    #     "n_ref",
-    # ]
     others = sorted([k for k in header_keys if k not in (fixed + preferred)])
     header = fixed + [k for k in preferred if k in header_keys] + others
     if rename_hd95_mm and "HD95" in header:
@@ -538,6 +450,21 @@ def write_cases_csv(
     metric_cols = _uniq([k for k in header if k not in fixed])
     # metric-like columns (everything except fixed identifiers)
     return metric_cols
+
+
+# --- stable sort: labels alpha by raw id; regions alpha by name ---
+def _group_sort_key(item):
+    (ctype, ident) = item[0]
+    return (0 if ctype == "label" else 1, str(ident).lower())
+
+
+# --- group key ---
+def class_key(r):
+    ctype = r.get("class_type")
+    if ctype == "region":
+        return ("region", str(r.get("class_name", "")))
+    # labels: use raw class_id string as-is
+    return ("label", str(r.get("class_id", "")))
 
 
 def write_summary_csv(
@@ -570,14 +497,6 @@ def write_summary_csv(
     logger.info(f"Std type: {std_type}")
     logger.info(f"Rounding: {round_ndigits}")
     logger.info(f"Rows: {len(rows)}")
-
-    # --- group key ---
-    def class_key(r):
-        ctype = r.get("class_type")
-        if ctype == "region":
-            return ("region", str(r.get("class_name", "")))
-        # labels: use raw class_id string as-is
-        return ("label", str(r.get("class_id", "")))
 
     by_group: Dict[Any, List[Dict[str, Any]]] = {}
     for r in rows:
@@ -613,11 +532,6 @@ def write_summary_csv(
             except Exception:
                 pass
         q_vals = sorted(set(parts))
-
-    # --- stable sort: labels alpha by raw id; regions alpha by name ---
-    def _group_sort_key(item):
-        (ctype, ident) = item[0]
-        return (0 if ctype == "label" else 1, str(ident).lower())
 
     out_rows: List[Dict[str, Any]] = []
     for key, grp in sorted(by_group.items(), key=_group_sort_key):
@@ -731,23 +645,23 @@ def write_summary_csv(
         if c == "HD95" and q_vals:
             headers += [f"HD95_p{int(q)}" for q in q_vals]
 
-    # micro block (fixed order; include if present on rows)
-    micro_block = [
-        "micro_dice",
-        "micro_jaccard",
-        "micro_precision",
-        "micro_recall",
-        "micro_specificity",
-        "micro_balanced_accuracy",
-        "micro_prevalence",
-        "micro_pred_pos_rate",
-        "micro_npv",
-        "micro_volumetric_bias",
-    ]
-    # include only ones that actually appear
-    present_micro = {k for r in out_rows for k in r.keys()}  # keys present
-    micro_headers = [k for k in micro_block if k in present_micro]
-    headers += micro_headers
+    # # micro block (fixed order; include if present on rows)
+    # micro_block = [
+    #     "micro_dice",
+    #     "micro_jaccard",
+    #     "micro_precision",
+    #     "micro_recall",
+    #     "micro_specificity",
+    #     "micro_balanced_accuracy",
+    #     "micro_prevalence",
+    #     "micro_pred_pos_rate",
+    #     "micro_npv",
+    #     "micro_volumetric_bias",
+    # ]
+    # # include only ones that actually appear
+    # present_micro = {k for r in out_rows for k in r.keys()}  # keys present
+    # micro_headers = [k for k in micro_block if k in present_micro]
+    # headers += micro_headers
 
     # counts block at the end
     for c in ("tp", "tn", "fp", "fn", "n_pred", "n_ref"):
@@ -761,45 +675,130 @@ def write_summary_csv(
         for r in out_rows:
             w.writerow({k: r.get(k, "") for k in headers})
 
-    #     # scores
-    #     for c in score_cols:
-    #         vals = [to_float(r.get(c)) for r in grp]
-    #         vals = [v for v in vals if v is not None and math.isfinite(v)]
-    #         if vals:
-    #             out[f"{c}_mean"] = sum(vals) / len(vals)
-    #             out[f"{c}_median"] = _median(vals)
-    #             out[f"{c}_std"] = _std(vals, std_type)
-    #             if c.lower() == "hd95" and q_vals:
-    #                 s = sorted(vals)
-    #                 for q in q_vals:
-    #                     k = int(round((q / 100.0) * (len(s) - 1)))
-    #                     out[f"HD95_p{int(q)}"] = s[k]
-    #         else:
-    #             out[f"{c}_mean"] = out[f"{c}_median"] = out[f"{c}_std"] = ""
 
-    #     # counts totals
-    #     for c in count_cols:
-    #         vals = [to_float(r.get(c)) for r in grp]
-    #         vals = [int(v) for v in vals if v is not None]
-    #         out[f"{c}_sum"] = sum(vals) if vals else ""
+def _group_key(r):
+    ctype = r.get("class_type")
+    if ctype == "region":
+        return ("region", str(r.get("class_name", "")))
+    return ("label", str(r.get("class_id", "")))
 
-    #     _round_inplace(out, round_ndigits)
-    #     out_rows.append(out)
 
-    # # header
-    # score_headers = ["class_type", "class_id", "class_name"]
-    # for c in score_cols:
-    #     score_headers += [f"{c}_mean", f"{c}_median", f"{c}_std"]
-    #     if c.lower() == "hd95" and q_vals:
-    #         score_headers += [f"HD95_p{int(q)}" for q in q_vals]
-    # for c in count_cols:
-    #     score_headers.append(f"{c}_sum")
+def write_micro_csv(
+    rows: List[Dict[str, Any]],
+    out_path: Path,
+    round_ndigits: Optional[int],
+):
+    """
+    Compute micro metrics (from sums) per (class_type, class_id/name) and write to CSV.
 
-    # with open(out_path, "w", newline="") as f:
-    #     w = csv.DictWriter(f, fieldnames=score_headers)
-    #     w.writeheader()
-    #     for r in out_rows:
-    #         w.writerow({k: r.get(k, "") for k in score_headers})
+    Columns:
+      - identifiers: class_type, class_id, class_name
+      - micro metrics: micro_dice, micro_jaccard, micro_precision, micro_recall,
+                       micro_specificity, micro_balanced_accuracy, micro_prevalence,
+                       micro_pred_pos_rate, micro_npv, micro_volumetric_bias
+      - counts: tp_sum, tn_sum, fp_sum, fn_sum, n_pred_sum, n_ref_sum
+    """
+    # Group rows
+    by_group: Dict[Any, List[Dict[str, Any]]] = {}
+    for r in rows:
+        by_group.setdefault(_group_key(r), []).append(r)
+
+    out_rows: List[Dict[str, Any]] = []
+
+    def safe_div(n, d):
+        try:
+            return (n / d) if d and d > 0 else ""
+        except Exception:
+            return ""
+
+    for key, grp in sorted(
+        by_group.items(),
+        key=lambda it: (0 if it[0][0] == "label" else 1, str(it[0][1]).lower()),
+    ):
+        ctype, ident = key
+        if ctype == "label":
+            class_id, class_name = ident, ""
+        else:
+            class_id, class_name = "", ident
+
+        # Sum counts
+        sums = {}
+        for c in ("tp", "tn", "fp", "fn", "n_pred", "n_ref"):
+            vals = [to_float(r.get(c)) for r in grp]
+            vals = [int(v) for v in vals if v is not None]
+            sums[c] = sum(vals) if vals else 0
+
+        tp_s, tn_s, fp_s, fn_s = (sums["tp"], sums["tn"], sums["fp"], sums["fn"])
+        n_pred_s, n_ref_s = (sums["n_pred"], sums["n_ref"])
+        total = tp_s + tn_s + fp_s + fn_s
+
+        micro_precision = safe_div(tp_s, tp_s + fp_s)
+        micro_npv = safe_div(tn_s, tn_s + fn_s)
+        micro_recall = safe_div(tp_s, tp_s + fn_s)
+        micro_specificity = safe_div(tn_s, tn_s + fp_s)
+        micro_bal_acc = (
+            0.5 * (micro_recall + micro_specificity)
+            if isinstance(micro_recall, float) and isinstance(micro_specificity, float)
+            else ""
+        )
+        micro_prevalence = safe_div(tp_s + fn_s, total)
+        micro_pred_pos_rate = safe_div(tp_s + fp_s, total)
+        micro_dice = safe_div(2 * tp_s, (2 * tp_s + fp_s + fn_s))
+        micro_jaccard = safe_div(tp_s, (tp_s + fp_s + fn_s))
+        micro_vol_bias = safe_div((n_pred_s - n_ref_s), n_ref_s)
+
+        out = {
+            "class_type": ctype,
+            "class_id": class_id,
+            "class_name": class_name,
+            "micro_dice": micro_dice,
+            "micro_jaccard": micro_jaccard,
+            "micro_precision": micro_precision,
+            "micro_recall": micro_recall,
+            "micro_specificity": micro_specificity,
+            "micro_balanced_accuracy": micro_bal_acc,
+            "micro_prevalence": micro_prevalence,
+            "micro_pred_pos_rate": micro_pred_pos_rate,
+            "micro_npv": micro_npv,
+            "micro_volumetric_bias": micro_vol_bias,
+            "tp_sum": tp_s,
+            "tn_sum": tn_s,
+            "fp_sum": fp_s,
+            "fn_sum": fn_s,
+            "n_pred_sum": n_pred_s,
+            "n_ref_sum": n_ref_s,
+        }
+
+        _round_inplace(out, round_ndigits)
+        out_rows.append(out)
+
+    headers = [
+        "class_type",
+        "class_id",
+        "class_name",
+        "micro_dice",
+        "micro_jaccard",
+        "micro_precision",
+        "micro_recall",
+        "micro_specificity",
+        "micro_balanced_accuracy",
+        "micro_prevalence",
+        "micro_pred_pos_rate",
+        "micro_npv",
+        "micro_volumetric_bias",
+        "tp_sum",
+        "tn_sum",
+        "fp_sum",
+        "fn_sum",
+        "n_pred_sum",
+        "n_ref_sum",
+    ]
+
+    with open(out_path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=headers)
+        w.writeheader()
+        for r in out_rows:
+            w.writerow({k: r.get(k, "") for k in headers})
 
 
 # -------------------------- CLI / main -------------------------- #
@@ -835,6 +834,12 @@ def parse_args():
         type=Path,
         default=None,
         help="Output CSV for per-class-or-region aggregates (default: <base>_summary.csv)",
+    )
+    ap.add_argument(
+        "--out_micro_fn",
+        type=Path,
+        default=None,
+        help="Output CSV for dataset-level (micro) metrics per class/region (default: <base>_micro.csv)",
     )
     ap.add_argument(
         "--counts_out_fn",
@@ -929,9 +934,19 @@ def main():
         hd95_quantiles=args.hd95_quantiles,
     )
 
+    out_micro = args.out_micro_fn or Path(str(base) + "_micro.csv")
+    write_micro_csv(
+        rows,
+        out_micro,
+        round_ndigits=args.round,
+    )
+
     logger.info("Wrote:")
     logger.info(f"  - {out_cases}")
     logger.info(f"  - {out_summary}")
+    logger.info(f"  - {out_micro}")
+
+    logger.info("Done.")
 
 
 if __name__ == "__main__":

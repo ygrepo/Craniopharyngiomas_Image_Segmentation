@@ -60,6 +60,7 @@ mkdir -p "$OUTP"
 IN_JSON_HD95="${OUTP}/${DATASET_ID}_fold${FOLD}_summary_with_hd95.json"
 OUT_CASE_FN="${OUTP}/${DATASET_ID}_validation_metrics_cases.csv"
 OUT_SUMMARY_FN="${OUTP}/${DATASET_ID}_validation_metrics_summary.csv"
+OUT_MICRO_FN="${OUTP}/${DATASET_ID}_validation_metrics_micro.csv"
 OUT_COUNTS_FN="${OUTP}/${DATASET_ID}_validation_metrics_counts.csv"
 
 HD95_QUANTILES="90,95"
@@ -80,6 +81,7 @@ LOG_FILE="${LOG_DIR}/${ts}_{DATASET_ID}_compute_validation_metrics.log"
   --in_fn "${IN_JSON_HD95}" \
   --out_cases_fn "${OUT_CASE_FN}" \
   --out_summary_fn "${OUT_SUMMARY_FN}" \
+  --out_micro_fn "${OUT_MICRO_FN}" \
   --counts_out_fn "${OUT_COUNTS_FN}" \
   --std_type "${STD_TYPE}" \
   --hd95_quantiles "${HD95_QUANTILES}" \
@@ -89,3 +91,4 @@ LOG_FILE="${LOG_DIR}/${ts}_{DATASET_ID}_compute_validation_metrics.log"
   --log_level "${LOG_LEVEL}"
 echo "[ok] Wrote: ${OUT_SUMMARY_FN}"
 echo "[ok] Wrote: ${OUT_CASE_FN}"
+echo "[ok] Wrote: ${OUT_MICRO_FN}"
