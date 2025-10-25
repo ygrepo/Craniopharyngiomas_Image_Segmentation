@@ -17,12 +17,14 @@ logger = get_logger(__name__)
 
 def main():
     setup_logging(None, "DEBUG")
-    logger.info("Hello world!")
     # Replace with the exact pair that showed ∞ in your sheet
     path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset503_CP/EmaDiceEarlyStopTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/predictions/validation/70900351.nii.gz"
     pred = sitk.ReadImage(path)
     path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/70900351.nii.gz"
     gt = sitk.ReadImage(path)
-    print(hd95_mm_from_binary_robust(pred, gt, one_empty_policy="inf"))
+    logger.info(hd95_mm_from_binary_robust(pred, gt, one_empty_policy="inf"))
     # Expect ~0.0 (if they fully overlap) or a small positive value
     # If you get ∞, something is wrong.
+
+__name__ == "__main__":
+    main()
