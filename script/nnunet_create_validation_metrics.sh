@@ -66,7 +66,7 @@ HD95_QUANTILES="90,95"
 STD_TYPE="population"
 # STD_TYPE="sample"
 
-MAIN="src/nnunet_eval_to_csv.py"
+MAIN="src/nnunet_compute_validation_metrics.py"
 DJ="${RAW}/dataset.json"
 
 "${PYTHON}" "${MAIN}" \

@@ -413,6 +413,8 @@ def write_summary_csv(
         elif is_numeric_col(c, rows):
             score_cols.append(c)
 
+    logger.info(f"Score columns: {score_cols}")
+    logger.info(f"Count columns: {count_cols}")
     # --- quantiles for HD95 ---
     q_vals: List[float] = []
     if hd95_quantiles:
