@@ -118,6 +118,7 @@ def _norm_case_metrics(md: Dict[str, Any]) -> Dict[str, Optional[float]]:
     ppv = _first_present(md, ALIASES["ppv"])
     npv = _first_present(md, ALIASES["npv"])
     hd95 = _first_present(md, ALIASES["hd95"])
+    logger.debug(f"Scores: Dice={dice}, IoU={iou}, PPV={ppv}, NPV={npv}, HD95={hd95}")
 
     # counts
     tp = _first_present(md, ALIASES["tp"])
