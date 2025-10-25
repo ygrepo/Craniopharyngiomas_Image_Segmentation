@@ -343,7 +343,7 @@ def write_cases_csv(
     out_path: Path,
     round_ndigits: Optional[int],
     rename_hd95_mm: bool,
-) -> List[str]:
+) -> Tuple[List[str], List[str]]:
     """Write per-case/per-class-or-region CSV. Returns the list of metric-like columns included."""
     header_keys = set()
     for r in rows:
@@ -382,7 +382,7 @@ def write_cases_csv(
             w.writerow({k: row.get(k, "") for k in header})
     logger.debug(f"Header: {header}")
     # metric-like columns (everything except fixed identifiers)
-    return [k for k in header if k not in fixed]
+    return [k for k in header if k not in fixed], rows
 
 
 def write_summary_csv(
@@ -623,7 +623,7 @@ def main():
 
     base = in_path.with_suffix("")
     out_cases = args.out_cases_fn or Path(str(base) + "_cases.csv")
-    metric_cols = write_cases_csv(
+    metric_cols, rows = write_cases_csv(
         rows, out_cases, round_ndigits=args.round, rename_hd95_mm=args.rename_hd95_mm
     )
 
