@@ -377,7 +377,7 @@ def write_cases_csv(
                 row["HD95_mm"] = row.pop("HD95")
             _round_inplace(row, round_ndigits)
             w.writerow({k: row.get(k, "") for k in header})
-
+    logger.debug(f"Header: {header}")
     # metric-like columns (everything except fixed identifiers)
     return [k for k in header if k not in fixed]
 
