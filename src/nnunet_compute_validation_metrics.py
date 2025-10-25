@@ -375,10 +375,10 @@ def write_cases_csv(
         w.writeheader()
         for r in rows:
             row = dict(r)
-            logger.debug(f"Row: {row}")
             if rename_hd95_mm and "HD95" in row:
                 row["HD95_mm"] = row.pop("HD95")
             _round_inplace(row, round_ndigits)
+            logger.debug(f"Row: {row}")
             w.writerow({k: row.get(k, "") for k in header})
     logger.debug(f"Header: {header}")
     # metric-like columns (everything except fixed identifiers)
