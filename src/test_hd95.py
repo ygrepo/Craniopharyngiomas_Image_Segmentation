@@ -36,6 +36,12 @@ def main():
     path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/75062101.nii.gz"
     gt = sitk.ReadImage(path)
     logger.info(hd95_mm_from_binary(pred, gt, one_empty_policy="inf"))
+    import nibabel as nib
+    import numpy as np
+
+    path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/data/CP/75062101/75062101_Tumor.seg.nii.gz"
+    mask = nib.load(path).get_fdata()
+    logger.info("Mask voxel count:", np.count_nonzero(mask))
 
 
 if __name__ == "__main__":
