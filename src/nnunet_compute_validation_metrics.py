@@ -258,11 +258,10 @@ def to_float(x):
 def is_numeric_col(col: str, rows: List[Dict[str, Any]]) -> bool:
     """Keep only columns that have at least one numeric value across all rows."""
     for r in rows:
-        logger.debug(f"Row: {r}")
         if to_float(r.get(col)) is not None:
             return True
         else:
-            logger.debug(f"Non-numeric value found in column {col}: {r.get(col)}")
+            logger.warning(f"Non-numeric value found in column {col}: {r.get(col)}")
 
     return False
 
