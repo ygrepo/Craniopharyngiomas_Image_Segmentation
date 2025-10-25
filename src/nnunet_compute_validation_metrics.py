@@ -209,6 +209,7 @@ def is_numeric_col(col: str, rows: List[Dict[str, Any]]) -> bool:
 
 def load_items(data: Any) -> List[Dict[str, Any]]:
     """Accept list or dict with common keys and return the list of per-case entries."""
+    logger.debug(f"Data: {data}")
     if isinstance(data, list):
         return data
     if isinstance(data, dict):

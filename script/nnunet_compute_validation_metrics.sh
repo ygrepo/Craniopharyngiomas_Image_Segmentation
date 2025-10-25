@@ -69,6 +69,13 @@ STD_TYPE="population"
 MAIN="src/nnunet_compute_validation_metrics.py"
 DJ="${RAW}/dataset.json"
 
+
+LOG_DIR="logs"
+LOG_LEVEL="DEBUG"
+mkdir -p "$LOG_DIR"
+ts=$(date +"%Y%m%d_%H%M%S")
+LOG_FILE="${LOG_DIR}/${ts}_{DATASET_ID}_compute_validation_metrics.log"
+
 "${PYTHON}" "${MAIN}" \
   --in_fn "${IN_JSON_HD95}" \
   --out_cases_fn "${OUT_CASE_FN}" \
@@ -77,6 +84,8 @@ DJ="${RAW}/dataset.json"
   --std_type "${STD_TYPE}" \
   --hd95_quantiles "${HD95_QUANTILES}" \
   --granularity labels \
-  --rename_hd95_mm --round 3
+  --rename_hd95_mm --round 3 \
+  --log_file "${LOG_FILE}" \
+  --log_level "${LOG_LEVEL}"
 echo "[ok] Wrote: ${OUT_SUMMARY_FN}"
 echo "[ok] Wrote: ${OUT_CASE_FN}"
