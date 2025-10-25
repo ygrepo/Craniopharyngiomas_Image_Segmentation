@@ -207,6 +207,9 @@ def is_numeric_col(col: str, rows: List[Dict[str, Any]]) -> bool:
     for r in rows:
         if to_float(r.get(col)) is not None:
             return True
+        else:
+            logger.debug(f"Non-numeric value found in column {col}: {r.get(col)}")
+
     return False
 
 
