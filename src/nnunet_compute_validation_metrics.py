@@ -472,8 +472,7 @@ def _quantile(vals: List[float], q: float) -> float:
     n = len(s)
     if n == 1:
         return s[0]
-    # position in [0, n-1]
-    pos = (n - 1) * q
+    pos = (n - 1) * q  # position in [0, n-1]
     lo = int(math.floor(pos))
     hi = int(math.ceil(pos))
     if lo == hi:
@@ -493,16 +492,14 @@ def _mean_ci95(vals: List[float], std_type: str) -> Tuple[float, float, float]:
     mean = sum(vals) / n
     if n == 1:
         return mean, mean, mean
-    # SD consistent with your _std()
+    # SD consistent with _std()
     if std_type == "population":
-        m = mean
-        var = sum((v - m) ** 2 for v in vals) / n
+        var = sum((v - mean) ** 2 for v in vals) / n
     else:
-        m = mean
-        var = sum((v - m) ** 2 for v in vals) / (n - 1)
+        var = sum((v - mean) ** 2 for v in vals) / (n - 1)
     sd = math.sqrt(var)
     z = 1.96
-    half = z * (sd / math.sqrt(n)) if n > 0 else float("nan")
+    half = z * (sd / math.sqrt(n))
     return mean, mean - half, mean + half
 
 
@@ -518,17 +515,14 @@ def write_summary_csv(
     Aggregate per (class_type, class_id/name):
 
       Macro block (per-case):
-        - For each score column: mean / median / std
-        - This includes derived per-case metrics (Recall, Specificity, BalancedAccuracy,
+        - For each score column: mean, ci95_lo, ci95_hi, median, std, q1, q3, iqr
+        - Includes derived per-case metrics (Recall, Specificity, BalancedAccuracy,
           Prevalence, PredPosRate, VolumetricBias) if present in rows.
-
-      Micro block (from sums):
-        - micro_dice, micro_jaccard, micro_precision (PPV), micro_npv, micro_recall,
-          micro_specificity, micro_balanced_accuracy, micro_prevalence, micro_pred_pos_rate,
-          micro_volumetric_bias
 
       Counts block:
         - tp_sum, tn_sum, fp_sum, fn_sum, n_pred_sum, n_ref_sum
+
+    Note: micro metrics are intentionally excluded (they go to the separate _micro.csv).
     """
     logger.info(f"Writing summary to {out_path}")
     logger.info(f"Metric columns: {metric_cols}")
@@ -537,6 +531,7 @@ def write_summary_csv(
     logger.info(f"Rounding: {round_ndigits}")
     logger.info(f"Rows: {len(rows)}")
 
+    # group rows
     by_group: Dict[Any, List[Dict[str, Any]]] = {}
     for r in rows:
         by_group.setdefault(class_key(r), []).append(r)
@@ -545,7 +540,7 @@ def write_summary_csv(
     score_cols: List[str] = []
     count_cols: List[str] = []
     skip_cols = {"class_id", "class_name", "class_type"}
-    metric_cols = list(dict.fromkeys(metric_cols))
+    metric_cols = list(dict.fromkeys(metric_cols))  # de-dupe, preserve order
     for c in metric_cols:
         if c in skip_cols:
             continue
@@ -556,7 +551,8 @@ def write_summary_csv(
 
     logger.info(f"Score columns: {score_cols}")
     logger.info(f"Count columns: {count_cols}")
-    # --- quantiles for HD95 ---
+
+    # --- optional HD95 percentiles to add (e.g., "90,95") ---
     q_vals: List[float] = []
     if hd95_quantiles:
         parts = []
@@ -593,7 +589,12 @@ def write_summary_csv(
             vals = [to_float(r.get(c)) for r in grp]
             vals = [v for v in vals if v is not None and math.isfinite(v)]
             if vals:
-                out[f"{c}_mean"] = sum(vals) / len(vals)
+                # mean and 95% CI for the mean
+                mean, ci_lo, ci_hi = _mean_ci95(vals, std_type)
+                out[f"{c}_mean"] = mean
+                out[f"{c}_ci95_lo"] = ci_lo
+                out[f"{c}_ci95_hi"] = ci_hi
+                # median & std (consistent with _std(std_type))
                 out[f"{c}_median"] = _median(vals)
                 out[f"{c}_std"] = _std(vals, std_type)
                 # IQR (Q1, Q3, IQR)
@@ -602,13 +603,13 @@ def write_summary_csv(
                 out[f"{c}_q1"] = q1
                 out[f"{c}_q3"] = q3
                 out[f"{c}_iqr"] = q3 - q1
-                if c.lower() == "hd95" and q_vals:
-                    s = sorted(vals)
+                # Optional: HD95 (mm) extra percentiles
+                name_norm = c.lower().replace("_mm", "")
+                if name_norm == "hd95" and q_vals:
                     for q in q_vals:
-                        k = int(round((q / 100.0) * (len(s) - 1)))
-                        out[f"HD95_p{int(q)}"] = s[k]
+                        out[f"HD95_p{int(q)}"] = _quantile(vals, q / 100.0)
             else:
-                # empty: fill blanks to keep headers consistent
+                # fill blanks to keep headers consistent
                 out[f"{c}_mean"] = out[f"{c}_ci95_lo"] = out[f"{c}_ci95_hi"] = ""
                 out[f"{c}_median"] = out[f"{c}_std"] = ""
                 out[f"{c}_q1"] = out[f"{c}_q3"] = out[f"{c}_iqr"] = ""
@@ -625,7 +626,6 @@ def write_summary_csv(
         out_rows.append(out)
 
     # ---------- HEADER GROUPING ----------
-    # identifiers
     headers = ["class_type", "class_id", "class_name"]
 
     # Order macro metrics (only those present)
@@ -640,10 +640,11 @@ def write_summary_csv(
         "Prevalence",
         "PredPosRate",
         "VolumetricBias",
-        "HD95_mm",
+        "HD95_mm",  # canonical HD95 in mm if you normalized it earlier
     ]
     macro_present = [m for m in macro_order if m in score_cols]
-    # group: each metric -> mean/median/std
+
+    # group: each metric -> mean / ci95_lo / ci95_hi / median / std / q1 / q3 / iqr
     for c in macro_present:
         headers += [
             f"{c}_mean",
@@ -655,7 +656,8 @@ def write_summary_csv(
             f"{c}_q3",
             f"{c}_iqr",
         ]
-        if c == "HD95" and q_vals:
+        # Optional HD95 percentiles (works for HD95_mm too)
+        if c.lower().replace("_mm", "") == "hd95" and q_vals:
             headers += [f"HD95_p{int(q)}" for q in q_vals]
 
     # counts block at the end
@@ -669,6 +671,226 @@ def write_summary_csv(
         w.writeheader()
         for r in out_rows:
             w.writerow({k: r.get(k, "") for k in headers})
+
+
+# # --- stable sort: labels alpha by raw id; regions alpha by name ---
+# def _group_sort_key(item):
+#     (ctype, ident) = item[0]
+#     return (0 if ctype == "label" else 1, str(ident).lower())
+
+
+# # --- group key ---
+# def class_key(r):
+#     ctype = r.get("class_type")
+#     if ctype == "region":
+#         return ("region", str(r.get("class_name", "")))
+#     # labels: use raw class_id string as-is
+#     return ("label", str(r.get("class_id", "")))
+
+
+# def _quantile(vals: List[float], q: float) -> float:
+#     """Linear interpolation quantile in [0,1]. Assumes vals is non-empty."""
+#     s = sorted(vals)
+#     n = len(s)
+#     if n == 1:
+#         return s[0]
+#     # position in [0, n-1]
+#     pos = (n - 1) * q
+#     lo = int(math.floor(pos))
+#     hi = int(math.ceil(pos))
+#     if lo == hi:
+#         return s[lo]
+#     frac = pos - lo
+#     return s[lo] * (1 - frac) + s[hi] * frac
+
+
+# def _mean_ci95(vals: List[float], std_type: str) -> Tuple[float, float, float]:
+#     """
+#     Return (mean, ci_lo, ci_hi) using normal approx (z=1.96).
+#     std_type: 'population' uses population SD, 'sample' uses sample SD.
+#     """
+#     n = len(vals)
+#     if n == 0:
+#         return float("nan"), float("nan"), float("nan")
+#     mean = sum(vals) / n
+#     if n == 1:
+#         return mean, mean, mean
+#     # SD consistent with your _std()
+#     if std_type == "population":
+#         m = mean
+#         var = sum((v - m) ** 2 for v in vals) / n
+#     else:
+#         m = mean
+#         var = sum((v - m) ** 2 for v in vals) / (n - 1)
+#     sd = math.sqrt(var)
+#     z = 1.96
+#     half = z * (sd / math.sqrt(n)) if n > 0 else float("nan")
+#     return mean, mean - half, mean + half
+
+
+# def write_summary_csv(
+#     rows: List[Dict[str, Any]],
+#     metric_cols: List[str],
+#     out_path: Path,
+#     round_ndigits: Optional[int],
+#     std_type: str = "population",
+#     hd95_quantiles: Optional[str] = None,
+# ):
+#     """
+#     Aggregate per (class_type, class_id/name):
+
+#       Macro block (per-case):
+#         - For each score column: mean / median / std
+#         - This includes derived per-case metrics (Recall, Specificity, BalancedAccuracy,
+#           Prevalence, PredPosRate, VolumetricBias) if present in rows.
+
+#       Micro block (from sums):
+#         - micro_dice, micro_jaccard, micro_precision (PPV), micro_npv, micro_recall,
+#           micro_specificity, micro_balanced_accuracy, micro_prevalence, micro_pred_pos_rate,
+#           micro_volumetric_bias
+
+#       Counts block:
+#         - tp_sum, tn_sum, fp_sum, fn_sum, n_pred_sum, n_ref_sum
+#     """
+#     logger.info(f"Writing summary to {out_path}")
+#     logger.info(f"Metric columns: {metric_cols}")
+#     logger.info(f"HD95 quantiles: {hd95_quantiles}")
+#     logger.info(f"Std type: {std_type}")
+#     logger.info(f"Rounding: {round_ndigits}")
+#     logger.info(f"Rows: {len(rows)}")
+
+#     by_group: Dict[Any, List[Dict[str, Any]]] = {}
+#     for r in rows:
+#         by_group.setdefault(class_key(r), []).append(r)
+
+#     # --- split columns ---
+#     score_cols: List[str] = []
+#     count_cols: List[str] = []
+#     skip_cols = {"class_id", "class_name", "class_type"}
+#     metric_cols = list(dict.fromkeys(metric_cols))
+#     for c in metric_cols:
+#         if c in skip_cols:
+#             continue
+#         if c.lower() in COUNT_KEYS:
+#             count_cols.append(c)
+#         elif is_numeric_col(c, rows):
+#             score_cols.append(c)
+
+#     logger.info(f"Score columns: {score_cols}")
+#     logger.info(f"Count columns: {count_cols}")
+#     # --- quantiles for HD95 ---
+#     q_vals: List[float] = []
+#     if hd95_quantiles:
+#         parts = []
+#         for tok in hd95_quantiles.split(","):
+#             tok = tok.strip()
+#             if not tok:
+#                 continue
+#             try:
+#                 q = float(tok)
+#                 if 0 < q < 100:
+#                     parts.append(q)
+#             except Exception:
+#                 pass
+#         q_vals = sorted(set(parts))
+
+#     out_rows: List[Dict[str, Any]] = []
+#     for key, grp in sorted(by_group.items(), key=_group_sort_key):
+#         ctype, ident = key
+#         if ctype == "label":
+#             class_id = ident
+#             class_name = ""
+#         else:
+#             class_id = ""
+#             class_name = ident
+
+#         out: Dict[str, Any] = {
+#             "class_type": ctype,
+#             "class_id": class_id,
+#             "class_name": class_name,
+#         }
+
+#         # ---------- MACRO: per-case stats ----------
+#         for c in score_cols:
+#             vals = [to_float(r.get(c)) for r in grp]
+#             vals = [v for v in vals if v is not None and math.isfinite(v)]
+#             if vals:
+#                 out[f"{c}_mean"] = sum(vals) / len(vals)
+#                 out[f"{c}_median"] = _median(vals)
+#                 out[f"{c}_std"] = _std(vals, std_type)
+#                 # IQR (Q1, Q3, IQR)
+#                 q1 = _quantile(vals, 0.25)
+#                 q3 = _quantile(vals, 0.75)
+#                 out[f"{c}_q1"] = q1
+#                 out[f"{c}_q3"] = q3
+#                 out[f"{c}_iqr"] = q3 - q1
+#                 if c.lower() == "hd95" and q_vals:
+#                     s = sorted(vals)
+#                     for q in q_vals:
+#                         k = int(round((q / 100.0) * (len(s) - 1)))
+#                         out[f"HD95_p{int(q)}"] = s[k]
+#             else:
+#                 # empty: fill blanks to keep headers consistent
+#                 out[f"{c}_mean"] = out[f"{c}_ci95_lo"] = out[f"{c}_ci95_hi"] = ""
+#                 out[f"{c}_median"] = out[f"{c}_std"] = ""
+#                 out[f"{c}_q1"] = out[f"{c}_q3"] = out[f"{c}_iqr"] = ""
+
+#         # ---------- COUNT SUMS ----------
+#         sums = {}
+#         for c in ("tp", "tn", "fp", "fn", "n_pred", "n_ref"):
+#             vals = [to_float(r.get(c)) for r in grp]
+#             vals = [int(v) for v in vals if v is not None]
+#             sums[c] = sum(vals) if vals else 0
+#             out[f"{c}_sum"] = sums[c] if vals else ""
+
+#         _round_inplace(out, round_ndigits)
+#         out_rows.append(out)
+
+#     # ---------- HEADER GROUPING ----------
+#     # identifiers
+#     headers = ["class_type", "class_id", "class_name"]
+
+#     # Order macro metrics (only those present)
+#     macro_order = [
+#         "Dice",
+#         "Jaccard",
+#         "PPV",
+#         "NPV",
+#         "Recall",
+#         "Specificity",
+#         "BalancedAccuracy",
+#         "Prevalence",
+#         "PredPosRate",
+#         "VolumetricBias",
+#         "HD95_mm",
+#     ]
+#     macro_present = [m for m in macro_order if m in score_cols]
+#     # group: each metric -> mean/median/std
+#     for c in macro_present:
+#         headers += [
+#             f"{c}_mean",
+#             f"{c}_ci95_lo",
+#             f"{c}_ci95_hi",
+#             f"{c}_median",
+#             f"{c}_std",
+#             f"{c}_q1",
+#             f"{c}_q3",
+#             f"{c}_iqr",
+#         ]
+#         if c == "HD95" and q_vals:
+#             headers += [f"HD95_p{int(q)}" for q in q_vals]
+
+#     # counts block at the end
+#     for c in ("tp", "tn", "fp", "fn", "n_pred", "n_ref"):
+#         col = f"{c}_sum"
+#         if any(col in r for r in out_rows):
+#             headers.append(col)
+
+#     with open(out_path, "w", newline="") as f:
+#         w = csv.DictWriter(f, fieldnames=headers)
+#         w.writeheader()
+#         for r in out_rows:
+#             w.writerow({k: r.get(k, "") for k in headers})
 
 
 def _group_key(r):
