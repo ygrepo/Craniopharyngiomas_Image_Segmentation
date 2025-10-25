@@ -341,6 +341,7 @@ def write_cases_csv(
     header_keys = set()
     for r in rows:
         header_keys.update(r.keys())
+    logger.info(f"Header keys: {header_keys}")
 
     fixed = ["case_id", "class_type", "class_id", "class_name", "pred_path", "ref_path"]
     preferred = [
