@@ -341,6 +341,19 @@ def load_sitk(path: Path) -> sitk.Image:
     return sitk.ReadImage(str(path))
 
 
+def load_mask_bool(path: Path) -> tuple[np.ndarray, sitk.Image]:
+    """Read image/seg (NRRD/nii), return boolean mask array (z,y,x) and the sitk image."""
+    img = sitk.ReadImage(str(path))
+    arr = sitk.GetArrayFromImage(img)  # shape: (z,y,x[,c])
+    # Collapse components if this is a Slicer .seg.nrrd with one slice per segment
+    if arr.ndim == 4:
+        arr = arr > 0
+        arr = arr.any(axis=-1)  # union of all segments
+    else:
+        arr = arr > 0
+    return arr, img
+
+
 def save_img_like_reference(
     ref_sitk: sitk.Image,
     mov_path: Path,

@@ -7,10 +7,16 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 import SimpleITK as sitk
+import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
-from src.util import get_logger, setup_logging, hd95_mm_from_binary  # noqa: E402
+from src.util import (
+    get_logger,
+    setup_logging,
+    hd95_mm_from_binary,
+    load_mask_bool,
+)  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -36,11 +42,27 @@ def main():
     path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/75062101.nii.gz"
     gt = sitk.ReadImage(path)
     logger.info(hd95_mm_from_binary(pred, gt, one_empty_policy="inf"))
-    import nibabel as nib
-    import numpy as np
 
-    path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/data/CP/75062101/75062101_Tumor.seg.nii.gz"
-    mask = nib.load(path).get_fdata()
+    path = Path(
+        "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/data/CP/75062101/75062101_Tumor.seg.nrrd"
+    )
+    mask_bool, img = load_mask_bool(path)
+
+    voxel_count = int(mask_bool.sum())
+    spacing = img.GetSpacing()  # (sx, sy, sz) in mm
+    size = img.GetSize()  # (nx, ny, nz)
+    origin = img.GetOrigin()
+    direction = img.GetDirection()
+
+    vol_mm3 = voxel_count * float(spacing[0] * spacing[1] * spacing[2])
+    vol_ml = vol_mm3 / 1000.0
+
+    raw_vals = np.unique(sitk.GetArrayFromImage(img))
+
+    logger.info(f"Mask voxel count: {voxel_count}")
+    logger.info(f"Unique raw values in file: {raw_vals[:10]}")
+    logger.info(f"Size: {size}, Spacing: {spacing}, Origin: {origin}")
+    logger.info(f"Physical volume: {vol_ml:.3f} mL")
     logger.info("Mask voxel count:", np.count_nonzero(mask))
 
 
