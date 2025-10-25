@@ -27,9 +27,9 @@ import re
 import blosc2
 import scipy.ndimage as ndi
 import math
-import warnings
 
 
+# ---- nnU-Net ----
 from nnunetv2.utilities.plans_handling.plans_handler import PlansManager
 
 from nnunetv2.utilities.label_handling.label_handling import LabelManager
@@ -1064,3 +1064,96 @@ def resolve_class_idx(meta, class_name, fallback_idx):
                 if key in n:
                     return i
         return min(fallback_idx, len(regions) - 1)
+
+
+def hd95_mm_from_binary_robust(
+    pred_img: sitk.Image,
+    ref_img: sitk.Image,
+    *,
+    one_empty_policy: str = "inf",  # "inf" | "max" | "zero" | "nan"
+    binarize_threshold: float = 0.5,
+) -> float:
+    """
+    Symmetric 95% Hausdorff distance (mm) between two masks with identical geometry.
+    Robust to label values, empty surfaces, and non-finite intermediates.
+    """
+
+    # --- geometry guard
+    def _geom(img):
+        return (img.GetSize(), img.GetSpacing(), img.GetOrigin(), img.GetDirection())
+
+    if _geom(pred_img) != _geom(ref_img):
+        raise ValueError(
+            "pred_img and ref_img must have identical size/spacing/origin/direction"
+        )
+
+    # --- binarize defensively (handles labelmaps or probabilities)
+    pred_bin = sitk.Cast(pred_img > binarize_threshold, sitk.sitkUInt8)
+    ref_bin = sitk.Cast(ref_img > binarize_threshold, sitk.sitkUInt8)
+
+    # --- quick foreground check via voxel counts
+    sf = sitk.StatisticsImageFilter()
+    sf.Execute(pred_bin)
+    pred_sum = int(sf.GetSum())
+    sf.Execute(ref_bin)
+    ref_sum = int(sf.GetSum())
+
+    # Both empty → distance 0
+    if pred_sum == 0 and ref_sum == 0:
+        return 0.0
+
+    # Build surfaces WITHOUT assuming a specific foreground value
+    # LabelContour treats any nonzero label as foreground.
+    surf_pred = sitk.LabelContour(pred_bin, fullyConnected=True)
+    surf_ref = sitk.LabelContour(ref_bin, fullyConnected=True)
+
+    # Count surface voxels (array sum is fine for UInt8)
+    sp = int(sitk.GetArrayViewFromImage(surf_pred).sum())
+    sr = int(sitk.GetArrayViewFromImage(surf_ref).sum())
+    logger.info(f"Surface voxels: pred={sp} ref={sr}")
+
+    # If one mask is empty (or binarization wiped it), decide policy here.
+    if (pred_sum == 0) ^ (ref_sum == 0):
+        if one_empty_policy == "inf":
+            return float("inf")
+        if one_empty_policy == "max":
+            spacing = np.array(pred_bin.GetSpacing(), dtype=float)
+            size = np.array(pred_bin.GetSize(), dtype=float)
+            return float(
+                np.linalg.norm(spacing * np.maximum(size - 1, 0))
+            )  # image diagonal (mm)
+        if one_empty_policy == "zero":
+            return 0.0
+        return float("nan")
+
+    # Distance maps (mm)
+    dm_ref = sitk.Abs(
+        sitk.SignedMaurerDistanceMap(
+            ref_bin, squaredDistance=False, useImageSpacing=True
+        )
+    )
+    dm_pred = sitk.Abs(
+        sitk.SignedMaurerDistanceMap(
+            pred_bin, squaredDistance=False, useImageSpacing=True
+        )
+    )
+
+    logger.info(f"Distance map ref={dm_ref}, pred={dm_pred}")
+    # Sample distances from each surface to the opposite mask
+    d_pred_to_ref = sitk.GetArrayFromImage(sitk.Mask(dm_ref, surf_pred))
+    d_ref_to_pred = sitk.GetArrayFromImage(sitk.Mask(dm_pred, surf_ref))
+
+    # Keep finite distances; keep zeros (touching/identical surfaces)
+    a = d_pred_to_ref[np.isfinite(d_pred_to_ref) & (d_pred_to_ref >= 0)]
+    b = d_ref_to_pred[np.isfinite(d_ref_to_pred) & (d_ref_to_pred >= 0)]
+
+    # If both sides have no samples (identical solid object with no surface? extremely rare), say 0
+    if a.size == 0 and b.size == 0:
+        return 0.0
+
+    all_d = a if b.size == 0 else b if a.size == 0 else np.concatenate([a, b])
+
+    if all_d.size == 0:
+        return 0.0  # last-resort guard; never NaN
+
+    return float(np.nanpercentile(all_d.astype(np.float64), 95))
