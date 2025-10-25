@@ -76,6 +76,7 @@ DROP_KEYS |= (
     | ALIASES["fn"]
     | ALIASES["n_pred"]
     | ALIASES["n_ref"]
+    | ALIASES["hd95"]  # drop 'HD95' (and its aliases) from source rows
 )
 
 IDENTIFIER_KEYS = {
@@ -211,7 +212,16 @@ def _norm_case_metrics(md: Dict[str, Any]) -> Dict[str, Optional[float]]:
         if k in DROP_KEYS:
             continue
         kl = str(k).lower()
-        if kl in {"iou", "io u", "iou_score", "iou_mean"}:
+        if kl in {
+            "iou",
+            "io u",
+            "iou_score",
+            "iou_mean",
+            "hd95",
+            "hausdorff95",
+            "hausdorff_95",
+            "hausdorff 95",
+        }:
             continue
         if k not in out:
             out[k] = v
@@ -461,7 +471,7 @@ def write_cases_csv(
     out_path: Path,
     round_ndigits: Optional[int],
     rename_hd95_mm: bool,
-) -> Tuple[List[str], List[str]]:
+) -> List[str]:
     """Write per-case/per-class-or-region CSV. Returns the list of metric-like columns included."""
     header_keys = set()
     for r in rows:
@@ -481,7 +491,7 @@ def write_cases_csv(
         "Prevalence",
         "PredPosRate",
         "VolumetricBias",
-        "HD95",  # may be renamed to HD95_mm below
+        "HD95_mm",
         # counts
         "tp",
         "tn",
@@ -506,9 +516,13 @@ def write_cases_csv(
     # ]
     others = sorted([k for k in header_keys if k not in (fixed + preferred)])
     header = fixed + [k for k in preferred if k in header_keys] + others
-
     if rename_hd95_mm and "HD95" in header:
         header = [("HD95_mm" if c == "HD95" else c) for c in header]
+
+    def _uniq(seq):
+        return list(dict.fromkeys(seq))
+
+    header = _uniq(header)
 
     with open(out_path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=header)
@@ -521,8 +535,9 @@ def write_cases_csv(
             logger.debug(f"Row: {row}")
             w.writerow({k: row.get(k, "") for k in header})
     logger.debug(f"Header: {header}")
+    metric_cols = _uniq([k for k in header if k not in fixed])
     # metric-like columns (everything except fixed identifiers)
-    return [k for k in header if k not in fixed], rows
+    return metric_cols
 
 
 def write_summary_csv(
@@ -572,6 +587,7 @@ def write_summary_csv(
     score_cols: List[str] = []
     count_cols: List[str] = []
     skip_cols = {"class_id", "class_name", "class_type"}
+    metric_cols = list(dict.fromkeys(metric_cols))
     for c in metric_cols:
         if c in skip_cols:
             continue
@@ -899,7 +915,7 @@ def main():
 
     base = in_path.with_suffix("")
     out_cases = args.out_cases_fn or Path(str(base) + "_cases.csv")
-    metric_cols, rows = write_cases_csv(
+    metric_cols = write_cases_csv(
         rows, out_cases, round_ndigits=args.round, rename_hd95_mm=args.rename_hd95_mm
     )
 
