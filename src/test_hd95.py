@@ -26,5 +26,6 @@ def main():
     # Expect ~0.0 (if they fully overlap) or a small positive value
     # If you get ∞, something is wrong.
 
-__name__ == "__main__":
+
+if __name__ == "__main__":
     main()
