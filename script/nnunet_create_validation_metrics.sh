@@ -3,12 +3,12 @@
 set -euo pipefail
 
 # --------- Config (edit if needed) ----------
-DATASET_ID=501
-DATASET_NAME=BraTS2017_4ch
-FOLD=0
-CFG=3d_fullres
-TR=nnUNetTrainer
-PLANS_ID=nnUNetPlans
+# DATASET_ID=501
+# DATASET_NAME=BraTS2017_4ch
+# FOLD=0
+# CFG=3d_fullres
+# TR=nnUNetTrainer
+# PLANS_ID=nnUNetPlans
 
 # DATASET_ID=502
 # DATASET_NAME=BraTS2017_4ch
@@ -17,6 +17,12 @@ PLANS_ID=nnUNetPlans
 # TR=nnUNetTrainer
 # PLANS_ID=nnUNetResEncUNetMPlans
 
+DATASET_ID=503
+DATASET_NAME=CP
+FOLD=0
+CFG=3d_fullres
+TR=EmaDiceEarlyStopTrainer
+PLANS_ID=nnUNetResEncUNetMPlans
 
 # -------------------------------------------
 
