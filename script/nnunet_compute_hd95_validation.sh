@@ -1,5 +1,13 @@
 #!/bin/bash
 # Usage: ./nnunet_compute_hd95_validation.sh [OPTIONAL_PREP_DIR]
+#SBATCH --job-name=unet_create_validation
+#SBATCH --partition=cpu
+#SBATCH --cpus-per-task=6
+#SBATCH --mem=48G
+#SBATCH --time=04:00:00
+#SBATCH --output=logs/nnunet_compute_hd95_validation%j.out
+#SBATCH --error=logs/nnunet_compute_hd95_validation%j.err
+
 set -euo pipefail
 
 # --------- Config (edit if needed) ----------

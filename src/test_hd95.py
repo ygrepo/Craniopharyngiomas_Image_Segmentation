@@ -31,6 +31,11 @@ def main():
     path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/52435303.nii.gz"
     gt = sitk.ReadImage(path)
     logger.info(hd95_mm_from_binary(pred, gt, one_empty_policy="inf"))
+    path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset503_CP/EmaDiceEarlyStopTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/predictions/validation/75062101.nii.gz"
+    pred = sitk.ReadImage(path)
+    path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/75062101.nii.gz"
+    gt = sitk.ReadImage(path)
+    logger.info(hd95_mm_from_binary(pred, gt, one_empty_policy="inf"))
 
 
 if __name__ == "__main__":
