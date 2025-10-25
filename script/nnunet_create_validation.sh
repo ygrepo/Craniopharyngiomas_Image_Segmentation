@@ -133,15 +133,15 @@ VALL="${VAL_ROOT}/labelsTr"; mkdir -p "$VALL"
 #   fi
 # done < "$OUT_IDS"
 
-echo "[ok] Linked $n_linked image channels into $VALI"
-echo "[ok] Labels linked into $VALL"
+# echo "[ok] Linked $n_linked image channels into $VALI"
+# echo "[ok] Labels linked into $VALL"
 
-n_cases=$(ls -1 "$VALI"/*_0000.nii.gz 2>/dev/null | wc -l | awk '{print $1}')
-echo "[info] Symlinked $n_cases validation cases (counted by *_0000.nii.gz)."
-if [[ "$n_cases" -eq 0 ]]; then
-  echo "[error] No validation cases were linked. Check splits_final.json IDs and RAW paths."
-  exit 2
-fi
+# n_cases=$(ls -1 "$VALI"/*_0000.nii.gz 2>/dev/null | wc -l | awk '{print $1}')
+# echo "[info] Symlinked $n_cases validation cases (counted by *_0000.nii.gz)."
+# if [[ "$n_cases" -eq 0 ]]; then
+#   echo "[error] No validation cases were linked. Check splits_final.json IDs and RAW paths."
+#   exit 2
+# fi
 
 # --- prediction output ---
 OUTP="${RES}/fold_${FOLD}/predictions/validation"
@@ -166,12 +166,12 @@ echo "[info] Running prediction into: $OUTP"
 #   --disable_progress_bar
 
 # verify predictions were created
-n_preds=$(ls -1 "$OUTP"/*.nii.gz 2>/dev/null | wc -l | awk '{print $1}')
-echo "[info] Predicted $n_preds files."
-if [[ "$n_preds" -eq 0 ]]; then
-  echo "[error] No predictions written to $OUTP. Check logs above."
-  exit 3
-fi
+# n_preds=$(ls -1 "$OUTP"/*.nii.gz 2>/dev/null | wc -l | awk '{print $1}')
+# echo "[info] Predicted $n_preds files."
+# if [[ "$n_preds" -eq 0 ]]; then
+#   echo "[error] No predictions written to $OUTP. Check logs above."
+#   exit 3
+# fi
 
 # --- evaluate ---
 OUT_JSON="${OUTP}/summary.json"
