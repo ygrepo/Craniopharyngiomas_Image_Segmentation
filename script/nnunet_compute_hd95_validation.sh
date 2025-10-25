@@ -1,14 +1,5 @@
 #!/bin/bash
-# Usage: ./unet_create_validation.sh [OPTIONAL_PREP_DIR]
-#SBATCH --job-name=unet_create_validation
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=6
-#SBATCH --mem=48G
-#SBATCH --time=04:00:00
-#SBATCH --output=logs/unet_create_validation_%j.out
-#SBATCH --error=logs/unet_create_validation_%j.err
-
+# Usage: ./nnunet_compute_hd95_validation.sh [OPTIONAL_PREP_DIR]
 set -euo pipefail
 
 # --------- Config (edit if needed) ----------
