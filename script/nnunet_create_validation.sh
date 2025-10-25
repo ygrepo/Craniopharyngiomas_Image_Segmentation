@@ -84,54 +84,54 @@ echo "[info] PL  =$PL"
 
 # --- extract fold-${FOLD} validation IDs (fix: don't rely on shell var expansion inside heredoc) ---
 OUT_IDS="val_ids_${DATASET_ID}_fold${FOLD}.txt"
-"${PYTHON}" - "$PREP" "$OUT_IDS" <<'PY'
-import json, os, sys
+# "${PYTHON}" - "$PREP" "$OUT_IDS" <<'PY'
+# import json, os, sys
 
-prep = sys.argv[1]
-out  = sys.argv[2]
-spl = os.path.join(prep, "splits_final.json")
-if not os.path.isfile(spl):
-    raise SystemExit(f"ERROR: splits_final.json not found: {spl}")
+# prep = sys.argv[1]
+# out  = sys.argv[2]
+# spl = os.path.join(prep, "splits_final.json")
+# if not os.path.isfile(spl):
+#     raise SystemExit(f"ERROR: splits_final.json not found: {spl}")
 
-with open(spl, "r") as f:
-    splits = json.load(f)
+# with open(spl, "r") as f:
+#     splits = json.load(f)
 
-if not isinstance(splits, list) or len(splits) == 0 or "val" not in splits[0]:
-    raise SystemExit("ERROR: splits_final.json has unexpected structure")
+# if not isinstance(splits, list) or len(splits) == 0 or "val" not in splits[0]:
+#     raise SystemExit("ERROR: splits_final.json has unexpected structure")
 
-val_ids = sorted(set(splits[0]["val"]))
-with open(out, "w") as g:
-    g.write("\n".join(val_ids))
-print(f"[ok] Wrote {len(val_ids)} IDs to {out}")
-PY
+# val_ids = sorted(set(splits[0]["val"]))
+# with open(out, "w") as g:
+#     g.write("\n".join(val_ids))
+# print(f"[ok] Wrote {len(val_ids)} IDs to {out}")
+# PY
 
 # --- build subset (symlinks) ---
 VAL_ROOT="$PWD/tmp_${DATASET_ID}_fold${FOLD}_val"
 VALI="${VAL_ROOT}/imagesTr"; mkdir -p "$VALI"
 VALL="${VAL_ROOT}/labelsTr"; mkdir -p "$VALL"
 
-n_linked=0
-while IFS= read -r ID && [[ -n "${ID}" ]]; do
-  # link channels (BraTS2017 = 4ch)
-  for ch in 0000 0001 0002 0003; do
-    src="${RAW}/imagesTr/${ID}_${ch}.nii.gz"
-    dst="${VALI}/${ID}_${ch}.nii.gz"
-    if [[ -f "$src" ]]; then
-      ln -sf "$src" "$dst"
-      ((n_linked++)) || true
-    else
-      echo "[warn] missing image channel: $src"
-    fi
-  done
-  # link label
-  lab_src="${RAW}/labelsTr/${ID}.nii.gz"
-  lab_dst="${VALL}/${ID}.nii.gz"
-  if [[ -f "$lab_src" ]]; then
-    ln -sf "$lab_src" "$lab_dst"
-  else
-    echo "[warn] missing label: $lab_src"
-  fi
-done < "$OUT_IDS"
+# n_linked=0
+# while IFS= read -r ID && [[ -n "${ID}" ]]; do
+#   # link channels (BraTS2017 = 4ch)
+#   for ch in 0000 0001 0002 0003; do
+#     src="${RAW}/imagesTr/${ID}_${ch}.nii.gz"
+#     dst="${VALI}/${ID}_${ch}.nii.gz"
+#     if [[ -f "$src" ]]; then
+#       ln -sf "$src" "$dst"
+#       ((n_linked++)) || true
+#     else
+#       echo "[warn] missing image channel: $src"
+#     fi
+#   done
+#   # link label
+#   lab_src="${RAW}/labelsTr/${ID}.nii.gz"
+#   lab_dst="${VALL}/${ID}.nii.gz"
+#   if [[ -f "$lab_src" ]]; then
+#     ln -sf "$lab_src" "$lab_dst"
+#   else
+#     echo "[warn] missing label: $lab_src"
+#   fi
+# done < "$OUT_IDS"
 
 echo "[ok] Linked $n_linked image channels into $VALI"
 echo "[ok] Labels linked into $VALL"
@@ -151,19 +151,19 @@ export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
 
 echo "[info] Running prediction into: $OUTP"
 # IMPORTANT: pass checkpoint NAME only (nnUNet constructs the path)
-nnUNetv2_predict \
-  -i "$VALI" \
-  -o "$OUTP" \
-  -d "$DATASET_ID" \
-  -p "$PLANS_ID" \
-  -tr "$TR" \
-  -c "$CFG" \
-  -f "$FOLD" \
-  -chk checkpoint_best.pth \
-  --disable_tta \
-  -device cuda \
-  --save_probabilities \
-  --disable_progress_bar
+# nnUNetv2_predict \
+#   -i "$VALI" \
+#   -o "$OUTP" \
+#   -d "$DATASET_ID" \
+#   -p "$PLANS_ID" \
+#   -tr "$TR" \
+#   -c "$CFG" \
+#   -f "$FOLD" \
+#   -chk checkpoint_best.pth \
+#   --disable_tta \
+#   -device cuda \
+#   --save_probabilities \
+#   --disable_progress_bar
 
 # verify predictions were created
 n_preds=$(ls -1 "$OUTP"/*.nii.gz 2>/dev/null | wc -l | awk '{print $1}')
@@ -176,12 +176,12 @@ fi
 # --- evaluate ---
 OUT_JSON="${OUTP}/summary.json"
 echo "[info] Evaluating to: $OUT_JSON"
-nnUNetv2_evaluate_folder \
-  -djfile "$DJ" \
-  -pfile  "$PL" \
-  -o      "$OUT_JSON" \
-  "$VALL" \
-  "$OUTP"
+# nnUNetv2_evaluate_folder \
+#   -djfile "$DJ" \
+#   -pfile  "$PL" \
+#   -o      "$OUT_JSON" \
+#   "$VALL" \
+#   "$OUTP"
 echo "[ok] Wrote metrics to: $OUT_JSON"
 
 # --- add HD95 per class to the JSON (writes summary_with_hd95.json) ---
@@ -192,12 +192,14 @@ echo "[info] Adding HD95 to: ${OUT_JSON}"
 
 # "${PYTHON}" "${ADD_HD95_PY}" \
 #   -i "$OUT_JSON" \
-#   -o "$OUT_JSON_HD95" 
+#   -o "$OUT_JSON_HD95" \
+#   --dataset_json "${DJ}"
+
 
 "${PYTHON}" "${ADD_HD95_PY}" \
   -i "$OUT_JSON" \
   -o "$OUT_JSON_HD95" \
-  --dataset_json "${DJ}"
-
+  --dataset_json "${DJ}" \
+  --classes 1
 
 echo "[ok] Wrote: ${OUT_JSON_HD95}"
