@@ -75,7 +75,7 @@ LOG_DIR="logs"
 LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 ts=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="${LOG_DIR}/${ts}_{DATASET_ID}_compute_validation_metrics.log"
+LOG_FILE="${LOG_DIR}/${ts}_${DATASET_ID}_compute_validation_metrics.log"
 
 "${PYTHON}" "${MAIN}" \
   --in_fn "${IN_JSON_HD95}" \

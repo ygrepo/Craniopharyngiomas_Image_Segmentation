@@ -22,6 +22,6 @@ def main():
     pred = sitk.ReadImage(path)
     path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/70900351.nii.gz"
     gt = sitk.ReadImage(path)
-    logger.info(hd95_mm_from_binary_robust(pred, gt, one_empty_policy="inf"))
+    print(hd95_mm_from_binary_robust(pred, gt, one_empty_policy="inf"))
     # Expect ~0.0 (if they fully overlap) or a small positive value
     # If you get ∞, something is wrong.
