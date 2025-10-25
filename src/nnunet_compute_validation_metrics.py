@@ -108,6 +108,8 @@ def _norm_case_metrics(md: Dict[str, Any]) -> Dict[str, Optional[float]]:
     Derive Jaccard (IoU) from counts or Dice; derive PPV/NPV from counts if needed.
     Non-canonical keys are preserved in the row.
     """
+
+    logger.debug(f"Normalizing metrics: {md}")
     out: Dict[str, Optional[float]] = {}
 
     # canonical scores
@@ -256,6 +258,7 @@ def parse_rows_labels(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
         for cls_key, mdict in metrics_dict.items():
             if cls_key == "regions" or not isinstance(mdict, dict):
+                logger.debug(f"Skipping non-dict entry for key: {cls_key}")
                 continue
             row = {
                 "case_id": case_id,
