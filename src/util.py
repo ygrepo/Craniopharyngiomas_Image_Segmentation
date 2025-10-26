@@ -1142,8 +1142,10 @@ def hd95_mm_from_binary(
     ref_sum = int(sf.GetSum())
 
     if pred_sum == 0 and ref_sum == 0:
+        logger.info("Both masks are empty, returning 0.0")
         return 0.0
     if (pred_sum == 0) ^ (ref_sum == 0):
+        logger.info(f"pred_sum={pred_sum} ref_sum={ref_sum}")
         if one_empty_policy == "inf":
             return float("inf")
         if one_empty_policy == "max":
