@@ -187,93 +187,209 @@ def _visualize_single_slice(
 def _visualize_multiple_slices(
     orig_np: np.ndarray,
     dream_np: np.ndarray,
-    slice_indices: List[int],
+    slice_indices: list[int],
     save_path: Optional[Path],
     max_cols: int = 4,
+    show_edge_colorbar: bool = False,
+    diff_clip: float = 2.5,  # clip diff at ±(this * std) for balanced colors
 ):
-    """Visualize multiple slices in a grid layout."""
+    """Visualize multiple slices in a grid: original | EDGES(overlay) | difference.
 
-    # Filter valid slice indices
+    - Middle row shows edge magnitude overlaid on the original slice.
+    - Difference uses jet colormap and symmetric limits.
+    """
+
+    # --- helpers ---
+    def edge_mag(img2d: np.ndarray) -> np.ndarray:
+        # smooth a bit to reduce noise before gradients
+        try:
+            from scipy.ndimage import gaussian_filter, sobel
+
+            x = gaussian_filter(img2d.astype(float), sigma=1.0)
+            gx = sobel(x, axis=1)  # horizontal
+            gy = sobel(x, axis=0)  # vertical
+            e = np.hypot(gx, gy)
+        except Exception:
+            # fallback: simple gradients (no scipy)
+            x = img2d.astype(float)
+            gy, gx = np.gradient(x)
+            e = np.hypot(gx, gy)
+        # normalize to 0..1 for nice overlay
+        m = np.percentile(e, 99.5)
+        return np.clip(e / (m + 1e-8), 0, 1)
+
+    # --- validate slices ---
     max_slice = orig_np.shape[0] - 1
     valid_slices = [s for s in slice_indices if 0 <= s <= max_slice]
-
     if not valid_slices:
-        print(
+        logger.info(
             f"No valid slice indices. Volume has {orig_np.shape[0]} slices (0-{max_slice})"
         )
         return
-
     if len(valid_slices) != len(slice_indices):
         invalid = [s for s in slice_indices if s not in valid_slices]
-        print(f"Warning: Invalid slice indices {invalid} ignored. Using {valid_slices}")
+        logger.info(
+            f"Warning: Invalid slice indices {invalid} ignored. Using {valid_slices}"
+        )
 
     num_slices = len(valid_slices)
 
-    # Calculate grid layout
+    # --- grid: 3 rows per slice (orig, edges, diff) ---
     cols = min(max_cols, num_slices)
     rows = (num_slices + cols - 1) // cols
+    fig, axes = plt.subplots(rows * 3, cols, figsize=(cols * 5, rows * 12))
 
-    # Create figure with 3 rows per slice (original, dream, difference)
-    fig_height = rows * 4 * 3  # 3 sub-rows per slice row
-    fig_width = cols * 5
-    _, axes = plt.subplots(rows * 3, cols, figsize=(fig_width, fig_height))
-
-    # Handle single row/column cases
-    if rows * 3 == 1:
-        axes = axes.reshape(1, -1)
+    # make axes 2D for easier indexing
+    if rows * 3 == 1 and cols == 1:
+        axes = np.array([[axes]])
+    elif rows * 3 == 1:
+        axes = axes[np.newaxis, :]
     elif cols == 1:
-        axes = axes.reshape(-1, 1)
+        axes = axes[:, np.newaxis]
 
-    for idx, slice_idx in enumerate(valid_slices):
-        row = idx // cols
-        col = idx % cols
+    for i, sidx in enumerate(valid_slices):
+        r = i // cols
+        c = i % cols
 
-        # Get slices
-        orig_slice = orig_np[slice_idx]
-        dream_slice = dream_np[slice_idx]
-        diff_slice = dream_slice - orig_slice
+        orig = orig_np[sidx]
+        dream = dream_np[sidx]
+        diff = dream - orig
 
-        # Calculate subplot positions
-        orig_row = row * 3
-        dream_row = row * 3 + 1
-        diff_row = row * 3 + 2
+        # symmetric limits for diff using robust std
+        dstd = float(np.std(diff))
+        lim = diff_clip * dstd if dstd > 0 else np.max(np.abs(diff)) + 1e-8
+        vmin, vmax = -lim, +lim
 
-        # Original
-        ax_orig = axes[orig_row, col] if cols > 1 else axes[orig_row]
-        ax_orig.imshow(orig_slice, cmap="gray")
-        ax_orig.set_title(f"Original (Slice {slice_idx})")
-        ax_orig.axis("off")
+        # rows
+        r0, r1, r2 = r * 3, r * 3 + 1, r * 3 + 2
 
-        # Dream
-        ax_dream = axes[dream_row, col] if cols > 1 else axes[dream_row]
-        ax_dream.imshow(dream_slice, cmap="gray")
-        ax_dream.set_title(f"Deep Dream (Slice {slice_idx})")
-        ax_dream.axis("off")
-
-        # Difference
-        ax_diff = axes[diff_row, col] if cols > 1 else axes[diff_row]
-        im = ax_diff.imshow(diff_slice, cmap="RdBu_r")
-        ax_diff.set_title(f"Difference (Slice {slice_idx})")
-        ax_diff.axis("off")
-
-        # Add colorbar for difference
-        plt.colorbar(im, ax=ax_diff, fraction=0.046, pad=0.04)
-
-    # Hide empty subplots
-    total_subplots = rows * cols * 3
-    used_subplots = len(valid_slices) * 3
-    for idx in range(used_subplots, total_subplots):
-        subplot_row = (idx // 3) // cols * 3 + (idx % 3)
-        subplot_col = (idx // 3) % cols
-        ax = axes[subplot_row, subplot_col] if cols > 1 else axes[subplot_row]
+        # --- Original ---
+        ax = axes[r0, c]
+        ax.imshow(orig, cmap="gray")
+        ax.set_title(f"Original (Slice {sidx})")
         ax.axis("off")
 
-    plt.tight_layout()
+        # --- EDGES overlaid on original ---
+        ax = axes[r1, c]
+        ax.imshow(orig, cmap="gray")
+        e = edge_mag(orig)
+        im_edges = ax.imshow(e, cmap="jet", alpha=0.65)  # edge heat overlaid
+        ax.set_title(f"Edges (Slice {sidx})")
+        ax.axis("off")
+        if show_edge_colorbar:
+            plt.colorbar(im_edges, ax=ax, fraction=0.046, pad=0.04)
 
+        # --- Difference (dream - orig) ---
+        ax = axes[r2, c]
+        im = ax.imshow(diff, cmap="jet", vmin=vmin, vmax=vmax)
+        ax.set_title(f"Difference (Slice {sidx})")
+        ax.axis("off")
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    # hide any unused subplots
+    total_used = num_slices * 3
+    total_slots = rows * cols * 3
+    for flat_idx in range(total_used, total_slots):
+        rr = flat_idx // (cols)
+        cc = flat_idx % (cols)
+        axes[rr, cc].axis("off")
+
+    plt.tight_layout()
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
-
     plt.show()
+
+
+# def _visualize_multiple_slices(
+#     orig_np: np.ndarray,
+#     dream_np: np.ndarray,
+#     slice_indices: List[int],
+#     save_path: Optional[Path],
+#     max_cols: int = 4,
+# ):
+#     """Visualize multiple slices in a grid layout."""
+
+#     # Filter valid slice indices
+#     max_slice = orig_np.shape[0] - 1
+#     valid_slices = [s for s in slice_indices if 0 <= s <= max_slice]
+
+#     if not valid_slices:
+#         logger.info(
+#             f"No valid slice indices. Volume has {orig_np.shape[0]} slices (0-{max_slice})"
+#         )
+#         return
+
+#     if len(valid_slices) != len(slice_indices):
+#         invalid = [s for s in slice_indices if s not in valid_slices]
+#         logger.info(f"Warning: Invalid slice indices {invalid} ignored. Using {valid_slices}")
+
+#     num_slices = len(valid_slices)
+
+#     # Calculate grid layout
+#     cols = min(max_cols, num_slices)
+#     rows = (num_slices + cols - 1) // cols
+
+#     # Create figure with 3 rows per slice (original, dream, difference)
+#     fig_height = rows * 4 * 3  # 3 sub-rows per slice row
+#     fig_width = cols * 5
+#     _, axes = plt.subplots(rows * 3, cols, figsize=(fig_width, fig_height))
+
+#     # Handle single row/column cases
+#     if rows * 3 == 1:
+#         axes = axes.reshape(1, -1)
+#     elif cols == 1:
+#         axes = axes.reshape(-1, 1)
+
+#     for idx, slice_idx in enumerate(valid_slices):
+#         row = idx // cols
+#         col = idx % cols
+
+#         # Get slices
+#         orig_slice = orig_np[slice_idx]
+#         dream_slice = dream_np[slice_idx]
+#         diff_slice = dream_slice - orig_slice
+
+#         # Calculate subplot positions
+#         orig_row = row * 3
+#         dream_row = row * 3 + 1
+#         diff_row = row * 3 + 2
+
+#         # Original
+#         ax_orig = axes[orig_row, col] if cols > 1 else axes[orig_row]
+#         ax_orig.imshow(orig_slice, cmap="gist_gray")
+#         ax_orig.set_title(f"Original (Slice {slice_idx})")
+#         ax_orig.axis("off")
+
+#         # Dream
+#         ax_dream = axes[dream_row, col] if cols > 1 else axes[dream_row]
+#         ax_dream.imshow(dream_slice, cmap="gray")
+#         ax_dream.set_title(f"Deep Dream (Slice {slice_idx})")
+#         ax_dream.axis("off")
+
+#         # Difference
+#         ax_diff = axes[diff_row, col] if cols > 1 else axes[diff_row]
+#         im = ax_diff.imshow(diff_slice, cmap="Jet")
+#         ax_diff.set_title(f"Difference (Slice {slice_idx})")
+#         ax_diff.axis("off")
+
+#         # Add colorbar for difference
+#         plt.colorbar(im, ax=ax_diff, fraction=0.046, pad=0.04)
+
+#     # Hide empty subplots
+#     total_subplots = rows * cols * 3
+#     used_subplots = len(valid_slices) * 3
+#     for idx in range(used_subplots, total_subplots):
+#         subplot_row = (idx // 3) // cols * 3 + (idx % 3)
+#         subplot_col = (idx // 3) % cols
+#         ax = axes[subplot_row, subplot_col] if cols > 1 else axes[subplot_row]
+#         ax.axis("off")
+
+#     plt.tight_layout()
+
+#     if save_path:
+#         plt.savefig(save_path, dpi=150, bbox_inches="tight")
+
+#     plt.show()
 
 
 def _next_multiple(n: int, m: int) -> int:

@@ -52,7 +52,6 @@ def main():
     spacing = img.GetSpacing()  # (sx, sy, sz) in mm
     size = img.GetSize()  # (nx, ny, nz)
     origin = img.GetOrigin()
-    direction = img.GetDirection()
 
     vol_mm3 = voxel_count * float(spacing[0] * spacing[1] * spacing[2])
     vol_ml = vol_mm3 / 1000.0
@@ -63,7 +62,6 @@ def main():
     logger.info(f"Unique raw values in file: {raw_vals[:10]}")
     logger.info(f"Size: {size}, Spacing: {spacing}, Origin: {origin}")
     logger.info(f"Physical volume: {vol_ml:.3f} mL")
-    logger.info("Mask voxel count:", np.count_nonzero(mask))
 
 
 if __name__ == "__main__":
