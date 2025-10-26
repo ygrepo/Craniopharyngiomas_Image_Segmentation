@@ -22,6 +22,22 @@ from src.util import (
 logger = get_logger(__name__)
 
 
+def stats(p):
+    a = sitk.GetArrayFromImage(sitk.ReadImage(p)).astype(np.float32)
+    return a.mean(), a.std(), np.percentile(a, [0.5, 50, 99.5]).tolist()
+
+
+def stats_b2nd(path):
+    x = np.asarray(b2.open(path)[:])  # shape (C,Z,Y,X)
+    print(path)
+    for c in range(x.shape[0]):
+        ch = x[c]
+        logger.info(
+            f"  ch{c}: mean={ch.mean():.3f}, std={ch.std():.3f}, "
+            f"p0.5={np.percentile(ch,0.5):.3f}, p99.5={np.percentile(ch,99.5):.3f}"
+        )
+
+
 def main():
     setup_logging(None, "DEBUG")
     # # Replace with the exact pair that showed ∞ in your sheet
@@ -70,6 +86,10 @@ def main():
     )
     logger.info(f"voxels fg>0.5: {int((fg > 0.5).sum())}")
 
+    path = "nnUNet_preprocessed/Dataset503_CP/nnUNetPlans_3d_fullres/75062101.b2nd"
+    stats_b2nd(path)
+    path = "nnUNet_preprocessed/Dataset503_CP/nnUNetPlans_3d_fullres/70900351.b2nd"
+    stats_b2nd(path)
     # path = Path(
     #     "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/data/CP/75062101/75062101_Tumor.seg.nrrd"
     # )
