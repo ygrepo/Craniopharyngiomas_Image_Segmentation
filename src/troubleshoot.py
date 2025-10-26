@@ -65,7 +65,7 @@ def main():
     # logger.info(f"Physical volume: {vol_ml:.3f} mL")
 
     seg_path = Path(
-        "../nnUNet_preprocessed/Dataset503_CP/nnUNetPlans_3d_fullres/75062101_seg.b2nd"
+        "nnUNet_preprocessed/Dataset503_CP/nnUNetPlans_3d_fullres/75062101_seg.b2nd"
     )
     seg_b2 = b2.open(seg_path)  # Blosc2 NDArray
     seg = np.asarray(seg_b2[:])  # to NumPy
