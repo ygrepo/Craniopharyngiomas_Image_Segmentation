@@ -44,6 +44,13 @@ def main():
     gt = sitk.ReadImage(path)
     logger.info(hd95_mm_from_binary(pred, gt, one_empty_policy="inf"))
 
+    pa, ga = sitk.GetArrayFromImage(pred), sitk.GetArrayFromImage(gt)
+    logger.info(f"pred unique: {np.unique(pa)}, nonzero: {np.count_nonzero(pa)}")
+    logger.info(f"gt   unique: {np.unique(ga)}, nonzero: {np.count_nonzero(ga)}")
+
+    # Optional: verify shapes match (nnU-Net should output in the reference geometry)
+    logger.info(f"pred shape: {pa.shape}, gt shape: {ga.shape}")
+
     # path = Path(
     #     "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/data/CP/75062101/75062101_Tumor.seg.nrrd"
     # )
