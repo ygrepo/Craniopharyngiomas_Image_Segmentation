@@ -38,12 +38,8 @@ OUT_DIR="out_nifti"
 mkdir -p "$OUT_DIR"
 
 "${PYTHON}" "${MAIN}" \
-  --root "$nnUNet_preprocessed/Dataset${DATASET_ID}_${DATASET_NAME}/nnUNetPlans_${CFG}" \
+  --root "nnUNet_preprocessed/Dataset${DATASET_ID}_${DATASET_NAME}/nnUNetPlans_${CFG}" \
   --case 75062101 \
-  --out "$OUT_DIR" \
-  --log_file "${LOG_FILE}" \
-  --log_level "${LOG_LEVEL}"
+  --out "${OUT_DIR}"
 
-echo "[ok] Wrote: ${OUT_SUMMARY_FN}"
-echo "[ok] Wrote: ${OUT_CASE_FN}"
-echo "[ok] Wrote: ${OUT_MICRO_FN}"
+echo "[ok] Wrote: ${OUT_DIR}"
