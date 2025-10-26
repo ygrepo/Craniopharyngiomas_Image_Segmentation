@@ -38,11 +38,11 @@ def main():
     # path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/52435303.nii.gz"
     # gt = sitk.ReadImage(path)
     # logger.info(hd95_mm_from_binary(pred, gt, one_empty_policy="inf"))
-    # path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset503_CP/EmaDiceEarlyStopTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/predictions/validation/75062101.nii.gz"
-    # pred = sitk.ReadImage(path)
-    # path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/75062101.nii.gz"
-    # gt = sitk.ReadImage(path)
-    # logger.info(hd95_mm_from_binary(pred, gt, one_empty_policy="inf"))
+    path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset503_CP/EmaDiceEarlyStopTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/predictions/validation/75062101.nii.gz"
+    pred = sitk.ReadImage(path)
+    path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/75062101.nii.gz"
+    gt = sitk.ReadImage(path)
+    logger.info(hd95_mm_from_binary(pred, gt, one_empty_policy="inf"))
 
     # path = Path(
     #     "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/data/CP/75062101/75062101_Tumor.seg.nrrd"
@@ -64,13 +64,13 @@ def main():
     # logger.info(f"Size: {size}, Spacing: {spacing}, Origin: {origin}")
     # logger.info(f"Physical volume: {vol_ml:.3f} mL")
 
-    seg_path = Path(
-        "nnUNet_preprocessed/Dataset503_CP/nnUNetPlans_3d_fullres/75062101_seg.b2nd"
-    )
-    seg_b2 = b2.open(seg_path)  # Blosc2 NDArray
-    seg = np.asarray(seg_b2[:])  # to NumPy
-    logger.info(f"seg shape: {seg.shape}, dtype: {seg.dtype}")
-    logger.info(f"unique: {np.unique(seg)}, nonzero: {np.count_nonzero(seg)}")
+    # seg_path = Path(
+    #     "nnUNet_preprocessed/Dataset503_CP/nnUNetPlans_3d_fullres/75062101_seg.b2nd"
+    # )
+    # seg_b2 = b2.open(seg_path)  # Blosc2 NDArray
+    # seg = np.asarray(seg_b2[:])  # to NumPy
+    # logger.info(f"seg shape: {seg.shape}, dtype: {seg.dtype}")
+    # logger.info(f"unique: {np.unique(seg)}, nonzero: {np.count_nonzero(seg)}")
 
 
 if __name__ == "__main__":
