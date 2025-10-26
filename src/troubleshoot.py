@@ -90,6 +90,22 @@ def main():
     stats_b2nd(path)
     path = "nnUNet_preprocessed/Dataset503_CP/nnUNetPlans_3d_fullres/70900351.b2nd"
     stats_b2nd(path)
+
+    path = "nnUNet_preprocessed/Dataset503_CP/nnUNetPlans_3d_fullres/75062101_seg.b2nd"
+    stats_b2nd(path)
+    path = "nnUNet_preprocessed/Dataset503_CP/nnUNetPlans_3d_fullres/70900351_seg.b2nd"
+    stats_b2nd(path)
+
+    # probs = np.load("<out_dir>/75062101.npz")  # from --save_probabilities run
+    # probs = probs["probabilities"] if hasattr(probs, "files") else probs  # (2,Z,Y,X)
+    # fg = probs[1]
+
+    # # Save as NIfTI for Slicer (uint16 heatmap)
+    # ref = sitk.ReadImage("/path/to/75062101_0000.nii.gz")
+    # fg16 = sitk.GetImageFromArray((np.clip(fg, 0, 1) * 65535).astype(np.uint16))
+    # fg16.CopyInformation(ref)
+    # sitk.WriteImage(fg16, "out_nifti/75062101_fg_prob_uint16.nii.gz")
+
     # path = Path(
     #     "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/data/CP/75062101/75062101_Tumor.seg.nrrd"
     # )
