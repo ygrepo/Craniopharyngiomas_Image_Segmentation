@@ -50,6 +50,15 @@ def main():
 
     # Optional: verify shapes match (nnU-Net should output in the reference geometry)
     logger.info(f"pred shape: {pa.shape}, gt shape: {ga.shape}")
+    path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset503_CP/EmaDiceEarlyStopTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/predictions/validation/75062101.npz"
+    probs = np.load(path)
+    probs = probs["probabilities"] if isinstance(probs, np.lib.npyio.NpzFile) else probs
+    logger.info(f"probs shape: {probs.shape}")  # (C,Z,Y,X)
+    fg = probs[1] if probs.shape[0] > 1 else probs[0]  # foreground channel
+    logger.info(
+        f"fg min/mean/max: {float(fg.min())} {float(fg.mean())} {float(fg.max())}"
+    )
+    logger.info(f"voxels fg>0.5: {int((fg > 0.5).sum())}")
 
     # path = Path(
     #     "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/data/CP/75062101/75062101_Tumor.seg.nrrd"
