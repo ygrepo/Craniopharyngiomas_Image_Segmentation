@@ -25,12 +25,22 @@ logger = get_logger(__name__)
 def main():
     setup_logging(None, "DEBUG")
     # # Replace with the exact pair that showed ∞ in your sheet
-    # path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset503_CP/EmaDiceEarlyStopTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/predictions/validation/70900351.nii.gz"
-    # pred = sitk.ReadImage(path)
-    # path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/70900351.nii.gz"
-    # gt = sitk.ReadImage(path)
-    # logger.info(hd95_mm_from_binary(pred, gt, one_empty_policy="inf"))
-    # # Expect ~0.0 (if they fully overlap) or a small positive value
+    path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset503_CP/EmaDiceEarlyStopTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/predictions/validation/70900351.nii.gz"
+    pred = sitk.ReadImage(path)
+    path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/tmp_503_fold0_val/labelsTr/70900351.nii.gz"
+    gt = sitk.ReadImage(path)
+    logger.info(hd95_mm_from_binary(pred, gt, one_empty_policy="inf"))
+    path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset503_CP/EmaDiceEarlyStopTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/predictions/validation/70900351.npz"
+    probs = np.load(path)
+    probs = probs["probabilities"] if isinstance(probs, np.lib.npyio.NpzFile) else probs
+    logger.info(f"probs shape: {probs.shape}")  # (C,Z,Y,X)
+    fg = probs[1] if probs.shape[0] > 1 else probs[0]  # foreground channel
+    logger.info(
+        f"fg min/mean/max: {float(fg.min())} {float(fg.mean())} {float(fg.max())}"
+    )
+    logger.info(f"voxels fg>0.5: {int((fg > 0.5).sum())}")
+
+    # Expect ~0.0 (if they fully overlap) or a small positive value
     # # If you get ∞, something is wrong.
 
     # path = "/projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset503_CP/EmaDiceEarlyStopTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/predictions/validation/52435303.nii.gz"
