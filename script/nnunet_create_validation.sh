@@ -181,8 +181,7 @@ nnUNetv2_predict \
   -step_size 0.25 \
   -device cuda \
   --save_probabilities \
-  --disable_progress_bar \
-  --disable_postprocessing
+  --disable_progress_bar
 
 # verify predictions were created
 n_preds=$(ls -1 "$OUTP"/*.nii.gz 2>/dev/null | wc -l | awk '{print $1}')
