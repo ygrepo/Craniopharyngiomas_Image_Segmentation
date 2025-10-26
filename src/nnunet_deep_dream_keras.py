@@ -190,56 +190,55 @@ def _visualize_multiple_slices(
     slice_indices: list[int],
     save_path: Optional[Path],
     max_cols: int = 4,
-    show_edge_colorbar: bool = False,
-    diff_clip: float = 2.5,  # clip diff at ±(this * std) for balanced colors
+    diff_clip: float = 2.5,  # symmetric limits: ±diff_clip * std
 ):
-    """Visualize multiple slices in a grid: original | EDGES(overlay) | difference.
-
-    - Middle row shows edge magnitude overlaid on the original slice.
-    - Difference uses jet colormap and symmetric limits.
+    """
+    Grid per slice: Original (top) | Edges (middle, gist_gray) | Difference (bottom, jet).
+    Plots are aligned by sharing axes within each column and using equal aspect.
     """
 
-    # --- helpers ---
+    # -------- helpers --------
     def edge_mag(img2d: np.ndarray) -> np.ndarray:
-        # smooth a bit to reduce noise before gradients
+        # robust edges with mild smoothing, falling back if SciPy not present
         try:
             from scipy.ndimage import gaussian_filter, sobel
 
             x = gaussian_filter(img2d.astype(float), sigma=1.0)
-            gx = sobel(x, axis=1)  # horizontal
-            gy = sobel(x, axis=0)  # vertical
+            gx = sobel(x, axis=1)
+            gy = sobel(x, axis=0)
             e = np.hypot(gx, gy)
         except Exception:
-            # fallback: simple gradients (no scipy)
-            x = img2d.astype(float)
-            gy, gx = np.gradient(x)
+            gy, gx = np.gradient(img2d.astype(float))
             e = np.hypot(gx, gy)
-        # normalize to 0..1 for nice overlay
-        m = np.percentile(e, 99.5)
-        return np.clip(e / (m + 1e-8), 0, 1)
+        return e
 
-    # --- validate slices ---
+    # -------- validate --------
     max_slice = orig_np.shape[0] - 1
     valid_slices = [s for s in slice_indices if 0 <= s <= max_slice]
     if not valid_slices:
-        logger.info(
+        print(
             f"No valid slice indices. Volume has {orig_np.shape[0]} slices (0-{max_slice})"
         )
         return
     if len(valid_slices) != len(slice_indices):
         invalid = [s for s in slice_indices if s not in valid_slices]
-        logger.info(
-            f"Warning: Invalid slice indices {invalid} ignored. Using {valid_slices}"
-        )
-
+        print(f"Warning: Invalid slice indices {invalid} ignored. Using {valid_slices}")
     num_slices = len(valid_slices)
 
-    # --- grid: 3 rows per slice (orig, edges, diff) ---
+    # -------- grid --------
     cols = min(max_cols, num_slices)
     rows = (num_slices + cols - 1) // cols
-    fig, axes = plt.subplots(rows * 3, cols, figsize=(cols * 5, rows * 12))
 
-    # make axes 2D for easier indexing
+    fig, axes = plt.subplots(
+        rows * 3,
+        cols,
+        figsize=(cols * 5.2, rows * 11.5),
+        sharex="col",
+        sharey="col",
+        constrained_layout=True,
+    )
+
+    # make axes 2D for uniform indexing
     if rows * 3 == 1 and cols == 1:
         axes = np.array([[axes]])
     elif rows * 3 == 1:
@@ -247,57 +246,177 @@ def _visualize_multiple_slices(
     elif cols == 1:
         axes = axes[:, np.newaxis]
 
+    # precompute edge normalization globally for the shown slices
+    edges_all = []
+    for sidx in valid_slices:
+        edges_all.append(edge_mag(orig_np[sidx]))
+    # robust global max (99.5th percentile over all requested slices)
+    p995 = np.percentile(np.concatenate([e.ravel() for e in edges_all]), 99.5)
+    edge_vmin, edge_vmax = 0.0, float(p995 if p995 > 0 else np.max(edges_all))
+
+    # plot
     for i, sidx in enumerate(valid_slices):
         r = i // cols
         c = i % cols
+        r0, r1, r2 = r * 3, r * 3 + 1, r * 3 + 2
 
         orig = orig_np[sidx]
         dream = dream_np[sidx]
         diff = dream - orig
 
-        # symmetric limits for diff using robust std
+        # symmetric, robust limits for diff
         dstd = float(np.std(diff))
         lim = diff_clip * dstd if dstd > 0 else np.max(np.abs(diff)) + 1e-8
         vmin, vmax = -lim, +lim
 
-        # rows
-        r0, r1, r2 = r * 3, r * 3 + 1, r * 3 + 2
-
-        # --- Original ---
+        # ---- Original (top) ----
         ax = axes[r0, c]
-        ax.imshow(orig, cmap="gray")
+        ax.imshow(orig, cmap="gray", aspect="equal")
         ax.set_title(f"Original (Slice {sidx})")
         ax.axis("off")
 
-        # --- EDGES overlaid on original ---
+        # ---- Edges (middle, grayscale) ----
         ax = axes[r1, c]
-        ax.imshow(orig, cmap="gray")
-        e = edge_mag(orig)
-        im_edges = ax.imshow(e, cmap="jet", alpha=0.65)  # edge heat overlaid
+        e = edges_all[i]
+        ax.imshow(e, cmap="gist_gray", vmin=edge_vmin, vmax=edge_vmax, aspect="equal")
         ax.set_title(f"Edges (Slice {sidx})")
         ax.axis("off")
-        if show_edge_colorbar:
-            plt.colorbar(im_edges, ax=ax, fraction=0.046, pad=0.04)
 
-        # --- Difference (dream - orig) ---
+        # ---- Difference (bottom, jet) ----
         ax = axes[r2, c]
-        im = ax.imshow(diff, cmap="jet", vmin=vmin, vmax=vmax)
+        im = ax.imshow(diff, cmap="jet", vmin=vmin, vmax=vmax, aspect="equal")
         ax.set_title(f"Difference (Slice {sidx})")
         ax.axis("off")
+        # colorbar attached but constrained so columns stay aligned
         plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
     # hide any unused subplots
     total_used = num_slices * 3
     total_slots = rows * cols * 3
     for flat_idx in range(total_used, total_slots):
-        rr = flat_idx // (cols)
-        cc = flat_idx % (cols)
+        rr = flat_idx // cols
+        cc = flat_idx % cols
         axes[rr, cc].axis("off")
 
-    plt.tight_layout()
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.show()
+
+
+# def _visualize_multiple_slices(
+#     orig_np: np.ndarray,
+#     dream_np: np.ndarray,
+#     slice_indices: list[int],
+#     save_path: Optional[Path],
+#     max_cols: int = 4,
+#     show_edge_colorbar: bool = False,
+#     diff_clip: float = 2.5,  # clip diff at ±(this * std) for balanced colors
+# ):
+#     """Visualize multiple slices in a grid: original | EDGES(overlay) | difference.
+
+#     - Middle row shows edge magnitude overlaid on the original slice.
+#     - Difference uses jet colormap and symmetric limits.
+#     """
+
+#     # --- helpers ---
+#     def edge_mag(img2d: np.ndarray) -> np.ndarray:
+#         # smooth a bit to reduce noise before gradients
+#         try:
+#             from scipy.ndimage import gaussian_filter, sobel
+
+#             x = gaussian_filter(img2d.astype(float), sigma=1.0)
+#             gx = sobel(x, axis=1)  # horizontal
+#             gy = sobel(x, axis=0)  # vertical
+#             e = np.hypot(gx, gy)
+#         except Exception:
+#             # fallback: simple gradients (no scipy)
+#             x = img2d.astype(float)
+#             gy, gx = np.gradient(x)
+#             e = np.hypot(gx, gy)
+#         # normalize to 0..1 for nice overlay
+#         m = np.percentile(e, 99.5)
+#         return np.clip(e / (m + 1e-8), 0, 1)
+
+#     # --- validate slices ---
+#     max_slice = orig_np.shape[0] - 1
+#     valid_slices = [s for s in slice_indices if 0 <= s <= max_slice]
+#     if not valid_slices:
+#         logger.info(
+#             f"No valid slice indices. Volume has {orig_np.shape[0]} slices (0-{max_slice})"
+#         )
+#         return
+#     if len(valid_slices) != len(slice_indices):
+#         invalid = [s for s in slice_indices if s not in valid_slices]
+#         logger.info(
+#             f"Warning: Invalid slice indices {invalid} ignored. Using {valid_slices}"
+#         )
+
+#     num_slices = len(valid_slices)
+
+#     # --- grid: 3 rows per slice (orig, edges, diff) ---
+#     cols = min(max_cols, num_slices)
+#     rows = (num_slices + cols - 1) // cols
+#     fig, axes = plt.subplots(rows * 3, cols, figsize=(cols * 5, rows * 12))
+
+#     # make axes 2D for easier indexing
+#     if rows * 3 == 1 and cols == 1:
+#         axes = np.array([[axes]])
+#     elif rows * 3 == 1:
+#         axes = axes[np.newaxis, :]
+#     elif cols == 1:
+#         axes = axes[:, np.newaxis]
+
+#     for i, sidx in enumerate(valid_slices):
+#         r = i // cols
+#         c = i % cols
+
+#         orig = orig_np[sidx]
+#         dream = dream_np[sidx]
+#         diff = dream - orig
+
+#         # symmetric limits for diff using robust std
+#         dstd = float(np.std(diff))
+#         lim = diff_clip * dstd if dstd > 0 else np.max(np.abs(diff)) + 1e-8
+#         vmin, vmax = -lim, +lim
+
+#         # rows
+#         r0, r1, r2 = r * 3, r * 3 + 1, r * 3 + 2
+
+#         # --- Original ---
+#         ax = axes[r0, c]
+#         ax.imshow(orig, cmap="gray")
+#         ax.set_title(f"Original (Slice {sidx})")
+#         ax.axis("off")
+
+#         # --- EDGES overlaid on original ---
+#         ax = axes[r1, c]
+#         ax.imshow(orig, cmap="gray")
+#         e = edge_mag(orig)
+#         im_edges = ax.imshow(e, cmap="jet", alpha=0.65)  # edge heat overlaid
+#         ax.set_title(f"Edges (Slice {sidx})")
+#         ax.axis("off")
+#         if show_edge_colorbar:
+#             plt.colorbar(im_edges, ax=ax, fraction=0.046, pad=0.04)
+
+#         # --- Difference (dream - orig) ---
+#         ax = axes[r2, c]
+#         im = ax.imshow(diff, cmap="jet", vmin=vmin, vmax=vmax)
+#         ax.set_title(f"Difference (Slice {sidx})")
+#         ax.axis("off")
+#         plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+#     # hide any unused subplots
+#     total_used = num_slices * 3
+#     total_slots = rows * cols * 3
+#     for flat_idx in range(total_used, total_slots):
+#         rr = flat_idx // (cols)
+#         cc = flat_idx % (cols)
+#         axes[rr, cc].axis("off")
+
+#     plt.tight_layout()
+#     if save_path:
+#         plt.savefig(save_path, dpi=150, bbox_inches="tight")
+#     plt.show()
 
 
 # def _visualize_multiple_slices(
