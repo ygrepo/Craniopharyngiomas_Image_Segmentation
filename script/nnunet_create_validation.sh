@@ -175,7 +175,6 @@ nnUNetv2_predict \
   -c "$CFG" \
   -f "$FOLD" \
   -chk checkpoint_best.pth \
-  --tta \
   --step_size 0.25 \
   -device cuda \
   --save_probabilities \
