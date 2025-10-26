@@ -849,6 +849,12 @@ def parse_args():
         help="Modality index for visualization (0=FLAIR)",
     )
     ap.add_argument(
+        "--only_visualize",
+        type=bool,
+        default=False,
+        help="Only visualize results",
+    )
+    ap.add_argument(
         "--log_file",
         type=Path,
         default="logs/nnunet_deepdream_keras.log",
@@ -867,7 +873,8 @@ if __name__ == "__main__":
     args = parse_args()
     setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
     logger.info(f"Args: {args}")
-    preprocessed_data_dir = args.preprocessed_dir.resolve()
+
+    preprocessed_data_dir = Path(args.preprocessed_dir).resolve()
     logger.info(f"Preprocessed data dir: {preprocessed_data_dir}")
 
     # Load model
@@ -875,6 +882,7 @@ if __name__ == "__main__":
     model, meta = load_model_from_results(
         args.model_dir, args.fold, None, args.checkpoint, compile_network=False
     )
+    model.eval()
     device = next(model.parameters()).device
     logger.info(f"Model on device: {device}")
 
@@ -883,20 +891,48 @@ if __name__ == "__main__":
         preprocessed_data_dir, args.case_id, device
     )
 
-    # Save results
-    output_dir = args.output_dir.resolve()
+    # Prepare output dir
+    output_dir = Path(args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Save original (for Slicer)
     save_b2nd_to_nifti_for_slicer(
-        input_tensor,
+        input_tensor.detach().cpu(),
         data_meta["properties"],
         output_dir,
         args.case_id,
         save_4d=False,
     )
 
-    # Initialize deep dream
+    # Parse slice indices once
+    slice_idx = [int(z) for z in str(args.slice_idx).split(",") if z.strip().isdigit()]
+
+    if args.only_visualize:
+        logger.info("Only visualizing results. Exiting.")
+        # Load deep-dream if provided
+        dreamed_tensor = None
+        dream_path = output_dir / f"{args.case_id}_deep_dream.nii.gz"
+        import nibabel as nib
+
+        img = nib.load(str(dream_path))
+        dd = np.asanyarray(img.dataobj)  # (Z, Y, X, C) or (Z, Y, X)
+        if dd.ndim == 3:
+            dd = dd[..., None]
+        # back to (1, C, Z, Y, X) torch tensor on CPU
+        dreamed_tensor = torch.from_numpy(dd.transpose(3, 0, 1, 2)).unsqueeze(0).float()
+
+        viz_path = output_dir / f"{args.case_id}_visualization_2.png"
+        visualize_results(
+            original=input_tensor.detach().cpu(),
+            dreamed=dreamed_tensor,
+            slice_idx=slice_idx,
+            modality_idx=args.modality_idx,
+            save_path=viz_path,
+        )
+        sys.exit(0)
+
+    # Initialize and run DeepDream
     deep_dream = DeepDreamBraTS(model, meta)
-    # Run deep dream
     dreamed_tensor = deep_dream.run_deep_dream(
         input_tensor,
         layer_regex=args.layer_regex,
@@ -908,21 +944,25 @@ if __name__ == "__main__":
         num_octaves=args.num_octaves,
     )
 
-    dreamed_np = dreamed_tensor[0].cpu().numpy()  # Remove batch dimension
+    # Save DeepDream as NIfTI, preserving geometry
+    # dreamed_tensor: (1, C, Z, Y, X)
+    dreamed_np = dreamed_tensor.detach().cpu().numpy()[0]  # (C, Z, Y, X)
+    dd_zyxc = dreamed_np.transpose(1, 2, 3, 0)  # (Z, Y, X, C)
 
-    # Save as NIfTI
-    nii_img = nib.Nifti1Image(dreamed_np.transpose(1, 2, 3, 0), affine=np.eye(4))
-    nib.save(nii_img, str(output_dir / f"{args.case_id}_deep_dream.nii.gz"))
-    logger.info(
-        f"Saved deep dream result to: {output_dir / f'{args.case_id}_deep_dream.nii.gz'}"
-    )
-    slice_idx = [int(z) for z in args.slice_idx.split(",") if z.strip().isdigit()]
+    import nibabel as nib
+
+    props = data_meta.get("properties", {})
+    affine = props.get("original_affine", np.eye(4))
+    nii_img = nib.Nifti1Image(dd_zyxc, affine=affine)
+    deep_dream_path = output_dir / f"{args.case_id}_deep_dream.nii.gz"
+    nib.save(nii_img, str(deep_dream_path))
+    logger.info(f"Saved deep dream result to: {deep_dream_path}")
 
     # Visualize
-    viz_path = args.output_dir / f"{args.case_id}_visualization_2.png"
+    viz_path = output_dir / f"{args.case_id}_visualization_2.png"
     visualize_results(
-        original=input_tensor,
-        dreamed=dreamed_tensor,
+        original=input_tensor.detach().cpu(),
+        dreamed=dreamed_tensor.detach().cpu(),
         slice_idx=slice_idx,
         modality_idx=args.modality_idx,
         save_path=viz_path,
@@ -943,9 +983,112 @@ if __name__ == "__main__":
         "input_shape": list(input_tensor.shape),
         "output_shape": list(dreamed_tensor.shape),
     }
-
-    params_path = args.output_dir / f"{args.case_id}_params.json"
+    params_path = output_dir / f"{args.case_id}_params.json"
     with open(params_path, "w") as f:
         json.dump(params, f, indent=2)
 
     logger.info("Deep dream completed successfully!")
+
+# if __name__ == "__main__":
+#     args = parse_args()
+#     setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
+#     logger.info(f"Args: {args}")
+#     preprocessed_data_dir = args.preprocessed_dir.resolve()
+#     logger.info(f"Preprocessed data dir: {preprocessed_data_dir}")
+
+#     # Load model
+#     logger.info("Loading nnU-Net model...")
+#     model, meta = load_model_from_results(
+#         args.model_dir, args.fold, None, args.checkpoint, compile_network=False
+#     )
+#     device = next(model.parameters()).device
+#     logger.info(f"Model on device: {device}")
+
+#     # Load data
+#     input_tensor, data_meta = load_nnunet_preprocessed_case(
+#         preprocessed_data_dir, args.case_id, device
+#     )
+
+#     # Save results
+#     output_dir = args.output_dir.resolve()
+
+#     save_b2nd_to_nifti_for_slicer(
+#         input_tensor,
+#         data_meta["properties"],
+#         output_dir,
+#         args.case_id,
+#         save_4d=False,
+#     )
+#     if args.only_visualize:
+#         logger.info("Only visualizing results. Exiting.")
+#         # Visualize
+#         viz_path = args.output_dir / f"{args.case_id}_visualization_2.png"
+#         slice_idx = [int(z) for z in args.slice_idx.split(",") if z.strip().isdigit()]
+#         # Load dream/delta
+#         fn = str(output_dir / f"{args.case_id}_deep_dream.nii.gz")
+#         dreamed_tensor = load_npy(fn) if args.dream_path is not None else None
+
+#         visualize_results(
+#             original=input_tensor,
+#             dreamed=dreamed_tensor,
+#             slice_idx=slice_idx,
+#             modality_idx=args.modality_idx,
+#             save_path=viz_path,
+#         )
+#         sys.exit(0)
+
+#     # Initialize deep dream
+#     deep_dream = DeepDreamBraTS(model, meta)
+#     # Run deep dream
+#     dreamed_tensor = deep_dream.run_deep_dream(
+#         input_tensor,
+#         layer_regex=args.layer_regex,
+#         target_idx=args.target_idx,
+#         iterations=args.iterations,
+#         step_size=args.step_size,
+#         filter_index=args.filter_index,
+#         octave_scale=args.octave_scale,
+#         num_octaves=args.num_octaves,
+#     )
+
+#     dreamed_np = dreamed_tensor[0].cpu().numpy()  # Remove batch dimension
+
+#     # Save as NIfTI
+#     nii_img = nib.Nifti1Image(dreamed_np.transpose(1, 2, 3, 0), affine=np.eye(4))
+#     nib.save(nii_img, str(output_dir / f"{args.case_id}_deep_dream.nii.gz"))
+#     logger.info(
+#         f"Saved deep dream result to: {output_dir / f'{args.case_id}_deep_dream.nii.gz'}"
+#     )
+#     slice_idx = [int(z) for z in args.slice_idx.split(",") if z.strip().isdigit()]
+
+#     # Visualize
+#     viz_path = args.output_dir / f"{args.case_id}_visualization_2.png"
+#     visualize_results(
+#         original=input_tensor,
+#         dreamed=dreamed_tensor,
+#         slice_idx=slice_idx,
+#         modality_idx=args.modality_idx,
+#         save_path=viz_path,
+#     )
+
+#     # Save parameters
+#     params = {
+#         "case_id": args.case_id,
+#         "model_dir": str(args.model_dir),
+#         "fold": args.fold,
+#         "layer_regex": args.layer_regex,
+#         "target_idx": args.target_idx,
+#         "iterations": args.iterations,
+#         "step_size": args.step_size,
+#         "filter_index": args.filter_index,
+#         "num_octaves": args.num_octaves,
+#         "octave_scale": args.octave_scale,
+#         "input_shape": list(input_tensor.shape),
+#         "output_shape": list(dreamed_tensor.shape),
+#     }
+
+#     params_path = args.output_dir / f"{args.case_id}_params.json"
+#     with open(params_path, "w") as f:
+#         json.dump(params, f, indent=2)
+
+#     logger.info("Deep dream completed successfully!")
