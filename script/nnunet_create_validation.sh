@@ -83,7 +83,8 @@ echo "[info] DJ  =$DJ"
 echo "[info] PL  =$PL"
 
 # --- extract fold-${FOLD} validation IDs (fix: don't rely on shell var expansion inside heredoc) ---
-OUT_IDS="val_ids_${DATASET_ID}_fold${FOLD}.txt"
+OUT_IDS="val_ids_${DATASET_ID}_fold${FOLD}_tta.txt"
+#OUT_IDS="val_ids_${DATASET_ID}_fold${FOLD}.txt"
 "${PYTHON}" - "$PREP" "$OUT_IDS" <<'PY'
 import json, os, sys
 
@@ -106,7 +107,8 @@ print(f"[ok] Wrote {len(val_ids)} IDs to {out}")
 PY
 
 # --- build subset (symlinks) ---
-VAL_ROOT="$PWD/tmp_${DATASET_ID}_fold${FOLD}_val"
+VAL_ROOT="$PWD/tmp_${DATASET_ID}_fold${FOLD}_val_tta"
+#VAL_ROOT="$PWD/tmp_${DATASET_ID}_fold${FOLD}_val"
 VALI="${VAL_ROOT}/imagesTr"; mkdir -p "$VALI"
 VALL="${VAL_ROOT}/labelsTr"; mkdir -p "$VALL"
 
@@ -145,6 +147,7 @@ fi
 
 # --- prediction output ---
 OUTP="${RES}/fold_${FOLD}/predictions/validation_tta"
+#OUTP="${RES}/fold_${FOLD}/predictions/validation"
 mkdir -p "$OUTP"
 
 export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
