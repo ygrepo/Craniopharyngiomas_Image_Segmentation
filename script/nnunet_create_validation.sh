@@ -144,13 +144,28 @@ if [[ "$n_cases" -eq 0 ]]; then
 fi
 
 # --- prediction output ---
-OUTP="${RES}/fold_${FOLD}/predictions/validation"
+OUTP="${RES}/fold_${FOLD}/predictions/validation_tta"
 mkdir -p "$OUTP"
 
 export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
 
 echo "[info] Running prediction into: $OUTP"
 # IMPORTANT: pass checkpoint NAME only (nnUNet constructs the path)
+# nnUNetv2_predict \
+#   -i "$VALI" \
+#   -o "$OUTP" \
+#   -d "$DATASET_ID" \
+#   -p "$PLANS_ID" \
+#   -tr "$TR" \
+#   -c "$CFG" \
+#   -f "$FOLD" \
+#   -chk checkpoint_best.pth \
+#   --disable_tta \
+#   -device cuda \
+#   --save_probabilities \
+#   --disable_progress_bar \
+#   --disable_postprocessing
+
 nnUNetv2_predict \
   -i "$VALI" \
   -o "$OUTP" \
@@ -160,10 +175,12 @@ nnUNetv2_predict \
   -c "$CFG" \
   -f "$FOLD" \
   -chk checkpoint_best.pth \
-  --disable_tta \
+  --tta \
+  --step_size 0.25 \
   -device cuda \
   --save_probabilities \
-  --disable_progress_bar
+  --disable_progress_bar \
+  --disable_postprocessing
 
 # verify predictions were created
 n_preds=$(ls -1 "$OUTP"/*.nii.gz 2>/dev/null | wc -l | awk '{print $1}')

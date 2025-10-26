@@ -79,6 +79,21 @@ RAW="${nnUNet_raw}/Dataset${DATASET_ID}_${DATASET_NAME}"
 RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
 
 # Predict Single fold (e.g., fold 0)
+# nnUNetv2_predict \
+#   -i ${RAW}/imagesTs/ \
+#   -o ${RES}/fold_${FOLD}/predictions/test \
+#   -d ${DATASET_ID} \
+#   -c ${CFG} \
+#   -f ${FOLD} \
+#   -tr ${TR} \
+#   -p ${PLANS_ID} \
+#   -chk ${RES}/fold_${FOLD}/checkpoint_best.pth \
+#   -device cuda \
+#   -save_probabilities \
+#   -disable_postprocessing
+
+
+# Predict Single fold (e.g., fold 0)
 nnUNetv2_predict \
   -i ${RAW}/imagesTs/ \
   -o ${RES}/fold_${FOLD}/predictions/test \
@@ -88,4 +103,6 @@ nnUNetv2_predict \
   -tr ${TR} \
   -p ${PLANS_ID} \
   -chk ${RES}/fold_${FOLD}/checkpoint_best.pth \
-  -device cuda
+  -device cuda \
+  -save_probabilities \
+  -disable_postprocessing
