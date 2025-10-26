@@ -8,7 +8,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 
 set -euo pipefail
 
@@ -39,6 +39,19 @@ source script/set_unet_path.sh
 
 # Choose a GPU id if needed:
 #export CUDA_VISIBLE_DEVICES=0
+
+
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+export NCCL_DEBUG=WARN          # or INFO when debugging comms
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
+
+echo "SLURM_JOB_GPUS=${SLURM_JOB_GPUS}"
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
+python - <<'PY'
+import torch
+print("PyTorch sees", torch.cuda.device_count(), "GPUs")
+PY
+
 
 PYTHON="${ENV_PREFIX}/bin/python"
 
