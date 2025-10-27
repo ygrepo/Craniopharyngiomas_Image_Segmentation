@@ -55,7 +55,7 @@ RAW="${nnUNet_raw}/Dataset${DATASET_ID}_${DATASET_NAME}"
 echo "[info] RAW =$RAW"
 
 # --- prediction output ---
-OUTP="${RES}/fold_${FOLD}/predictions/validation"
+OUTP="${RES}/fold_${FOLD}/predictions/validation_tta"
 mkdir -p "$OUTP"
 IN_JSON_HD95="${OUTP}/${DATASET_ID}_fold${FOLD}_summary_with_hd95.json"
 OUT_CASE_FN="${OUTP}/${DATASET_ID}_validation_metrics_cases.csv"
@@ -68,8 +68,6 @@ STD_TYPE="population"
 # STD_TYPE="sample"
 
 MAIN="src/nnunet_compute_validation_metrics.py"
-DJ="${RAW}/dataset.json"
-
 
 LOG_DIR="logs"
 LOG_LEVEL="DEBUG"

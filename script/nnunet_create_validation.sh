@@ -166,8 +166,7 @@ echo "[info] Running prediction into: $OUTP"
 #   --disable_tta \
 #   -device cuda \
 #   --save_probabilities \
-#   --disable_progress_bar \
-#   --disable_postprocessing
+#   --disable_progress_bar
 
 nnUNetv2_predict \
   -i "$VALI" \
@@ -207,12 +206,6 @@ ADD_HD95_PY="src/nnunet_add_hd95_to_eval_json.py"   # path to the helper script
 OUT_JSON_HD95="${OUTP}/${DATASET_ID}_fold${FOLD}_summary_with_hd95.json"
 
 echo "[info] Adding HD95 to: ${OUT_JSON}"
-
-# "${PYTHON}" "${ADD_HD95_PY}" \
-#   -i "$OUT_JSON" \
-#   -o "$OUT_JSON_HD95" \
-#   --dataset_json "${DJ}"
-
 
 "${PYTHON}" "${ADD_HD95_PY}" \
   -i "$OUT_JSON" \
