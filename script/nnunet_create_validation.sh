@@ -32,7 +32,7 @@ DATASET_ID=503
 DATASET_NAME=CP
 FOLD=0
 CFG=3d_fullres
-TR=EmaDiceEarlyStopTrainer
+TR=nnUNetTrainerEarlyStopping
 PLANS_ID=nnUNetResEncUNetMPlans
 
 
