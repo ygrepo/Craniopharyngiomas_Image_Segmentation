@@ -1,8 +1,8 @@
 #!/bin/bash
-#   nnunet_train_focal_tversky.sh    —  Train 3D mask using nnU-Net v2.
-#SBATCH --job-name=nnunet_train_focal_tversky
-#SBATCH --output=logs/nnunet_train_focal_tversky_%A_%a.out
-#SBATCH --error=logs/nnunet_train_focal_tversky_%A_%a.err
+#   nnunet_train_topk_ce.sh    —  Train 3D mask using nnU-Net v2.
+#SBATCH --job-name=nnunet_train_topk_ce
+#SBATCH --output=logs/nnunet_train_topk_ce_%A_%a.out
+#SBATCH --error=logs/nnunet_train_topk_ce_%A_%a.err
 #SBATCH --time=72:00:00
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:4
@@ -63,4 +63,4 @@ export nnUNet_compile=1     # or set in your shell rc
 # nnUNetv2_train 501 3d_fullres 3
 # nnUNetv2_train 501 3d_fullres 4
 
-nnUNetv2_train 503 3d_fullres 0 -tr EmaDiceFocalTverskyTrainer -num_gpus 4 -p nnUNetResEncUNetMPlans --npz
+nnUNetv2_train 503 3d_fullres 0 -tr EmaDiceTopKCETrainer -num_gpus 4 -p nnUNetResEncUNetMPlans --npz
