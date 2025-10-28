@@ -1,5 +1,5 @@
 #!/bin/bash
-#   unet_collect_training_stats.sh    —  Collect training stats from nnU-Net v2 logs.
+#   nnunet_collect_training_stats.sh    —  Collect training stats from nnU-Net v2 logs.
 set -euo pipefail
 
 module purge
