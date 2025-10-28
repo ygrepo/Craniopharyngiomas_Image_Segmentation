@@ -23,7 +23,7 @@ DATASET_ID=503
 DATASET_NAME=CP
 FOLD=0
 CFG=3d_fullres
-TR=EmaDiceFocalTverskyTrainer
+TR=EmaDiceEarlyStopTrainer
 PLANS_ID=nnUNetResEncUNetMPlans
 
 RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
