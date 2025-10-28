@@ -17,10 +17,16 @@ LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 source script/set_unet_path.sh
 
-# INPUT_DIR="nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/"
-# OUTPUT_FN="nnUNet_results/Dataset501_BraTS2017_4ch/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/training_metrics.csv"
-INPUT_DIR="nnUNet_results/Dataset502_BraTS2017_4ch/nnUNetTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/"
-OUTPUT_FN="nnUNet_results/Dataset502_BraTS2017_4ch/nnUNetTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/training_metrics.csv"
+
+
+DATASET_ID=503
+DATASET_NAME=CP
+FOLD=0
+CFG=3d_fullres
+TR=EmaDiceFocalTverskyTrainer
+PLANS_ID=nnUNetResEncUNetMPlans
+
+RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
 
 ts=$(date +"%Y%m%d_%H%M%S")
 log_file="${LOG_DIR}/${ts}_unet_collect_training_stats.log"
@@ -30,8 +36,8 @@ set +e
 "${PYTHON}" "${MAIN}" \
   --log_file "${log_file}" \
   --log_level "${LOG_LEVEL}" \
-  --input_dir "${INPUT_DIR}" \
-  --output_fn "${OUTPUT_FN}"
+  --input_dir "${RES}/fold_${FOLD}/" \
+  --output_fn "${RES}/fold_${FOLD}/training_metrics.csv"
 exit_code=$?
 set -e
 
