@@ -32,7 +32,7 @@ DATASET_ID=503
 DATASET_NAME=CP
 FOLD=0
 CFG=3d_fullres
-TR=EmaDiceFocalTverskyTrainer
+TR=nnUNetTrainerTopk10Loss
 PLANS_ID=nnUNetResEncUNetMPlans
 
 
@@ -83,8 +83,7 @@ echo "[info] DJ  =$DJ"
 echo "[info] PL  =$PL"
 
 # --- extract fold-${FOLD} validation IDs (fix: don't rely on shell var expansion inside heredoc) ---
-OUT_IDS="val_ids_${DATASET_ID}_${TR}__${PLANS_ID}__${CFG}_fold${FOLD}.txt"
-#OUT_IDS="val_ids_${DATASET_ID}_fold${FOLD}.txt"
+OUT_IDS="${RES}/val_ids_${DATASET_ID}_${TR}__${PLANS_ID}__${CFG}_fold${FOLD}.txt"
 "${PYTHON}" - "$PREP" "$OUT_IDS" <<'PY'
 import json, os, sys
 
@@ -107,8 +106,7 @@ print(f"[ok] Wrote {len(val_ids)} IDs to {out}")
 PY
 
 # --- build subset (symlinks) ---
-VAL_ROOT="$PWD/tmp_${DATASET_ID}_${TR}__${PLANS_ID}__${CFG}_fold${FOLD}_val"
-#VAL_ROOT="$PWD/tmp_${DATASET_ID}_fold${FOLD}_val"
+VAL_ROOT="$PWD/${RES}/tmp_val"
 VALI="${VAL_ROOT}/imagesTr"; mkdir -p "$VALI"
 VALL="${VAL_ROOT}/labelsTr"; mkdir -p "$VALL"
 
