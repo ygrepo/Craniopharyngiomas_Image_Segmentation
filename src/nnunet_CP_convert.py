@@ -22,6 +22,8 @@ from src.util import (
     save_img_like_reference,
     save_nifti_image,
     save_nifti,
+    assert_matches_ref,
+    log_geom,
 )
 
 logger = get_logger(__name__)
@@ -82,51 +84,6 @@ def _case_and_modality(path: Path) -> Tuple[str, Optional[str]]:
         return (case_id, "t1")
 
     return (case_id, None)
-
-
-def _assert_matches_ref(cid: str, tag: str, ref_sitk: sitk.Image, out_path: Path):
-    ref_xyz = tuple(int(v) for v in ref_sitk.GetSize())  # (x,y,z)
-    shp = nib.load(str(out_path)).shape  # (x,y,z)
-    if tuple(shp) != ref_xyz:
-        raise RuntimeError(
-            f"[{cid}] {tag}: saved shape {shp} != ref {ref_xyz} ({out_path.name})"
-        )
-
-
-def _size(img: sitk.Image) -> tuple[int, int, int]:
-    # SimpleITK reports (x, y, z)
-    return tuple(int(v) for v in img.GetSize())
-
-
-def _spacing(img: sitk.Image) -> tuple[float, float, float]:
-    return tuple(float(v) for v in img.GetSpacing())
-
-
-def _log_geom(
-    cid: str,
-    tag: str,
-    img: sitk.Image,
-    ref: sitk.Image,
-    *,
-    tol_rel: float = 0.05,
-    tol_abs: float = 0.2,
-) -> None:
-    sz = _size(img)
-    sp = _spacing(img)
-    rsz = _size(ref)
-    rsp = _spacing(ref)
-    logger.info(
-        f"[{cid}] {tag:>6} size={sz} spacing={sp} | REF size={rsz} spacing={rsp}"
-    )
-
-    # warn if spacing differs a lot (per-axis)
-    diffs_abs = np.abs(np.array(sp) - np.array(rsp))
-    diffs_rel = diffs_abs / np.maximum(np.array(rsp), 1e-8)
-    if np.any((diffs_rel > tol_rel) & (diffs_abs > tol_abs)):
-        logger.warning(
-            f"[{cid}] {tag}: spacing differs from reference "
-            f"(abs={tuple(diffs_abs.round(4))}, rel={tuple((100*diffs_rel).round(1))}%)"
-        )
 
 
 def convert_to_nnUNet(
@@ -231,7 +188,6 @@ def convert_to_nnUNet(
         # have: dict modality->Path for this cid; choose reference modality
         ref_mod = "flair" if "flair" in have else next(iter(have.keys() - {"seg"}))
         ref_sitk = load_sitk(have[ref_mod])
-        _log_geom(cid, "REF", ref_sitk, ref_sitk)  # logs once
 
         # images in fixed channel order
         for ch, m in enumerate(modalities):
@@ -245,7 +201,7 @@ def convert_to_nnUNet(
                     n4_shrink=n4_shrink,
                     n4_iters=n4_iters,
                 )
-                _assert_matches_ref(cid, m, ref_sitk, imgTr / f"{cid}_{ch:04d}.nii.gz")
+                assert_matches_ref(cid, m, ref_sitk, imgTr / f"{cid}_{ch:04d}.nii.gz")
             except Exception as e:
                 msg = f"{cid}:{m} -> {type(e).__name__}: {e}"
                 if on_error == "skip_modality":
@@ -281,7 +237,7 @@ def convert_to_nnUNet(
                 is_label=True,
                 do_n4=False,
             )
-            _assert_matches_ref(cid, "seg", ref_sitk, labTr / f"{cid}.nii.gz")
+            assert_matches_ref(cid, "seg", ref_sitk, labTr / f"{cid}.nii.gz")
             seg_nii = safe_load_seg_any(have["seg"], out_dtype=np.uint8)
             seg = seg_nii.get_fdata().astype(np.uint8, copy=False)
             seg = remap_labels_to_0123(seg)

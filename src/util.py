@@ -1187,3 +1187,47 @@ def hd95_mm_from_binary(
         return 0.0
 
     return float(np.nanpercentile(all_d.astype(np.float64), 95))
+
+
+def assert_matches_ref(cid: str, tag: str, ref_sitk: sitk.Image, out_path: Path):
+    ref_xyz = tuple(int(v) for v in ref_sitk.GetSize())  # (x,y,z)
+    shp = nib.load(str(out_path)).shape  # (x,y,z)
+    if tuple(shp) != ref_xyz:
+        raise RuntimeError(
+            f"[{cid}] {tag}: saved shape {shp} != ref {ref_xyz} ({out_path.name})"
+        )
+
+
+def log_geom(
+    cid: str,
+    tag: str,
+    img: sitk.Image,
+    ref: sitk.Image,
+    *,
+    tol_rel: float = 0.05,
+    tol_abs: float = 0.2,
+) -> None:
+
+    def _size(img: sitk.Image) -> tuple[int, int, int]:
+        # SimpleITK reports (x, y, z)
+        return tuple(int(v) for v in img.GetSize())
+
+    def _spacing(img: sitk.Image) -> tuple[float, float, float]:
+        return tuple(float(v) for v in img.GetSpacing())
+
+    sz = _size(img)
+    sp = _spacing(img)
+    rsz = _size(ref)
+    rsp = _spacing(ref)
+    logger.info(
+        f"[{cid}] {tag:>6} size={sz} spacing={sp} | REF size={rsz} spacing={rsp}"
+    )
+
+    # warn if spacing differs a lot (per-axis)
+    diffs_abs = np.abs(np.array(sp) - np.array(rsp))
+    diffs_rel = diffs_abs / np.maximum(np.array(rsp), 1e-8)
+    if np.any((diffs_rel > tol_rel) & (diffs_abs > tol_abs)):
+        logger.warning(
+            f"[{cid}] {tag}: spacing differs from reference "
+            f"(abs={tuple(diffs_abs.round(4))}, rel={tuple((100*diffs_rel).round(1))}%)"
+        )
