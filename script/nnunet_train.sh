@@ -62,5 +62,4 @@ export nnUNet_compile=1     # or set in your shell rc
 # nnUNetv2_train 501 3d_fullres 2
 # nnUNetv2_train 501 3d_fullres 3
 # nnUNetv2_train 501 3d_fullres 4
-
 nnUNetv2_train 503 3d_fullres 0 -tr nnUNetTrainerEarlyStopping -num_gpus 4 -p nnUNetResEncUNetMPlans --npz

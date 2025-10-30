@@ -31,7 +31,7 @@ ENV_PREFIX="/projects/gbm_modeling/.conda/envs/mri"
 conda activate "${ENV_PREFIX}"
 
 DATASET_ID=504
-PLANNER=nnUNetPlannerResEncM
+PLANNER=nnUNetPlannerResEncXL
 
 mkdir -p logs
 source script/set_unet_path.sh
