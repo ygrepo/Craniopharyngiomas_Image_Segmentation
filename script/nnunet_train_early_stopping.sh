@@ -54,16 +54,6 @@ PY
 # Train all 5 folds:
 export nnUNet_compile=1     # or set in your shell rc
 
-#nnUNetv2_train 502 3d_fullres 0 -tr nnUNetTrainer -num_gpus 4 -p nnUNetResEncUNetMPlans --npz
-#nnUNetv2_train 502 3d_fullres 0 -num_gpus 4 -p nnUNetResEncUNetMPlans --npz
-#nnUNetv2_train 501 3d_fullres 0 -num_gpus 2 -p nnUNetResEncUNetMPlans
-
-# nnUNetv2_train 501 3d_fullres 1
-# nnUNetv2_train 501 3d_fullres 2
-# nnUNetv2_train 501 3d_fullres 3
-# nnUNetv2_train 501 3d_fullres 4
-
-
 
 DATASET_ID=504
 CFG=3d_fullres
