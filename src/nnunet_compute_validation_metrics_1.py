@@ -150,10 +150,11 @@ def _norm_case_metrics(md: Dict[str, Any]) -> Dict[str, Optional[float]]:
     # ---- per-case (macro) derived metrics from counts ----
     recall = None
     specificity = None
-    accuracy = None
-    f1_score = None
+    balanced_acc = None
+    prevalence = None
+    pred_pos_rate = None
     vol_bias = None
-    # total = None
+    total = None
 
     try:
         if all(x is not None for x in (tp, tn, fp, fn)):
@@ -161,18 +162,16 @@ def _norm_case_metrics(md: Dict[str, Any]) -> Dict[str, Optional[float]]:
             tn_f = float(tn)
             fp_f = float(fp)
             fn_f = float(fn)
-            # total = tp_f + tn_f + fp_f + fn_f
+            total = tp_f + tn_f + fp_f + fn_f
             if (tp_f + fn_f) > 0:
                 recall = tp_f / (tp_f + fn_f)
             if (tn_f + fp_f) > 0:
                 specificity = tn_f / (tn_f + fp_f)
-            accuracy = (tp_f + tn_f) / (tp_f + tn_f + fp_f + fn_f)
-            f1_score = 2 * (recall * ppv) / (recall + ppv) if recall + ppv > 0 else 0.0
-            # if recall is not None and specificity is not None:
-            #     balanced_acc = 0.5 * (recall + specificity)
-            # if total > 0:
-            #     prevalence = (tp_f + fn_f) / total
-            #     pred_pos_rate = (tp_f + fp_f) / total
+            if recall is not None and specificity is not None:
+                balanced_acc = 0.5 * (recall + specificity)
+            if total > 0:
+                prevalence = (tp_f + fn_f) / total
+                pred_pos_rate = (tp_f + fp_f) / total
         if n_pred is not None and n_ref is not None:
             n_pred_f = float(n_pred)
             n_ref_f = float(n_ref)
@@ -189,23 +188,22 @@ def _norm_case_metrics(md: Dict[str, Any]) -> Dict[str, Optional[float]]:
         {
             "Dice": dice,
             "Jaccard": iou,  # canonical: Jaccard == IoU
-            # "PPV": ppv,
-            # "NPV": npv,
-            "Accuracy": accuracy,
-            "F1Score": f1_score,
-            "Recall": recall,
-            "Specificity": specificity,
+            "PPV": ppv,
+            "NPV": npv,
             "HD95_mm": hd95,
-            "VolumetricBias": vol_bias,
             "tp": tp,
             "tn": tn,
             "fp": fp,
             "fn": fn,
             "n_pred": n_pred,
             "n_ref": n_ref,
-            # "BalancedAccuracy": balanced_acc,
-            # "Prevalence": prevalence,
-            # "PredPosRate": pred_pos_rate,
+            # per-case derived
+            "Recall": recall,
+            "Specificity": specificity,
+            "BalancedAccuracy": balanced_acc,
+            "Prevalence": prevalence,
+            "PredPosRate": pred_pos_rate,
+            "VolumetricBias": vol_bias,
         }
     )
 
@@ -409,17 +407,15 @@ def write_cases_csv(
         # scores first
         "Dice",
         "Jaccard",
-        # "PPV",
-        # "NPV",
-        "Accuracy",
-        "F1Score",
+        "PPV",
+        "NPV",
         "Recall",
         "Specificity",
-        # "BalancedAccuracy",
-        # "Prevalence",
-        # "PredPosRate",
-        "HD95_mm",
+        "BalancedAccuracy",
+        "Prevalence",
+        "PredPosRate",
         "VolumetricBias",
+        "HD95_mm",
         # counts
         "tp",
         "tn",
@@ -636,18 +632,15 @@ def write_summary_csv(
     macro_order = [
         "Dice",
         "Jaccard",
-        # "PPV",
-        # "NPV",
-        "Accuracy",
-        "F1Score",
+        "PPV",
+        "NPV",
         "Recall",
         "Specificity",
-        # "BalancedAccuracy",
-        # "Prevalence",
-        # "PredPosRate",
+        "BalancedAccuracy",
+        "Prevalence",
+        "PredPosRate",
         "VolumetricBias",
-        "HD95_mm",
-        # "HD95_mm",  # canonical HD95 in mm if you normalized it earlier
+        "HD95_mm",  # canonical HD95 in mm if you normalized it earlier
     ]
     macro_present = [m for m in macro_order if m in score_cols]
 

@@ -83,7 +83,7 @@ echo "[info] DJ  =$DJ"
 echo "[info] PL  =$PL"
 
 # --- extract fold-${FOLD} validation IDs (fix: don't rely on shell var expansion inside heredoc) ---
-OUT_IDS="${RES}/val_ids_${DATASET_ID}_${TR}__${PLANS_ID}__${CFG}_fold${FOLD}.txt"
+OUT_IDS="${RES}/val_ids.txt"
 "${PYTHON}" - "$PREP" "$OUT_IDS" <<'PY'
 import json, os, sys
 
