@@ -44,10 +44,13 @@ MAIN="src/nnunet_BraTS2017_convert.py"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/nnunet_brats201_data_convert_${TIMESTAMP}.log"
 
+DATASET_ID=504
+
 set +e
 $PYTHON "$MAIN" \
     --src_root "$DATA_DIR" \
     --dst_root "$OUTPUT_DIR" \
+    --dataset_id "$DATASET_ID" \
     --log_level "$LOG_LEVEL" \
     --log_file "$LOG_FILE"
 exit_code=$?

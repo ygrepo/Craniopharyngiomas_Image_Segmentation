@@ -85,6 +85,10 @@ def convert_braTS_to_nnUNet(
     logger.info("Starting BraTS→nnU-Net conversion")
 
     assert on_error in ("skip_case", "skip_modality", "raise")
+    logger.info(f"dataset_id={dataset_id}, dataset_name={dataset_name}")
+    logger.info(f"modalities={modalities}")
+    logger.info(f"split_ratio={split_ratio}")
+    logger.info(f"do_n4={do_n4}, n4_shrink={n4_shrink}, n4_iters={n4_iters}")
 
     # ---- validate split ----
     if len(split_ratio) not in (2, 3):
@@ -254,13 +258,12 @@ def convert_braTS_to_nnUNet(
     labels = OrderedDict(
         [
             ("background", 0),
-            ("whole_tumor", [1, 2, 3]),
-            ("tumor_core", [2, 3]),
-            ("enhancing_tumor", 3),
+            ("tumor", [1, 3]),
+            ("edema", 2),
         ]
     )
     logger.info(f"Labels: {labels}")
-    regions_class_order = [1, 2, 3]
+    regions_class_order = [1, 2]
     ds = OrderedDict(
         [
             ("name", dataset_name),
