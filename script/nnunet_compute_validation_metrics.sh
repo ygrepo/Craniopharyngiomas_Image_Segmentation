@@ -55,7 +55,7 @@ RAW="${nnUNet_raw}/Dataset${DATASET_ID}_${DATASET_NAME}"
 echo "[info] RAW =$RAW"
 
 # --- prediction output ---
-OUTP="${RES}/fold_${FOLD}/predictions/validation_tta"
+OUTP="${RES}/fold_${FOLD}/predictions/validation"
 mkdir -p "$OUTP"
 IN_JSON_HD95="${OUTP}/${DATASET_ID}_fold${FOLD}_summary_with_hd95.json"
 OUT_CASE_FN="${OUTP}/${DATASET_ID}_validation_metrics_cases.csv"
