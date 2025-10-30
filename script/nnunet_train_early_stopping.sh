@@ -68,7 +68,7 @@ export nnUNet_compile=1     # or set in your shell rc
 DATASET_ID=504
 CFG=3d_fullres
 TR=nnUNetTrainerEarlyStopping
-PLANS_ID=nnUNetResEncUNetMPlans
+PLANS_ID=nnUNetPlannerResEncXL
 
 FOLD=0
 nnUNetv2_train $DATASET_ID $CFG  $FOLD -tr $TR -num_gpus 4 -p $PLANS_ID --npz
