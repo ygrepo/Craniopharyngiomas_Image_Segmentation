@@ -357,8 +357,28 @@ def main():
         "val_loss",
     ]
 
-    # Sort dice class fields for consistent ordering
-    dice_fieldnames = sorted([f for f in detected_classes if f.endswith("_Dice")])
+    # Preserve order based on class_names if provided, otherwise use detected order
+    if args.class_names:
+        # Use the order from command line arguments
+        dice_fieldnames = []
+        for class_name in args.class_names:
+            field_name = f"{class_name}_Dice"
+            if field_name in detected_classes:
+                dice_fieldnames.append(field_name)
+
+        # Add any detected classes not in the provided list (sorted)
+        remaining_classes = sorted(
+            [
+                f
+                for f in detected_classes
+                if f.endswith("_Dice") and f not in dice_fieldnames
+            ]
+        )
+        dice_fieldnames.extend(remaining_classes)
+    else:
+        # If no class names provided, try to preserve natural order from first occurrence
+        # For now, fall back to sorted order (you could enhance this to track first occurrence order)
+        dice_fieldnames = sorted([f for f in detected_classes if f.endswith("_Dice")])
 
     end_fieldnames = [
         "EMA_DICE",

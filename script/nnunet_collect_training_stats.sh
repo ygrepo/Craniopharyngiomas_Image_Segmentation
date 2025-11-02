@@ -40,11 +40,6 @@ set +e
   --input_dir "${RES}/fold_${FOLD}/" \
   --output_fn "${OUT_FN}" \
   --class_names Tumor Edema
-# "${PYTHON}" "${MAIN}" \
-#   --log_file "${log_file}" \
-#   --log_level "${LOG_LEVEL}" \
-#   --input_dir "${RES}/fold_${FOLD}/" \
-#   --output_fn "${OUT_FN}"
 exit_code=$?
 set -e
 
