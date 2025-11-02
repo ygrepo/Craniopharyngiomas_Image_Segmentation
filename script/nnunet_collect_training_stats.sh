@@ -19,11 +19,11 @@ source script/set_unet_path.sh
 
 
 
-DATASET_ID=503
-DATASET_NAME=CP
+DATASET_ID=504
+DATASET_NAME=BraTS2017_4ch
 FOLD=0
 CFG=3d_fullres
-TR=EmaDiceEarlyStopTrainer
+TR=nnUNetTrainerEarlyStopping
 PLANS_ID=nnUNetResEncUNetMPlans
 
 RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
