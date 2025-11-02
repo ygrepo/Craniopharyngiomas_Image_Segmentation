@@ -32,12 +32,13 @@ ts=$(date +"%Y%m%d_%H%M%S")
 log_file="${LOG_DIR}/${ts}_unet_collect_training_stats.log"
 echo "  log_file : ${log_file}"
 
+OUT_FN="${RES}/${DATASET_ID}_${TR}__${PLANS_ID}__${CFG}_fold${FOLD}_training_metrics.csv"
 set +e
 "${PYTHON}" "${MAIN}" \
   --log_file "${log_file}" \
   --log_level "${LOG_LEVEL}" \
   --input_dir "${RES}/fold_${FOLD}/" \
-  --output_fn "${RES}/fold_${FOLD}/training_metrics.csv"
+  --output_fn "${OUT_FN}"
 exit_code=$?
 set -e
 
