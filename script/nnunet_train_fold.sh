@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=brats_f${FOLD}
-#SBATCH --output=logs/brats_f${FOLD}_%j.out
-#SBATCH --error=logs/brats_f${FOLD}_%j.err
+#SBATCH --job-name=brats_fold
+#SBATCH --output=logs/brats_fold_%j.out
+#SBATCH --error=logs/brats_fold_%j.err
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:4
 #SBATCH --ntasks=1
