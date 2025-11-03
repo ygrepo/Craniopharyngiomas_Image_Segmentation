@@ -9,5 +9,5 @@ for F in 1 2 3 4; do
     --job-name=brats_f$F \
     --output=logs/brats_f${F}_%j.out \
     --error=logs/brats_f${F}_%j.err \
-    script/nnunet_train_fold.sbatch
+    script/nnunet_train_fold.sh
 done
