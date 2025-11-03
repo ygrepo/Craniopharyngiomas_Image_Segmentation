@@ -39,9 +39,13 @@ LOG_DIR="logs"
 LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
-DATASET_ID=502
-CONFIG=3d_fullres
-FOLD=0
+
+DATASET_ID=504
+CFG=3d_fullres
+TR=nnUNetTrainerEarlyStopping
+PLANS_ID=nnUNetResEncUNetMPlans
+FOlD=1
+
 NUM_GPUS=4
 
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
@@ -55,10 +59,10 @@ import torch
 print("PyTorch sees", torch.cuda.device_count(), "GPUs")
 PY
 
-export nnUNet_compile=1    
+export nnUNet_compile=1
 
 # Results dir where fold_0 lives (this is nnU-Net’s default layout)
-RESULTS_DIR="${nnUNet_results}/Dataset${DATASET_ID}_BraTS2017_4ch/nnUNetTrainer__nnUNetResEncUNetMPlans__${CONFIG}"
+RESULTS_DIR="${nnUNet_results}/Dataset${DATASET_ID}_BraTS2017_4ch/${TR}__${PLANS_ID}__${CFG}"
 CHK_LATEST="${RESULTS_DIR}/fold_${FOLD}/checkpoint_latest.pth"
 CHK_BEST="${RESULTS_DIR}/fold_${FOLD}/checkpoint_best.pth"
 
@@ -66,12 +70,12 @@ echo "[info] RESULTS_DIR=${RESULTS_DIR}"
 echo "[info] Checking checkpoints…"
 if [[ -f "${CHK_LATEST}" ]]; then
   echo "[resume] Found checkpoint_latest.pth → continuing training with --c"
-  nnUNetv2_train "${DATASET_ID}" "${CONFIG}" "${FOLD}" --c -num_gpus "${NUM_GPUS}" -p nnUNetResEncUNetMPlans --npz
+  nnUNetv2_train "${DATASET_ID}" "${CFG}" "${FOLD}" --c -num_gpus "${NUM_GPUS}" -p ${PLANS_ID} --npz
 elif [[ -f "${CHK_BEST}" ]]; then
   echo "[warmstart] checkpoint_latest.pth not found. Using checkpoint_best.pth as pretrained weights (new optimizer/LR schedule)."
-  nnUNetv2_train "${DATASET_ID}" "${CONFIG}" "${FOLD}" \
+  nnUNetv2_train "${DATASET_ID}" "${CFG}" "${FOLD}" \
     -pretrained_weights "${CHK_BEST}" \
-    -num_gpus "${NUM_GPUS}" -p nnUNetResEncUNetMPlans --npz
+    -num_gpus "${NUM_GPUS}" -p ${PLANS_ID} --npz
 else
   echo "[error] No checkpoint_latest.pth or checkpoint_best.pth found in:"
   echo "        ${RESULTS_DIR}/fold_${FOLD}"
