@@ -6,6 +6,7 @@ doc/Meetings
 checkpoints/
 logs/
 output/
+doc/
 src/__pycache__/
 Dataset002_BRATS19/
 pretrained_weights/
