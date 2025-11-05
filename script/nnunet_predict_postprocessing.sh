@@ -1,8 +1,8 @@
 #!/bin/bash
-#   nnunet_predict.sh    —  Predict 3D mask using nnU-Net v2.
-#SBATCH --job-name=nnunet_predict
-#SBATCH --output=logs/nnunet_predict_%A_%a.out
-#SBATCH --error=logs/nnunet_predict_%A_%a.err
+#   nnunet_predict_postprocessing.sh    —  Predict 3D mask using nnU-Net v2.
+#SBATCH --job-name=nnunet_predict_postprocessing
+#SBATCH --output=logs/nnunet_predict_postprocessing_%A_%a.out
+#SBATCH --error=logs/nnunet_predict_postprocessing_%A_%a.err
 #SBATCH --time=72:00:00
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:4
@@ -16,7 +16,7 @@ set -euo pipefail
 module purge
 module load anaconda3/2023.09
 module load proxy/jh-proxy-1.0
-source $(conda info --base)/etc/profile.d/conda.sh
+source "$(conda info --base)/etc/profile.d/conda.sh"
 
 # --- Paths (edit if needed) ---
 ENV_PREFIX="/projects/gbm_modeling/.conda/envs/mri"
@@ -50,59 +50,33 @@ import torch
 print("PyTorch sees", torch.cuda.device_count(), "GPUs")
 PY
 
-# Choose a GPU id if needed:
-#export CUDA_VISIBLE_DEVICES=0
-# DATASET_ID=501
-# DATASET_NAME=BraTS2017_4ch
-# FOLD=0
-# CFG=3d_fullres
-# TR=nnUNetTrainer
-# PLANS_ID=nnUNetPlans
-
-
-# DATASET_ID=502
-# DATASET_NAME=BraTS2017_4ch
-# FOLD=0
-# CFG=3d_fullres
-# TR=nnUNetTrainer
-# PLANS_ID=nnUNetResEncUNetMPlans
-
-DATASET_ID=503
-DATASET_NAME=CP
+DATASET_ID=504
+DATASET_NAME=BraTS2017_4ch
 FOLD=0
 CFG=3d_fullres
-TR=EmaDiceEarlyStopTrainer
+TR=nnUNetTrainerEarlyStopping
 PLANS_ID=nnUNetResEncUNetMPlans
 
 # --- derive paths from envs ---
 RAW="${nnUNet_raw}/Dataset${DATASET_ID}_${DATASET_NAME}"
 RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
 
-# Predict Single fold (e.g., fold 0)
-# nnUNetv2_predict \
-#   -i ${RAW}/imagesTs/ \
-#   -o ${RES}/fold_${FOLD}/predictions/test \
-#   -d ${DATASET_ID} \
-#   -c ${CFG} \
-#   -f ${FOLD} \
-#   -tr ${TR} \
-#   -p ${PLANS_ID} \
-#   -chk ${RES}/fold_${FOLD}/checkpoint_best.pth \
-#   -device cuda \
-#   -save_probabilities \
-#   -disable_postprocessing
+nnUNetv2_apply_postprocessing -i OUTPUT_FOLDER -o OUTPUT_FOLDER_PP -pp_pkl_file /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset504_
+nnUNetv2_apply_postprocessing -i OUTPUT_FOLDER -o OUTPUT_FOLDER_PP -pp_pkl_file /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset504_
+BraTS2017_4ch/nnUNetTrainerEarlyStopping__nnUNetResEncUNetMPlans__3d_fullres/crossval_results_folds_0_1_2_3_4/postprocessing.pkl -np 8 -plans_json /projects/gbm_modeling/gith
+ub/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset504_BraTS2017_4ch/nnUNetTrainerEarlyStopping__nnUNetResEncUNetMPlans__3d_fullres/crossval_results_folds_0_1_2_3
+_4/plans.json
 
 
-# Predict Single fold (e.g., fold 0)
-nnUNetv2_predict \
+# Predict all folds
+nnUNetv2_apply_postprocessing \
   -i ${RAW}/imagesTs/ \
-  -o ${RES}/fold_${FOLD}/predictions/test \
+  -o ${RES}/folds/predictions/test \
   -d ${DATASET_ID} \
   -c ${CFG} \
-  -f ${FOLD} \
+  -f 0 1 2 3 4 \
   -tr ${TR} \
   -p ${PLANS_ID} \
-  -chk ${RES}/fold_${FOLD}/checkpoint_best.pth \
   -device cuda \
   -save_probabilities \
   -disable_postprocessing

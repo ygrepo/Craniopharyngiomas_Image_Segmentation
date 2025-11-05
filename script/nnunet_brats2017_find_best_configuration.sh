@@ -5,7 +5,6 @@
 #SBATCH --error=logs/unet_brats2017_find_best_configuration_%j.err
 #SBATCH --time=72:00:00
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:4
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
