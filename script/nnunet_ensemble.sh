@@ -42,7 +42,7 @@ RES_DIR="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_I
 # --- Run the ensemble command ---
 echo "Starting ensemble..."
 nnUNetv2_ensemble \
-    -f "${RES_DIR}/folds_0/test_predictions" \
+    -i "${RES_DIR}/folds_0/test_predictions" \
        "${RES_DIR}/folds_1/test_predictions" \
        "${RES_DIR}/folds_2/test_predictions" \
        "${RES_DIR}/folds_3/test_predictions" \
