@@ -72,5 +72,4 @@ nnUNetv2_predict \
   -tr ${TR} \
   -p ${PLANS_ID} \
   -device cuda \
-  --save_probabilities \
-  --disable_postprocessing
+  --save_probabilities 
