@@ -1,82 +1,73 @@
 #!/bin/bash
-#   nnunet_predict_postprocessing.sh    —  Predict 3D mask using nnU-Net v2.
-#SBATCH --job-name=nnunet_predict_postprocessing
-#SBATCH --output=logs/nnunet_predict_postprocessing_%A_%a.out
-#SBATCH --error=logs/nnunet_predict_postprocessing_%A_%a.err
-#SBATCH --time=72:00:00
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:4
+#   nnunet_apply_pp.sh    — Apply post-processing to ensembled predictions
+#SBATCH --job-name=nnunet_apply_pp
+#SBATCH --output=logs/nnunet_apply_pp_%j.out
+#SBATCH --error=logs/nnunet_apply_pp_%j.err
+#SBATCH --time=04:00:00        # 4h is a safe start
+#SBATCH --partition=cpu        # <-- This is a CPU-only job
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=128G
-
+#SBATCH --cpus-per-task=8      # <-- Matches -np 8
+#SBATCH --mem=64G              # 64G is likely plenty
 
 set -euo pipefail
 
+# --- Environment Setup (Same as your other scripts) ---
 module purge
 module load anaconda3/2023.09
 module load proxy/jh-proxy-1.0
 source "$(conda info --base)/etc/profile.d/conda.sh"
 
-# --- Paths (edit if needed) ---
 ENV_PREFIX="/projects/gbm_modeling/.conda/envs/mri"
 PIP_CACHE_DIR="/projects/gbm_modeling/.pip_cache"
 CONDA_PKGS_DIRS="/projects/gbm_modeling/.conda/pkgs"
 
-# --- Keep installs off $HOME and avoid user-site leakage ---
-mkdir -p "${PIP_CACHE_DIR}" "${CONDA_PKGS_DIRS}"
-export PIP_CACHE_DIR="${PIP_CACHE_DIR}"
-export CONDA_PKGS_DIRS="${CONDA_PKGS_DIRS}"
+export PIP_CACHE_DIR CONDA_PKGS_DIRS
 export PYTHONNOUSERSITE=1
 unset PYTHONPATH || true
 
 conda activate "${ENV_PREFIX}"
-
-LOG_DIR="logs"
-LOG_LEVEL="DEBUG"
-mkdir -p "$LOG_DIR"
-
 source script/set_unet_path.sh
+# --- End of Environment Setup ---
 
 
-export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
-export NCCL_DEBUG=WARN          # or INFO when debugging comms
-export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
-
-echo "SLURM_JOB_GPUS=${SLURM_JOB_GPUS}"
-echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>}"
-python - <<'PY'
-import torch
-print("PyTorch sees", torch.cuda.device_count(), "GPUs")
-PY
-
+# --- Define paths ---
 DATASET_ID=504
 DATASET_NAME=BraTS2017_4ch
-FOLD=0
-CFG=3d_fullres
 TR=nnUNetTrainerEarlyStopping
 PLANS_ID=nnUNetResEncUNetMPlans
+CFG=3d_fullres
 
-# --- derive paths from envs ---
-RAW="${nnUNet_raw}/Dataset${DATASET_ID}_${DATASET_NAME}"
-RES="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
+# This is the base directory for this model
+RES_DIR="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
 
-nnUNetv2_apply_postprocessing -i OUTPUT_FOLDER -o OUTPUT_FOLDER_PP -pp_pkl_file /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset504_
-nnUNetv2_apply_postprocessing -i OUTPUT_FOLDER -o OUTPUT_FOLDER_PP -pp_pkl_file /projects/gbm_modeling/github/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset504_
-BraTS2017_4ch/nnUNetTrainerEarlyStopping__nnUNetResEncUNetMPlans__3d_fullres/crossval_results_folds_0_1_2_3_4/postprocessing.pkl -np 8 -plans_json /projects/gbm_modeling/gith
-ub/Craniopharyngiomas_Image_Segmentation/nnUNet_results/Dataset504_BraTS2017_4ch/nnUNetTrainerEarlyStopping__nnUNetResEncUNetMPlans__3d_fullres/crossval_results_folds_0_1_2_3
-_4/plans.json
+# 1. INPUT: The folder created by your previous ensemble script
+INPUT_DIR="${RES_DIR}/ensemble_predictions_final"
 
+# 2. OUTPUT: A new folder for the final, clean .nii.gz files
+OUTPUT_DIR="${RES_DIR}/ensemble_predictions_final_pp"
 
-# Predict all folds
+# 3. Path to the cross-validation results (from nnU-Net's recommendation)
+CROSSVAL_DIR="${RES_DIR}/crossval_results_folds_0_1_2_3_4"
+
+# 4. The specific files needed from that folder
+PP_FILE="${CROSSVAL_DIR}/postprocessing.pkl"
+PLANS_FILE="${CROSSVAL_DIR}/plans.json"
+
+# Create the new output directory
+mkdir -p "${OUTPUT_DIR}"
+
+# --- Run the apply_postprocessing command ---
+echo "Applying postprocessing..."
+echo "Input (raw .npz):   ${INPUT_DIR}"
+echo "Output (clean .nii.gz): ${OUTPUT_DIR}"
+echo "Postprocessing file: ${PP_FILE}"
+echo "Plans file:          ${PLANS_FILE}"
+
 nnUNetv2_apply_postprocessing \
-  -i ${RAW}/imagesTs/ \
-  -o ${RES}/folds/predictions/test \
-  -d ${DATASET_ID} \
-  -c ${CFG} \
-  -f 0 1 2 3 4 \
-  -tr ${TR} \
-  -p ${PLANS_ID} \
-  -device cuda \
-  -save_probabilities \
-  -disable_postprocessing
+    -i "${INPUT_DIR}" \
+    -o "${OUTPUT_DIR}" \
+    -pp_pkl_file "${PP_FILE}" \
+    -plans_json "${PLANS_FILE}" \
+    -np 8  # Match --cpus-per-task
+
+echo "Postprocessing complete. Final segmentations are in ${OUTPUT_DIR}"
