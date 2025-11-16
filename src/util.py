@@ -17,7 +17,6 @@ from nibabel.orientations import (
 
 from typing import Dict, Any
 import torch
-from torch.serialization import add_safe_globals
 import nnunetv2
 import json
 import torch.nn as nn
@@ -735,6 +734,8 @@ def safe_torch_load(path: str, map_location: torch.device | str = "cpu"):
     """
     # 1) Try weights_only=True with allowlisted numpy scalar
     try:
+        from torch.utils.cpp_extension import add_safe_globals
+
         add_safe_globals([np._core.multiarray.scalar])  # allow old numpy scalar pickles
     except Exception:
         # older torch versions may not have add_safe_globals; that's fine

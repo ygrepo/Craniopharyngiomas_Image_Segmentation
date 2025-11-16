@@ -261,12 +261,6 @@ def convert_braTS_to_nnUNet(
     logger.info(f"Channel names: {channel_names}")
     modality_map = OrderedDict((str(i), "MRI") for i in range(len(modalities)))
     logger.info(f"Modality map: {modality_map}")
-    # channel_names = {
-    #     "0": "FLAIR",
-    #     "1": "T1",
-    #     "2": "T1CE",
-    #     "3": "T2",
-    # }
     labels = OrderedDict(
         [
             ("background", 0),
