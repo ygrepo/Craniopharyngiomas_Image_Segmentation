@@ -35,7 +35,7 @@ LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
 PYTHON="${ENV_PREFIX}/bin/python"
-MAIN="src/nnunet_compute_chiasm_metrics.py"
+MAIN="src/nnunet_compute_chiasm_metrics_2.py"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/nnunet_compute_chiasm_metrics_${TIMESTAMP}.log"
