@@ -24,7 +24,7 @@ def get_args():
     ap.add_argument(
         "--base_dir",
         type=Path,
-        required=True,
+        default=Path("nnUNet_raw/Dataset503_CP"),
         help="Base directory containing labelsTr/ and chiasm_masks/",
     )
     ap.add_argument(
