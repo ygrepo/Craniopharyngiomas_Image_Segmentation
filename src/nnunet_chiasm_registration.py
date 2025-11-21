@@ -43,7 +43,7 @@ def process_split(
         out_file = outdir / f"{case_id}_chiasm_mask.nii.gz"
 
         if out_file.exists():
-            logger.warning(f"[SKIP]:{case_id}")
+            logger.warning(f"[SKIP]:{case_id}, file exists: {out_file}")
             continue
 
         logger.info(f"[RUN]:{case_id}")
