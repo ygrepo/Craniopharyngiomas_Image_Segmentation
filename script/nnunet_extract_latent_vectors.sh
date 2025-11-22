@@ -49,7 +49,7 @@ CFG=3d_fullres
 TR=nnUNetTrainerEarlyStopping
 PLANS_ID=nnUNetResEncUNetMPlans
 
-MODEL_FOLDER="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}/fold_${FOLD}"
+MODEL_FOLDER="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
 OUTPUT_DIR="${MODEL_FOLDER}/latent_features"
 CASE_ID="06780898"  # Edit as needed
 
