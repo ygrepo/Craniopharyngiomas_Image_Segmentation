@@ -128,7 +128,7 @@ def main():
         [str(p) for p in channel_paths],  # File paths as strings
         None,  # No initial properties needed
         predictor.plans_manager,
-        predictor.configuration_manager.configuration,
+        predictor.configuration_manager,
         predictor.dataset_json,
     )
 
