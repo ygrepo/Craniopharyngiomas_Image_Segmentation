@@ -125,7 +125,7 @@ def main():
     )
 
     # Run preprocessing
-    data, seg, props = preprocessor.preprocess_test_case(images, props)
+    data, seg, props = preprocessor.preprocess_single_case(images, props)
 
     # Convert to tensor
     img_np = data.astype(np.float32)
