@@ -6,10 +6,10 @@ import argparse
 import sys
 import torch
 import numpy as np
+import os
 from pathlib import Path
 
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
-from nnunetv2.imageio.simpleitk_reader_writer import SimpleITKIO
 
 # Add repo root to path for imports
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -111,31 +111,32 @@ def main():
     logger.info(f"Hook registered on: {bottleneck_module}")
 
     # --- STEP 3: Read and preprocess the case ---
-    io = SimpleITKIO()
+    # Use predictor's data iterator (standard nnUNet approach)
+    list_of_lists = [[str(p) for p in channel_paths]]  # Wrap in list for single case
 
-    # Pass all 3 channels in correct order
-    images, props = io.read_images([str(p) for p in channel_paths])
-
-    # Use the preprocessor already configured by the predictor
-    # Depending on version, preprocess_single_case can return:
-    #   (data, seg, props)  OR a list-like where [0] is data.
-    preprocessor_class = predictor.configuration_manager.preprocessor_class
-    preprocessor = preprocessor_class(verbose=predictor.verbose)
-
-    logger.info(f"Preprocessor class: {preprocessor_class}")
-    logger.info(f"Preprocessor class name: {preprocessor_class.__name__}")
-    data, seg, props = preprocessor.run_case(
-        [str(p) for p in channel_paths],  # File paths as strings
-        None,  # No initial properties needed
-        predictor.plans_manager,
-        predictor.configuration_manager,
-        predictor.dataset_json,
+    # Get data iterator
+    data_iterator = predictor._internal_get_data_iterator_from_lists_of_filenames(
+        list_of_lists,
+        seg_from_prev_stage_files=[None],
+        output_filenames_truncated=[None],
+        num_processes=1,
     )
 
-    # Convert to tensor (C, D, H, W)
-    img_np = data.astype(np.float32)
-    # If shape is (C, Z, Y, X), this is correct; add batch dimension:
-    input_tensor = torch.from_numpy(img_np).unsqueeze(0).to(device)  # (1, C, D, H, W)
+    # Get preprocessed data
+    preprocessed = next(data_iterator)
+    data = preprocessed["data"]
+
+    # Convert to tensor if it's a file path
+    if isinstance(data, str):
+        data = torch.from_numpy(np.load(data))
+        # Clean up temp file if needed
+        if os.path.exists(data):
+            os.remove(data)
+    elif isinstance(data, np.ndarray):
+        data = torch.from_numpy(data)
+
+    input_tensor = data.unsqueeze(0).to(device) if data.dim() == 4 else data.to(device)
+    logger.info(f"Input tensor shape: {input_tensor.shape}")
 
     # --- STEP 4: Forward pass to trigger hook ---
     with torch.no_grad():
