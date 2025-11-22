@@ -46,7 +46,7 @@ def main():
     )
 
     case_id = args.case_id or "06780898"
-    images_dir = Path("nnUNet_raw/Dataset503_CP/imagesTs")
+    images_dir = Path("nnUNet_raw/Dataset503_CP/imagesTr")
 
     # Channel order must match dataset.json: 0: FLAIR, 1: T1CE, 2: T2
     channel_paths = [
