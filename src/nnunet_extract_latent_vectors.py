@@ -124,14 +124,14 @@ def main():
 
     logger.info(f"Preprocessor class: {preprocessor_class}")
     logger.info(f"Preprocessor class name: {preprocessor_class.__name__}")
-     data, seg, props = preprocessor.run_case(
+    data, seg, props = preprocessor.run_case(
         [str(p) for p in channel_paths],  # File paths as strings
         None,  # No initial properties needed
         predictor.plans_manager,
         predictor.configuration_manager.configuration,
         predictor.dataset_json,
     )
-    
+
     # Convert to tensor (C, D, H, W)
     img_np = data.astype(np.float32)
     # If shape is (C, Z, Y, X), this is correct; add batch dimension:
