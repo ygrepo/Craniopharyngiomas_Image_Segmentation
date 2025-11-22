@@ -128,15 +128,48 @@ def main():
 
     # Convert to tensor if it's a file path
     if isinstance(data, str):
-        data = torch.from_numpy(np.load(data))
+        data_np = np.load(data)
         # Clean up temp file if needed
         if os.path.exists(data):
             os.remove(data)
+        data = torch.from_numpy(data_np)
     elif isinstance(data, np.ndarray):
         data = torch.from_numpy(data)
 
-    input_tensor = data.unsqueeze(0).to(device) if data.dim() == 4 else data.to(device)
+    # Ensure proper batch dimension
+    if data.dim() == 4:  # (C, D, H, W)
+        input_tensor = data.unsqueeze(0).to(device)  # (1, C, D, H, W)
+    else:  # Already has batch dim
+        input_tensor = data.to(device)
+
     logger.info(f"Input tensor shape: {input_tensor.shape}")
+    # Debug: Check if dimensions are divisible by network requirements
+    _, c, d, h, w = input_tensor.shape
+    logger.info(f"Tensor dimensions - C:{c}, D:{d}, H:{h}, W:{w}")
+
+    # Try to make dimensions compatible by padding if needed
+    # nnUNet typically requires dimensions divisible by powers of 2
+    def make_divisible(size, divisor=32):
+        return int(np.ceil(size / divisor) * divisor)
+
+    target_d = make_divisible(d)
+    target_h = make_divisible(h)
+    target_w = make_divisible(w)
+
+    if target_d != d or target_h != h or target_w != w:
+        logger.info(
+            f"Padding tensor from ({d},{h},{w}) to ({target_d},{target_h},{target_w})"
+        )
+        pad_d = target_d - d
+        pad_h = target_h - h
+        pad_w = target_w - w
+
+        # Pad: (pad_left, pad_right, pad_top, pad_bottom, pad_front, pad_back)
+        padding = (0, pad_w, 0, pad_h, 0, pad_d)
+        input_tensor = torch.nn.functional.pad(
+            input_tensor, padding, mode="constant", value=0
+        )
+        logger.info(f"Padded tensor shape: {input_tensor.shape}")
 
     # --- STEP 4: Forward pass to trigger hook ---
     with torch.no_grad():
