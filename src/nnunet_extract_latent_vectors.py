@@ -116,19 +116,19 @@ def main():
     # Pass all 3 channels in correct order
     images, props = io.read_images([str(p) for p in channel_paths])
 
-    # Instantiate the preprocessor using the configuration from the loaded model
-    preprocessor_class = predictor.configuration_manager.preprocessor_class
-    preprocessor = preprocessor_class(
-        verbose=predictor.verbose,
-        configuration_manager=predictor.configuration_manager,
-        label_manager=predictor.plans_manager.get_label_manager(predictor.dataset_json),
-    )
+    # Use the preprocessor already configured by the predictor
+    # Depending on version, preprocess_single_case can return:
+    #   (data, seg, props)  OR a list-like where [0] is data.
+    preprocessed = predictor.preprocessor.preprocess_single_case(images, props)
+    if isinstance(preprocessed, tuple) and len(preprocessed) == 3:
+        data, seg, props = preprocessed
+    else:
+        # Fallback to old behavior if it returns just a list/array
+        data = preprocessed[0]
 
-    # Run preprocessing
-    data, seg, props = preprocessor.preprocess_single_case(images, props)
-
-    # Convert to tensor
+    # Convert to tensor (C, D, H, W)
     img_np = data.astype(np.float32)
+    # If shape is (C, Z, Y, X), this is correct; add batch dimension:
     input_tensor = torch.from_numpy(img_np).unsqueeze(0).to(device)  # (1, C, D, H, W)
 
     # --- STEP 4: Forward pass to trigger hook ---
