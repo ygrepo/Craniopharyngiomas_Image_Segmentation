@@ -127,7 +127,7 @@ def main():
     data, seg, props = preprocessor.run_case(
         images,
         props,
-        predictor.plans_manager.plans,
+        predictor.plans_manager,
         predictor.configuration_manager.configuration,
         predictor.dataset_json,
     )
