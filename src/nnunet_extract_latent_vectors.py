@@ -160,7 +160,12 @@ def parse_args() -> argparse.Namespace:
         "--checkpoint", type=str, default="checkpoint_final.pth", help="Checkpoint name"
     )
     parser.add_argument("--device", type=str, default="cuda", help="Device to use")
-    parser.add_argument("--log_level", type=str, default="INFO", help="Logging level")
+    parser.add_argument(
+        "--log_level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Logging verbosity.",
+    )
     parser.add_argument("--log_file", type=Path, help="Log file path")
 
     args = parser.parse_args()
@@ -171,7 +176,7 @@ def main():
     args = parse_args()
 
     # Setup logging
-    setup_logging(args.log_level, args.log_file)
+    setup_logging(args.log_file, args.log_level)
 
     # --- CONFIGURATION ---
     model_folder = args.model_folder.resolve()

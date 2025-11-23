@@ -1,6 +1,7 @@
 import argparse
 import ants
 from pathlib import Path
+from typing import List, Tuple
 
 import sys
 
@@ -33,42 +34,85 @@ def get_args():
 
 
 def process_split(
-    split_dir: Path, mni_t1: ants.ANTsImage, chiasm_mni: ants.ANTsImage, outdir: Path
-):
+    split_name: str,
+    split_dir: Path,
+    mni_t1: ants.ANTsImage,
+    chiasm_mni: ants.ANTsImage,
+    outdir: Path,
+) -> List[Tuple[str, str, str, str]]:
+    """
+    Process a given split (imagesTr or imagesTs).
+
+    Parameters
+    ----------
+    split_name : str
+        Name of the split, e.g. "imagesTr" or "imagesTs".
+    split_dir : Path
+        Directory containing the *_0001.nii.gz files.
+    mni_t1 : ants.ANTsImage
+        Atlas T1 in MNI space.
+    chiasm_mni : ants.ANTsImage
+        Chiasm mask in MNI space.
+    outdir : Path
+        Base output directory for chiasm masks.
+
+    Returns
+    -------
+    records : list of (split_name, case_id, status, message)
+        Status per case.
+    """
+    records: List[Tuple[str, str, str, str]] = []
+
+    split_outdir = outdir / split_name
+    split_outdir.mkdir(parents=True, exist_ok=True)
+
     # all T1CE files: channel 1
     t1_files = sorted(split_dir.glob("*_0001.nii.gz"))
+    logger.info(f"[{split_name}] Found {len(t1_files)} T1CE files.")
 
     for t1_path in t1_files:
         case_id = t1_path.name.replace("_0001.nii.gz", "")
-        out_file = outdir / f"{case_id}_chiasm_mask.nii.gz"
+        out_file = split_outdir / f"{case_id}_chiasm_mask.nii.gz"
 
         if out_file.exists():
-            logger.warning(f"[SKIP]:{case_id}, file exists: {out_file}")
+            msg = f"[SKIP]: {case_id}, file exists: {out_file}"
+            logger.warning(msg)
+            records.append((split_name, case_id, "skipped_exists", msg))
             continue
 
-        logger.info(f"[RUN]:{case_id}")
-        patient_t1 = ants.image_read(str(t1_path)).reorient_image2("RAI")
-        logger.info(f"Patient T1 shape: {patient_t1.shape}")
+        logger.info(f"[RUN {split_name}]: {case_id}")
+        try:
+            patient_t1 = ants.image_read(str(t1_path)).reorient_image2("RAI")
+            logger.info(f"Patient T1 shape: {patient_t1.shape}")
 
-        # --- Registration: atlas -> patient ---
-        reg = ants.registration(
-            fixed=patient_t1,
-            moving=mni_t1,
-            type_of_transform="SyN",
-            verbose=False,
-        )
+            # --- Registration: atlas -> patient ---
+            reg = ants.registration(
+                fixed=patient_t1,
+                moving=mni_t1,
+                type_of_transform="SyN",
+                verbose=False,
+            )
 
-        # --- Warp chiasm mask into patient space ---
-        chiasm_patient = ants.apply_transforms(
-            fixed=patient_t1,
-            moving=chiasm_mni,
-            transformlist=reg["fwdtransforms"],
-            interpolator="nearestNeighbor",
-        )
-        logger.info(f"Chiasm mask patient shape: {chiasm_patient.shape}")
+            # --- Warp chiasm mask into patient space ---
+            chiasm_patient = ants.apply_transforms(
+                fixed=patient_t1,
+                moving=chiasm_mni,
+                transformlist=reg["fwdtransforms"],
+                interpolator="nearestNeighbor",
+            )
+            logger.info(f"Chiasm mask patient shape: {chiasm_patient.shape}")
 
-        ants.image_write(chiasm_patient, str(out_file))
-        logger.info(f"[ok] saved {out_file}")
+            ants.image_write(chiasm_patient, str(out_file))
+            logger.info(f"[OK {split_name}] saved {out_file}")
+            records.append((split_name, case_id, "ok", ""))
+
+        except Exception as e:
+            msg = f"[FAIL {split_name}]: {case_id}: {e}"
+            logger.exception(msg)
+            records.append((split_name, case_id, "failed", str(e)))
+            # continue to next case
+
+    return records
 
 
 def main():
@@ -95,9 +139,25 @@ def main():
         logger.info(f"Atlas T1 shape: {mni_t1.shape}")
         logger.info(f"Chiasm mask shape: {chiasm_mni.shape}")
 
-        process_split(imagesTr, mni_t1, chiasm_mni, outdir)
-        process_split(imagesTs, mni_t1, chiasm_mni, outdir)
-        logger.info("[OK] Done.")
+        all_records: List[Tuple[str, str, str, str]] = []
+        all_records.extend(
+            process_split("imagesTr", imagesTr, mni_t1, chiasm_mni, outdir)
+        )
+        all_records.extend(
+            process_split("imagesTs", imagesTs, mni_t1, chiasm_mni, outdir)
+        )
+
+        # --- Write summary TSV with registration status ---
+        summary_path = outdir / "registration_summary.tsv"
+        with summary_path.open("w") as f:
+            f.write("split\tcase_id\tstatus\tmessage\n")
+            for split_name, case_id, status, msg in all_records:
+                # sanitize message for single-line TSV
+                msg_clean = msg.replace("\n", " | ").replace("\t", " ")
+                f.write(f"{split_name}\t{case_id}\t{status}\t{msg_clean}\n")
+
+        logger.info(f"[OK] Done. Summary written to {summary_path}")
+
     except Exception as e:
         logger.error(f"Error: {e}")
         raise e
