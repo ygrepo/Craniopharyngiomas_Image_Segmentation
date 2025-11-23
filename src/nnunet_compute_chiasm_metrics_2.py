@@ -25,7 +25,13 @@ def get_args():
         "--base_dir",
         type=Path,
         default=Path("nnUNet_raw/Dataset503_CP"),
-        help="Base directory containing labelsTr/ and chiasm_masks/",
+        help="Base directory containing labelsTr/ and chiasm_masks/imagesTr, imagesTs.",
+    )
+    ap.add_argument(
+        "--pred_dir",
+        type=Path,
+        required=True,
+        help="Directory containing test tumor labels (predictions for imagesTs).",
     )
     ap.add_argument(
         "--output_csv", type=Path, default=None, help="Path to save results."
@@ -37,7 +43,7 @@ def get_args():
     return ap.parse_args()
 
 
-def get_surface_voxels(mask):
+def get_surface_voxels(mask: np.ndarray) -> np.ndarray:
     """
     Extracts only the boundary/surface voxels of a binary mask.
     Optimization: Drastically reduces points for KDTree.
@@ -49,7 +55,7 @@ def get_surface_voxels(mask):
     return np.argwhere(surface)
 
 
-def compute_metrics(tumor_path, chiasm_path):
+def compute_metrics(tumor_path: Path, chiasm_path: Path):
     """
     Computes spatial metrics.
     Returns: Min_Dist(mm), Hausdorff95(mm), Overlap(mm3), Contact(bool)
@@ -68,7 +74,6 @@ def compute_metrics(tumor_path, chiasm_path):
         chiasm_arr = c_img.get_fdata() > 0
 
         # 1. SANITY CHECK: Geometry
-        # Using a small tolerance for float precision issues in affine
         if (
             not np.allclose(affine, c_img.affine, atol=1e-3)
             or tumor_arr.shape != chiasm_arr.shape
@@ -100,7 +105,6 @@ def compute_metrics(tumor_path, chiasm_path):
         c_mm = nib.affines.apply_affine(affine, c_surf_idx)
 
         # KDTree: Find nearest neighbor in Tumor for every Chiasm point
-        # Note: We query Chiasm points against the Tumor tree
         tree = cKDTree(t_mm)
         dists, _ = tree.query(c_mm, k=1)
 
@@ -114,72 +118,109 @@ def compute_metrics(tumor_path, chiasm_path):
         return None
 
 
+def process_split(
+    split_name: str,
+    tumor_dir: Path,
+    chiasm_dir: Path,
+) -> list[dict]:
+    """
+    Process a given split (train/test) and return a list of result dicts.
+    """
+    results: list[dict] = []
+
+    if not tumor_dir.exists() or not chiasm_dir.exists():
+        logger.warning(
+            f"[{split_name}] Directories not found. Checked:\n"
+            f"  Tumor:  {tumor_dir}\n"
+            f"  Chiasm: {chiasm_dir}\n"
+            f"Skipping this split."
+        )
+        return results
+
+    tumor_files = sorted(list(tumor_dir.glob("*.nii.gz")))
+    logger.info(f"[{split_name}] Found {len(tumor_files)} tumor files. Starting...")
+
+    for t_path in tumor_files:
+        case_id = t_path.name.replace(".nii.gz", "")
+
+        c_path = chiasm_dir / f"{case_id}_chiasm_mask.nii.gz"
+        if not c_path.exists():
+            logger.warning(f"[{split_name}] Missing chiasm for {case_id}: {c_path}")
+            continue
+
+        metrics = compute_metrics(t_path, c_path)
+        if metrics:
+            min_d, hd95, vol, is_contact = metrics
+            results.append(
+                {
+                    "Split": split_name,
+                    "Case_ID": case_id,
+                    "Min_Distance_mm": min_d,
+                    "Hausdorff95_mm": hd95,
+                    "Overlap_Volume_mm3": vol,
+                    "Contact": int(is_contact),
+                }
+            )
+
+    logger.info(f"[{split_name}] Completed. Valid cases: {len(results)}")
+    return results
+
+
 def main():
     args = get_args()
-    setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
-    logger.info(f"Starting analysis with args: {args}")
+    setup_logging(args.log_file.resolve() if args.log_file else None, args.log_level)
+    logger.info("Starting analysis")
 
     try:
+        logger.info(f"Base dir: {args.base_dir}")
+        logger.info(f"Pred dir: {args.pred_dir}")
+        logger.info(f"Output CSV: {args.output_csv}")
+        logger.info(f"Log file: {args.log_file}")
 
-        # Directory Setup
-        # Assuming standard nnU-Net structure or similar
-        tumor_dir = args.base_dir / "labelsTr"
-        chiasm_dir = args.base_dir / "chiasm_masks"
+        # Training split directories
+        tumor_dir_tr = args.base_dir / "labelsTr"
+        chiasm_dir_tr = args.base_dir / "chiasm_masks" / "imagesTr"
 
-        if not tumor_dir.exists() or not chiasm_dir.exists():
-            logger.critical(
-                f"Directories not found. Checked:\n{tumor_dir}\n{chiasm_dir}"
-            )
-            return
+        # Test split directories
+        tumor_dir_ts = args.pred_dir
+        chiasm_dir_ts = args.base_dir / "chiasm_masks" / "imagesTs"
 
-        # Find Matches
-        tumor_files = sorted(list(tumor_dir.glob("*.nii.gz")))
-        results = []
+        all_results: list[dict] = []
 
-        logger.info(f"Found {len(tumor_files)} tumor files. Starting processing...")
+        # Process training
+        all_results.extend(process_split("train", tumor_dir_tr, chiasm_dir_tr))
 
-        for t_path in tumor_files:
-            case_id = t_path.name.replace(".nii.gz", "")
-
-            # Expected chiasm filename? Adjust pattern as needed.
-            # Example: case_001.nii.gz -> case_001_chiasm.nii.gz
-            c_path = chiasm_dir / f"{case_id}_chiasm_mask.nii.gz"
-
-            if not c_path.exists():
-                # Try alternative naming if needed, or skip
-                logger.warning(f"Missing chiasm for {case_id}")
-                continue
-
-            metrics = compute_metrics(t_path, c_path)
-
-            if metrics:
-                min_d, hd95, vol, is_contact = metrics
-                results.append(
-                    {
-                        "Case_ID": case_id,
-                        "Min_Distance_mm": min_d,
-                        "Hausdorff95_mm": hd95,
-                        "Overlap_Volume_mm3": vol,
-                        "Contact": int(is_contact),
-                    }
-                )
+        # Process test
+        all_results.extend(process_split("test", tumor_dir_ts, chiasm_dir_ts))
 
         # Save
-        if results:
-            df = pd.DataFrame(results)
+        if all_results:
+            df = pd.DataFrame(all_results)
             save_path = (
                 args.output_csv
                 if args.output_csv
                 else args.base_dir / "radiomics_results.csv"
             )
             df.to_csv(save_path, index=False)
-            logger.info(f"Success! Saved metrics for {len(df)} cases to {save_path}")
+            logger.info(
+                f"Success! Saved metrics for {len(df)} cases (both splits) to {save_path}"
+            )
 
-            # Quick Stats
-            logger.info(f"Mean Min Distance: {df['Min_Distance_mm'].mean():.2f} mm")
-            logger.info(f"Contact Cases: {df['Contact'].sum()} / {len(df)}")
+            # Quick Stats (overall)
+            logger.info(
+                f"Overall Mean Min Distance: {df['Min_Distance_mm'].mean():.2f} mm"
+            )
+            logger.info(f"Overall Contact Cases: {df['Contact'].sum()} / {len(df)}")
+
+            # Optional: per-split stats
+            for split_name, g in df.groupby("Split"):
+                logger.info(
+                    f"[{split_name}] n={len(g)}, "
+                    f"Mean Min Distance={g['Min_Distance_mm'].mean():.2f} mm, "
+                    f"Contact Cases={g['Contact'].sum()} / {len(g)}"
+                )
         else:
-            logger.warning("No results generated.")
+            logger.warning("No results generated for any split.")
 
     except Exception as e:
         logger.error(f"Fatal error in main: {e}")

@@ -3,7 +3,7 @@
 #SBATCH --job-name=nnunet_compute_chiasm_metrics
 #SBATCH --output=logs/nnunet_compute_chiasm_metrics_%A_%a.out
 #SBATCH --error=logs/nnunet_compute_chiasm_metrics_%A_%a.err
-#SBATCH --time=04:00:00
+#SBATCH --time=48:00:00
 #SBATCH --partition=cpu
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -30,18 +30,22 @@ unset PYTHONPATH || true
 
 conda activate "${ENV_PREFIX}"
 
+PYTHON="${ENV_PREFIX}/bin/python"
+MAIN="src/nnunet_compute_chiasm_metrics_2.py"
+BASE_DIR="nnUNet_raw/Dataset503_CP"
+PRED_DIR="nnUNet_results/Dataset503_CP/EmaDiceEarlyStopTrainer__nnUNetResEncUNetMPlans__3d_fullres/fold_0/predictions/test"
+
+
 LOG_DIR="logs"
 LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
-
-PYTHON="${ENV_PREFIX}/bin/python"
-MAIN="src/nnunet_compute_chiasm_metrics_2.py"
-
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/nnunet_compute_chiasm_metrics_${TIMESTAMP}.log"
 
 set +e
 $PYTHON "$MAIN" \
+    --base_dir "$BASE_DIR" \
+    --pred_dir "$PRED_DIR" \
     --log_level "$LOG_LEVEL" \
     --log_file "$LOG_FILE"
 exit_code=$?
