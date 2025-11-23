@@ -51,21 +51,18 @@ PLANS_ID=nnUNetResEncUNetMPlans
 
 MODEL_FOLDER="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
 OUTPUT_DIR="${MODEL_FOLDER}/latent_features"
-CASE_ID="06780898"  # Edit as needed
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/nnunet_extract_latent_vectors_${TIMESTAMP}.log"
 
 echo "Model folder: ${MODEL_FOLDER}"
 echo "Output dir: ${OUTPUT_DIR}"
-echo "Case ID: ${CASE_ID}"
 
 set +e
 $PYTHON "$MAIN" \
     --log_level "$LOG_LEVEL" \
     --log_file "$LOG_FILE" \
     --model_folder "$MODEL_FOLDER" \
-    --case_id "$CASE_ID" \
     --output_dir "$OUTPUT_DIR" \
     --device "cuda"
 exit_code=$?
