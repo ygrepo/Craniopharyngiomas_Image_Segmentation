@@ -157,7 +157,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model_folder", type=Path, help="nnU-Net model folder")
     parser.add_argument("--output_dir", type=Path, help="Output directory")
     parser.add_argument(
-        "--checkpoint", type=str, default="checkpoint_final.pth", help="Checkpoint name"
+        "--checkpoint", type=str, default="checkpoint_best.pth", help="Checkpoint name"
     )
     parser.add_argument("--device", type=str, default="cuda", help="Device to use")
     parser.add_argument(

@@ -81,5 +81,4 @@ nnUNetv2_predict \
   -p ${PLANS_ID} \
   -chk ${RES}/fold_${FOLD}/checkpoint_best.pth \
   -device cuda \
-  -save_probabilities \
-  -disable_postprocessing
+  --save_probabilities 
