@@ -118,7 +118,7 @@ def process_split(
 def main():
     # --- Paths ---
     args = get_args()
-    setup_logging(Path(args.log_file) if args.log_file else None, args.log_level)
+    setup_logging(args.log_file.resolve() if args.log_file else None, args.log_level)
     logger.info(f"Args: {args}")
     logger.info(f"  REPO_ROOT: {REPO_ROOT}")
     try:
