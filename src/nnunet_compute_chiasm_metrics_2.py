@@ -201,6 +201,7 @@ def main():
                 if args.output_csv
                 else args.base_dir / "radiomics_results.csv"
             )
+            logger.info(f"Saving results to {save_path}")
             df.to_csv(save_path, index=False)
             logger.info(
                 f"Success! Saved metrics for {len(df)} cases (both splits) to {save_path}"
