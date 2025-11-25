@@ -121,7 +121,6 @@ def main():
             penalty="l1",
             solver="saga",
             max_iter=5000,
-            multi_class="multinomial",
             class_weight="balanced",
             n_jobs=-1,
             C=C,
