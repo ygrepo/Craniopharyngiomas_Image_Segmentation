@@ -123,7 +123,7 @@ def main():
     logger.info(f"latent shape = {df_latent.shape}")
 
     # ---------------------------------------------------------
-    # PART 2: Load Radiomics (has Split column)
+    # Load Radiomics (has Split column)
     # ---------------------------------------------------------
     logger.info("Loading radiomics...")
     df_rad = pd.read_csv(args.radiomics_csv)
@@ -145,7 +145,7 @@ def main():
     logger.info(f"radiomics shape = {df_rad.shape}")
 
     # ---------------------------------------------------------
-    # PART 3: Load Clinical
+    # Load Clinical
     # ---------------------------------------------------------
     logger.info("Loading clinical...")
     if args.model_type == "preop":
@@ -212,7 +212,7 @@ def main():
     logger.info(f"clinical shape (clean) = {df_clin.shape}")
 
     # ---------------------------------------------------------
-    # PART 4: Merge latent + radiomics + clinical
+    # Merge latent + radiomics + clinical
     # ---------------------------------------------------------
     logger.info("Merging latent, radiomics, clinical...")
     df = df_rad.merge(df_latent, on="Case_ID", how="inner")
@@ -234,12 +234,16 @@ def main():
     # df = df.drop(columns=["Latent_Split"])
     logger.info(f"merged master shape = {df.shape}")
 
-    merged_path = args.output_dir / "merged_classifier_data.csv"
+    if args.model_type == "preop":
+        merged_path = args.output_dir / "preop_classifier_data.csv"
+    if args.model_type == "postop":
+        merged_path = args.output_dir / "postop_classifier_data.csv"
+
     df.to_csv(merged_path, index=False)
     logger.info(f"Saved merged master to {merged_path}")
 
     # # ---------------------------------------------------------
-    # # PART 5: Build pre-op and post-op design matrices
+    # Build pre-op and post-op design matrices
     # # ---------------------------------------------------------
     # latent_cols = [c for c in df.columns if c.startswith("Latent_")]
 
@@ -278,7 +282,7 @@ def main():
     # )
 
     # # ---------------------------------------------------------
-    # # PART 6: Select design + features based on model_type
+    # Select design + features based on model_type
     # # ---------------------------------------------------------
     # if args.model_type == "preop":
     #     design_df = df_preop
@@ -299,7 +303,7 @@ def main():
     #     feature_cols = rad_features + latent_cols + postop_clinical_features
 
     # # ---------------------------------------------------------
-    # # PART 7: Split into Train/Val/Test (by radiomics Split)
+    # Split into Train/Val/Test (by radiomics Split)
     # # ---------------------------------------------------------
     # logger.info("Splitting into Train / Validation / Test based on radiomics Split...")
     # outcome_col_binary = "Outcome_Worsened"
@@ -348,7 +352,7 @@ def main():
     # )
 
     # # ---------------------------------------------------------
-    # # PART 8: Build numeric & scaled matrices for chosen model_type
+    # Build numeric & scaled matrices for chosen model_type
     # # ---------------------------------------------------------
     # def build_arrays(df_design):
     #     X = df_design[feature_cols].astype(float).to_numpy()
