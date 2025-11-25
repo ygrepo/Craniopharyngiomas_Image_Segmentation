@@ -183,6 +183,10 @@ def main():
             "CCI",
             "MFI5",
             "MFI11",
+            "Race_Asian Indian",
+            "Race_Black or African American",
+            "Race_Other",
+            "Race_White",
             "Neurosurgeon_Postop_Visual_Outcome",
             "Outcome_Worsened",
         ]
@@ -199,6 +203,10 @@ def main():
             "MFI11",
             "EEA",
             "EOR",
+            "Race_Asian Indian",
+            "Race_Black or African American",
+            "Race_Other",
+            "Race_White",
             "Neurosurgeon_Postop_Visual_Outcome",
             "Outcome_Worsened",
         ]
@@ -239,171 +247,136 @@ def main():
     if args.model_type == "postop":
         merged_path = args.output_dir / "postop_classifier_data.csv"
 
+    df.drop(columns=["Patient_Num"], inplace=True)
     df.to_csv(merged_path, index=False)
     logger.info(f"Saved merged master to {merged_path}")
 
-    # # ---------------------------------------------------------
-    # Build pre-op and post-op design matrices
-    # # ---------------------------------------------------------
-    # latent_cols = [c for c in df.columns if c.startswith("Latent_")]
+    # Identify feature columns (exclude IDs, splits, and outcome labels)
+    non_feature_cols = [
+        "Case_ID",
+        "Split",
+        "Latent_Split",
+        "Patient_MRN",
+    ]
+    # Keep only columns that are not in non_feature_cols and are numeric
+    candidate_cols = [c for c in df.columns if c not in non_feature_cols]
 
-    # # Pre-op imaging-only design (radiomics + latent)
-    # df_preop = df[
-    #     ["Case_ID"]
-    #     + rad_features
-    #     + latent_cols
-    #     + ["Outcome_Worsened", "Neurosurgeon_Postop_Visual_Outcome"]
-    # ].copy()
+    # keep only numeric dtypes among candidate columns
+    feature_cols = [c for c in candidate_cols if pd.api.types.is_numeric_dtype(df[c])]
 
-    # # Post-op full design (imaging + clinical + EEA + EOR)
-    # df_postop = df[
-    #     ["Case_ID", "Patient_Num"]
-    #     + rad_features
-    #     + latent_cols
-    #     + [
-    #         "Age_at_Surgery_Years",
-    #         "Sex_Male",
-    #         "Preop_VIS_Score",
-    #         "Preop_Visual_Field_Deficit",
-    #         "CCI",
-    #         "MFI5",
-    #         "MFI11",
-    #         "EEA",
-    #         "EOR",
-    #         "Outcome_Worsened",
-    #         "Neurosurgeon_Postop_Visual_Outcome",
-    #     ]
-    # ].copy()
+    logger.info(f"Feature columns: {feature_cols}")
 
-    # df_preop.to_csv(args.output_dir / "design_preop_full.csv", index=False)
-    # df_postop.to_csv(args.output_dir / "design_postop_full.csv", index=False)
-    # logger.info(
-    #     f"Saved design matrices: pre-op {df_preop.shape}, post-op {df_postop.shape}"
-    # )
-
-    # # ---------------------------------------------------------
-    # Select design + features based on model_type
-    # # ---------------------------------------------------------
-    # if args.model_type == "preop":
-    #     design_df = df_preop
-    #     feature_cols = rad_features + latent_cols
-    # else:  # postop
-    #     design_df = df_postop
-    #     postop_clinical_features = [
-    #         "Age_at_Surgery_Years",
-    #         "Sex_Male",
-    #         "Preop_VIS_Score",
-    #         "Preop_Visual_Field_Deficit",
-    #         "CCI",
-    #         "MFI5",
-    #         "MFI11",
-    #         "EEA",
-    #         "EOR",
-    #     ]
-    #     feature_cols = rad_features + latent_cols + postop_clinical_features
-
-    # # ---------------------------------------------------------
+    # ---------------------------------------------------------
     # Split into Train/Val/Test (by radiomics Split)
-    # # ---------------------------------------------------------
-    # logger.info("Splitting into Train / Validation / Test based on radiomics Split...")
-    # outcome_col_binary = "Outcome_Worsened"
+    # ---------------------------------------------------------
+    logger.info("Splitting into Train / Validation / Test based on radiomics Split...")
+    outcome_col_binary = "Outcome_Worsened"
 
-    # df_train_all = df[df["Split"] == "train"].copy()
-    # df_test_all = df[df["Split"] == "test"].copy()
+    df_train_all = df[df["Split"] == "train"].copy()
+    df_test_all = df[df["Split"] == "test"].copy()
 
-    # logger.info(f"train count (all) = {len(df_train_all)}")
-    # logger.info(f"test count (all) = {len(df_test_all)}")
+    logger.info(f"train count (all) = {len(df_train_all)}")
+    logger.info(f"test count (all) = {len(df_test_all)}")
 
-    # stratify_labels = None
-    # if df_train_all[outcome_col_binary].nunique() > 1:
-    #     stratify_labels = df_train_all[outcome_col_binary]
+    stratify_labels = None
+    if df_train_all[outcome_col_binary].nunique() > 1:
+        logger.info(f"Stratifying on {outcome_col_binary}")
+        stratify_labels = df_train_all[outcome_col_binary]
 
-    # df_train, df_val = train_test_split(
-    #     df_train_all,
-    #     test_size=args.val_frac,
-    #     random_state=42,
-    #     stratify=stratify_labels,
-    # )
+    df_train, df_val = train_test_split(
+        df_train_all,
+        test_size=args.val_frac,
+        random_state=42,
+        stratify=stratify_labels,
+    )
 
-    # logger.info(f"train_final = {df_train.shape}")
-    # logger.info(f"val = {df_val.shape}")
-    # logger.info(f"test = {df_test_all.shape}")
+    logger.info(f"train_final = {df_train.shape}")
+    logger.info(f"val = {df_val.shape}")
+    logger.info(f"test = {df_test_all.shape}")
 
-    # def subset_design(df_design, df_split):
-    #     return df_design[df_design["Case_ID"].isin(df_split["Case_ID"])].copy()
+    def subset_design(df_design, df_split):
+        return df_design[df_design["Case_ID"].isin(df_split["Case_ID"])].copy()
 
-    # df_design_train = subset_design(design_df, df_train)
-    # df_design_val = subset_design(design_df, df_val)
-    # df_design_test = subset_design(design_df, df_test_all)
+    df_design_train = subset_design(df, df_train)
+    df_design_val = subset_design(df, df_val)
+    df_design_test = subset_design(df, df_test_all)
 
-    # # Save full design splits for this model_type
-    # df_design_train.to_csv(
-    #     args.output_dir / f"{args.model_type}_train_full.csv", index=False
-    # )
-    # df_design_val.to_csv(
-    #     args.output_dir / f"{args.model_type}_val_full.csv", index=False
-    # )
-    # df_design_test.to_csv(
-    #     args.output_dir / f"{args.model_type}_test_full.csv", index=False
-    # )
-    # logger.info(
-    #     f"Saved {args.model_type} full design splits: "
-    #     f"train {df_design_train.shape}, val {df_design_val.shape}, test {df_design_test.shape}"
-    # )
+    # Save full design splits for this model_type
+    df_design_train.to_csv(
+        args.output_dir / f"{args.model_type}_train_full.csv", index=False
+    )
+    df_design_val.to_csv(
+        args.output_dir / f"{args.model_type}_val_full.csv", index=False
+    )
+    df_design_test.to_csv(
+        args.output_dir / f"{args.model_type}_test_full.csv", index=False
+    )
+    logger.info(
+        f"Saved {args.model_type} full design splits: "
+        f"train {df_design_train.shape}, val {df_design_val.shape}, test {df_design_test.shape}"
+    )
 
-    # # ---------------------------------------------------------
+    # ---------------------------------------------------------
     # Build numeric & scaled matrices for chosen model_type
-    # # ---------------------------------------------------------
-    # def build_arrays(df_design):
-    #     X = df_design[feature_cols].astype(float).to_numpy()
-    #     y_bin = df_design["Outcome_Worsened"].astype(int).to_numpy()
-    #     y_multi = df_design["Neurosurgeon_Postop_Visual_Outcome"].astype(str).to_numpy()
-    #     return X, y_bin, y_multi
+    # ---------------------------------------------------------
+    def build_arrays(
+        df: pd.DataFrame, feature_cols: list
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        X = df[feature_cols].astype(float).to_numpy()
+        y_bin = df["Outcome_Worsened"].astype(int).to_numpy()
+        y_multi = df["Neurosurgeon_Postop_Visual_Outcome"].astype(str).to_numpy()
+        return X, y_bin, y_multi
 
-    # X_train, y_train_bin, y_train_multi = build_arrays(df_design_train)
-    # X_val, y_val_bin, y_val_multi = build_arrays(df_design_val)
-    # X_test, y_test_bin, y_test_multi = build_arrays(df_design_test)
+    X_train, y_train_bin, y_train_multi = build_arrays(df_design_train, feature_cols)
+    X_val, y_val_bin, y_val_multi = build_arrays(df_design_val, feature_cols)
+    X_test, y_test_bin, y_test_multi = build_arrays(df_design_test, feature_cols)
 
-    # scaler = StandardScaler()
-    # X_train_scaled = scaler.fit_transform(X_train)
-    # X_val_scaled = scaler.transform(X_val)
-    # X_test_scaled = scaler.transform(X_test)
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_val_scaled = scaler.transform(X_val)
+    X_test_scaled = scaler.transform(X_test)
 
-    # def save_npz(path, X, y_bin, y_multi, feature_names):
-    #     np.savez_compressed(
-    #         path,
-    #         X=X,
-    #         y_bin=y_bin,
-    #         y_multi=y_multi,
-    #         feature_names=np.array(feature_names),
-    #     )
+    def save_npz(
+        path: Path,
+        X: np.ndarray,
+        y_bin: np.ndarray,
+        y_multi: np.ndarray,
+        feature_names: list,
+    ):
+        np.savez_compressed(
+            path,
+            X=X,
+            y_bin=y_bin,
+            y_multi=y_multi,
+            feature_names=np.array(feature_names),
+        )
 
-    # save_npz(
-    #     args.output_dir / f"{args.model_type}_train_scaled.npz",
-    #     X_train_scaled,
-    #     y_train_bin,
-    #     y_train_multi,
-    #     feature_cols,
-    # )
-    # save_npz(
-    #     args.output_dir / f"{args.model_type}_val_scaled.npz",
-    #     X_val_scaled,
-    #     y_val_bin,
-    #     y_val_multi,
-    #     feature_cols,
-    # )
-    # save_npz(
-    #     args.output_dir / f"{args.model_type}_test_scaled.npz",
-    #     X_test_scaled,
-    #     y_test_bin,
-    #     y_test_multi,
-    #     feature_cols,
-    # )
+    save_npz(
+        args.output_dir / f"{args.model_type}_train_scaled.npz",
+        X_train_scaled,
+        y_train_bin,
+        y_train_multi,
+        feature_cols,
+    )
+    save_npz(
+        args.output_dir / f"{args.model_type}_val_scaled.npz",
+        X_val_scaled,
+        y_val_bin,
+        y_val_multi,
+        feature_cols,
+    )
+    save_npz(
+        args.output_dir / f"{args.model_type}_test_scaled.npz",
+        X_test_scaled,
+        y_test_bin,
+        y_test_multi,
+        feature_cols,
+    )
 
-    # logger.info(
-    #     f"Saved scaled matrices for model_type={args.model_type} "
-    #     "(train/val/test npz)."
-    # )
+    logger.info(
+        f"Saved scaled matrices for model_type={args.model_type} "
+        "(train/val/test npz)."
+    )
     logger.info("=== DONE PREPARE LASSO DATA ===")
 
 
