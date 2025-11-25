@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score, f1_macro
+from sklearn.metrics import roc_auc_score, f1_score
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -66,9 +66,6 @@ def main():
     args = get_args()
     setup_logging(args.log_file, args.log_level)
 
-    if args.output_json is None:
-        args.output_json = args.data_dir / f"{args.model_type}_lasso_hyperparams.json"
-
     logger.info("=== BEGIN LASSO HYPERPARAM TUNING ===")
     logger.info(f"model_type = {args.model_type}")
 
@@ -125,13 +122,14 @@ def main():
             solver="saga",
             max_iter=5000,
             multi_class="multinomial",
+            class_weight="balanced",
             n_jobs=-1,
             C=C,
         )
         model.fit(X_train, y_train_multi)
 
         y_pred = model.predict(X_val)
-        f1 = f1_macro(y_val_multi, y_pred)
+        f1 = f1_score(y_val_multi, y_pred, average="macro")
         logger.info(f"  Val macro-F1 = {f1:.3f}")
 
         if f1 > best_f1:
@@ -146,6 +144,9 @@ def main():
         "binary": {"C": best_C_bin, "val_auc": best_auc},
         "multinomial": {"C": best_C_multi, "val_f1_macro": best_f1},
     }
+
+    if args.output_json is None:
+        args.output_json = args.data_dir / f"{args.model_type}_lasso_hyperparams.json"
 
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     with open(args.output_json, "w") as f:
