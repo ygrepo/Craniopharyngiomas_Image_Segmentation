@@ -217,6 +217,7 @@ def main():
 
     logger.info("=== BEGIN LASSO MODEL EVALUATION ===")
     logger.info(f"model_type = {args.model_type}")
+    logger.info(f"C_binary = {args.C_binary}, C_multinomial = {args.C_multinomial}")
 
     # Load C values from hyperparameters JSON if provided
     if args.hyperparams_json is not None:

@@ -40,10 +40,12 @@ PYTHON="${ENV_PREFIX}/bin/python"
 MAIN="src/train_lasso.py"
 
 
-MODEL_TYPE="preop"
+MODEL_TYPE="postop"
 DATA_DIR="data/CP"
-C_BINARY=1
-C_MULTINOMIAL=1
+C_BINARY=10
+C_MULTINOMIAL=.1
+# C_BINARY=1
+# C_MULTINOMIAL=1
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_train_lasso_${TIMESTAMP}.log"
 
