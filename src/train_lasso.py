@@ -133,7 +133,7 @@ def compute_binary_metrics_df(
 
 def compute_multiclass_metrics_df(
     y_true: np.ndarray, y_pred: np.ndarray, model_type="", C_value=None
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+):
     """Compute comprehensive multiclass classification metrics and return as DataFrames."""
 
     # Overall metrics
@@ -175,16 +175,18 @@ def compute_multiclass_metrics_df(
         y_true, y_pred, average=None, labels=unique_classes, zero_division=0
     )
 
-    # Per-class DataFrame
+    # Per-class DataFrame - handle both string and numeric labels
     per_class_data = []
     for i, class_label in enumerate(unique_classes):
+        # Convert class_label to string to handle both numeric and string labels
+        class_str = str(class_label)
         per_class_data.append(
             {
                 "model_type": model_type,
                 "task": "multinomial",
                 "target": "Neurosurgeon_Postop_Visual_Outcome",
                 "C_value": C_value,
-                "class": int(class_label),
+                "class": class_str,  # Keep as string
                 "precision": float(precision_per_class[i]),
                 "recall": float(recall_per_class[i]),
                 "sensitivity": float(recall_per_class[i]),
@@ -198,8 +200,8 @@ def compute_multiclass_metrics_df(
     cm = confusion_matrix(y_true, y_pred, labels=unique_classes)
     cm_df = pd.DataFrame(
         cm,
-        index=[f"True_{cls}" for cls in unique_classes],
-        columns=[f"Pred_{cls}" for cls in unique_classes],
+        index=[f"True_{str(cls)}" for cls in unique_classes],  # Convert to string
+        columns=[f"Pred_{str(cls)}" for cls in unique_classes],  # Convert to string
     )
     # Add metadata columns
     cm_df.insert(0, "model_type", model_type)
