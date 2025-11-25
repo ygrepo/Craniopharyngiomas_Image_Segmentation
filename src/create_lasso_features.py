@@ -26,7 +26,9 @@ def get_args():
     ap.add_argument(
         "--latent_dir",
         type=Path,
-        default=Path("nnUNet_results/Dataset503_CP/.../latent_features"),
+        default=Path(
+            "nnUNet_results/Dataset503_CP/nnUNetTrainerEarlyStopping__nnUNetResEncUNetMPlans__3d_fullres/latent_features/"
+        ),
         help="Directory containing latent features (.npy files).",
     )
     ap.add_argument(
@@ -38,7 +40,7 @@ def get_args():
     ap.add_argument(
         "--clinical_csv",
         type=Path,
-        default=Path("clinical_data.csv"),
+        default=Path("data/CP/clinical_design_"),
         help="Path to clinical metadata.",
     )
     ap.add_argument(
@@ -57,7 +59,7 @@ def get_args():
     ap.add_argument(
         "--output_dir",
         type=Path,
-        default=Path("merged_lasso_inputs"),
+        default=Path("data/CP"),
         help="Directory to save outputs.",
     )
     ap.add_argument("--log_file", type=Path, default="prepare_lasso_data.log")
@@ -80,19 +82,44 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # ---------------------------------------------------------
-    # PART 1: Load Latent Features
+    # Load Latent Features
     # ---------------------------------------------------------
     logger.info("Loading latent vectors...")
     latent_rows = []
 
-    for npy_file in sorted(args.latent_dir.glob("*.npy")):
-        case_id = npy_file.stem
-        vec = np.load(npy_file)
+    # Load from imagesTr (these will be training cases)
+    train_latent_dir = args.latent_dir / "imagesTr"
+    if train_latent_dir.exists():
+        for npy_file in sorted(train_latent_dir.glob("*.npy")):
+            case_id = npy_file.stem
+            vec = np.load(npy_file)
 
-        row = {"Case_ID": str(case_id)}
-        for i, v in enumerate(vec):
-            row[f"Latent_{i}"] = float(v)
-        latent_rows.append(row)
+            row = {"Case_ID": str(case_id), "Latent_Split": "train"}
+            for i, v in enumerate(vec):
+                row[f"Latent_{i}"] = float(v)
+            logger.debug(f"Loaded train latent vector for {case_id}: {row}")
+            latent_rows.append(row)
+        logger.info(
+            f"Loaded {len([r for r in latent_rows if r['Latent_Split'] == 'train'])} latent vectors from imagesTr"
+        )
+    # Load from imagesTs (these will be test cases)
+    test_latent_dir = args.latent_dir / "imagesTs"
+    if test_latent_dir.exists():
+        test_count = 0
+        for npy_file in sorted(test_latent_dir.glob("*.npy")):
+            case_id = npy_file.stem
+            vec = np.load(npy_file)
+
+            row = {"Case_ID": str(case_id), "Latent_Split": "test"}
+            for i, v in enumerate(vec):
+                row[f"Latent_{i}"] = float(v)
+            logger.debug(f"Loaded test latent vector for {case_id}: {row}")
+            latent_rows.append(row)
+            test_count += 1
+        logger.info(f"Loaded {test_count} latent vectors from imagesTs")
+
+    if not latent_rows:
+        raise ValueError(f"No latent vectors found in {args.latent_dir}")
 
     df_latent = pd.DataFrame(latent_rows)
     logger.info(f"latent shape = {df_latent.shape}")
@@ -123,7 +150,11 @@ def main():
     # PART 3: Load Clinical
     # ---------------------------------------------------------
     logger.info("Loading clinical...")
-    df_clin = pd.read_csv(args.clinical_csv)
+    if args.model_type == "preop":
+        clinical_csv = args.clinical_csv / "preop.csv"
+    if args.model_type == "postop":
+        clinical_csv = args.clinical_csv / "postop.csv"
+    df_clin = pd.read_csv(clinical_csv)
 
     # Clean MRN and create Case_ID from it
     if "Patient_MRN" not in df_clin.columns:
@@ -172,174 +203,189 @@ def main():
     logger.info("Merging latent, radiomics, clinical...")
     df = df_rad.merge(df_latent, on="Case_ID", how="inner")
     df = df.merge(df_clin, on="Case_ID", how="inner")
+
+    # Verify split consistency between radiomics and latent features
+    split_mismatch = df[df["Split"] != df["Latent_Split"]]
+    if len(split_mismatch) > 0:
+        logger.warning(
+            f"Found {len(split_mismatch)} cases with mismatched splits between radiomics and latent features"
+        )
+        logger.warning("Cases with mismatches:")
+        for _, row in split_mismatch.iterrows():
+            logger.warning(
+                f"  {row['Case_ID']}: radiomics={row['Split']}, latent={row['Latent_Split']}"
+            )
+
+    # Use radiomics split as the authoritative split
+    # df = df.drop(columns=["Latent_Split"])
     logger.info(f"merged master shape = {df.shape}")
 
-    merged_path = args.output_dir / "merged_master_full.csv"
+    merged_path = args.output_dir / "merged_classifier_data.csv"
     df.to_csv(merged_path, index=False)
     logger.info(f"Saved merged master to {merged_path}")
 
-    # ---------------------------------------------------------
-    # PART 5: Build pre-op and post-op design matrices
-    # ---------------------------------------------------------
-    latent_cols = [c for c in df.columns if c.startswith("Latent_")]
+    # # ---------------------------------------------------------
+    # # PART 5: Build pre-op and post-op design matrices
+    # # ---------------------------------------------------------
+    # latent_cols = [c for c in df.columns if c.startswith("Latent_")]
 
-    # Pre-op imaging-only design (radiomics + latent)
-    df_preop = df[
-        ["Case_ID"]
-        + rad_features
-        + latent_cols
-        + ["Outcome_Worsened", "Neurosurgeon_Postop_Visual_Outcome"]
-    ].copy()
+    # # Pre-op imaging-only design (radiomics + latent)
+    # df_preop = df[
+    #     ["Case_ID"]
+    #     + rad_features
+    #     + latent_cols
+    #     + ["Outcome_Worsened", "Neurosurgeon_Postop_Visual_Outcome"]
+    # ].copy()
 
-    # Post-op full design (imaging + clinical + EEA + EOR)
-    df_postop = df[
-        ["Case_ID", "Patient_Num"]
-        + rad_features
-        + latent_cols
-        + [
-            "Age_at_Surgery_Years",
-            "Sex_Male",
-            "Preop_VIS_Score",
-            "Preop_Visual_Field_Deficit",
-            "CCI",
-            "MFI5",
-            "MFI11",
-            "EEA",
-            "EOR",
-            "Outcome_Worsened",
-            "Neurosurgeon_Postop_Visual_Outcome",
-        ]
-    ].copy()
+    # # Post-op full design (imaging + clinical + EEA + EOR)
+    # df_postop = df[
+    #     ["Case_ID", "Patient_Num"]
+    #     + rad_features
+    #     + latent_cols
+    #     + [
+    #         "Age_at_Surgery_Years",
+    #         "Sex_Male",
+    #         "Preop_VIS_Score",
+    #         "Preop_Visual_Field_Deficit",
+    #         "CCI",
+    #         "MFI5",
+    #         "MFI11",
+    #         "EEA",
+    #         "EOR",
+    #         "Outcome_Worsened",
+    #         "Neurosurgeon_Postop_Visual_Outcome",
+    #     ]
+    # ].copy()
 
-    df_preop.to_csv(args.output_dir / "design_preop_full.csv", index=False)
-    df_postop.to_csv(args.output_dir / "design_postop_full.csv", index=False)
-    logger.info(
-        f"Saved design matrices: pre-op {df_preop.shape}, post-op {df_postop.shape}"
-    )
+    # df_preop.to_csv(args.output_dir / "design_preop_full.csv", index=False)
+    # df_postop.to_csv(args.output_dir / "design_postop_full.csv", index=False)
+    # logger.info(
+    #     f"Saved design matrices: pre-op {df_preop.shape}, post-op {df_postop.shape}"
+    # )
 
-    # ---------------------------------------------------------
-    # PART 6: Select design + features based on model_type
-    # ---------------------------------------------------------
-    if args.model_type == "preop":
-        design_df = df_preop
-        feature_cols = rad_features + latent_cols
-    else:  # postop
-        design_df = df_postop
-        postop_clinical_features = [
-            "Age_at_Surgery_Years",
-            "Sex_Male",
-            "Preop_VIS_Score",
-            "Preop_Visual_Field_Deficit",
-            "CCI",
-            "MFI5",
-            "MFI11",
-            "EEA",
-            "EOR",
-        ]
-        feature_cols = rad_features + latent_cols + postop_clinical_features
+    # # ---------------------------------------------------------
+    # # PART 6: Select design + features based on model_type
+    # # ---------------------------------------------------------
+    # if args.model_type == "preop":
+    #     design_df = df_preop
+    #     feature_cols = rad_features + latent_cols
+    # else:  # postop
+    #     design_df = df_postop
+    #     postop_clinical_features = [
+    #         "Age_at_Surgery_Years",
+    #         "Sex_Male",
+    #         "Preop_VIS_Score",
+    #         "Preop_Visual_Field_Deficit",
+    #         "CCI",
+    #         "MFI5",
+    #         "MFI11",
+    #         "EEA",
+    #         "EOR",
+    #     ]
+    #     feature_cols = rad_features + latent_cols + postop_clinical_features
 
-    # ---------------------------------------------------------
-    # PART 7: Split into Train/Val/Test (by radiomics Split)
-    # ---------------------------------------------------------
-    logger.info("Splitting into Train / Validation / Test based on radiomics Split...")
-    outcome_col_binary = "Outcome_Worsened"
+    # # ---------------------------------------------------------
+    # # PART 7: Split into Train/Val/Test (by radiomics Split)
+    # # ---------------------------------------------------------
+    # logger.info("Splitting into Train / Validation / Test based on radiomics Split...")
+    # outcome_col_binary = "Outcome_Worsened"
 
-    df_train_all = df[df["Split"] == "train"].copy()
-    df_test_all = df[df["Split"] == "test"].copy()
+    # df_train_all = df[df["Split"] == "train"].copy()
+    # df_test_all = df[df["Split"] == "test"].copy()
 
-    logger.info(f"train count (all) = {len(df_train_all)}")
-    logger.info(f"test count (all) = {len(df_test_all)}")
+    # logger.info(f"train count (all) = {len(df_train_all)}")
+    # logger.info(f"test count (all) = {len(df_test_all)}")
 
-    stratify_labels = None
-    if df_train_all[outcome_col_binary].nunique() > 1:
-        stratify_labels = df_train_all[outcome_col_binary]
+    # stratify_labels = None
+    # if df_train_all[outcome_col_binary].nunique() > 1:
+    #     stratify_labels = df_train_all[outcome_col_binary]
 
-    df_train, df_val = train_test_split(
-        df_train_all,
-        test_size=args.val_frac,
-        random_state=42,
-        stratify=stratify_labels,
-    )
+    # df_train, df_val = train_test_split(
+    #     df_train_all,
+    #     test_size=args.val_frac,
+    #     random_state=42,
+    #     stratify=stratify_labels,
+    # )
 
-    logger.info(f"train_final = {df_train.shape}")
-    logger.info(f"val = {df_val.shape}")
-    logger.info(f"test = {df_test_all.shape}")
+    # logger.info(f"train_final = {df_train.shape}")
+    # logger.info(f"val = {df_val.shape}")
+    # logger.info(f"test = {df_test_all.shape}")
 
-    def subset_design(df_design, df_split):
-        return df_design[df_design["Case_ID"].isin(df_split["Case_ID"])].copy()
+    # def subset_design(df_design, df_split):
+    #     return df_design[df_design["Case_ID"].isin(df_split["Case_ID"])].copy()
 
-    df_design_train = subset_design(design_df, df_train)
-    df_design_val = subset_design(design_df, df_val)
-    df_design_test = subset_design(design_df, df_test_all)
+    # df_design_train = subset_design(design_df, df_train)
+    # df_design_val = subset_design(design_df, df_val)
+    # df_design_test = subset_design(design_df, df_test_all)
 
-    # Save full design splits for this model_type
-    df_design_train.to_csv(
-        args.output_dir / f"{args.model_type}_train_full.csv", index=False
-    )
-    df_design_val.to_csv(
-        args.output_dir / f"{args.model_type}_val_full.csv", index=False
-    )
-    df_design_test.to_csv(
-        args.output_dir / f"{args.model_type}_test_full.csv", index=False
-    )
-    logger.info(
-        f"Saved {args.model_type} full design splits: "
-        f"train {df_design_train.shape}, val {df_design_val.shape}, test {df_design_test.shape}"
-    )
+    # # Save full design splits for this model_type
+    # df_design_train.to_csv(
+    #     args.output_dir / f"{args.model_type}_train_full.csv", index=False
+    # )
+    # df_design_val.to_csv(
+    #     args.output_dir / f"{args.model_type}_val_full.csv", index=False
+    # )
+    # df_design_test.to_csv(
+    #     args.output_dir / f"{args.model_type}_test_full.csv", index=False
+    # )
+    # logger.info(
+    #     f"Saved {args.model_type} full design splits: "
+    #     f"train {df_design_train.shape}, val {df_design_val.shape}, test {df_design_test.shape}"
+    # )
 
-    # ---------------------------------------------------------
-    # PART 8: Build numeric & scaled matrices for chosen model_type
-    # ---------------------------------------------------------
-    def build_arrays(df_design):
-        X = df_design[feature_cols].astype(float).to_numpy()
-        y_bin = df_design["Outcome_Worsened"].astype(int).to_numpy()
-        y_multi = df_design["Neurosurgeon_Postop_Visual_Outcome"].astype(str).to_numpy()
-        return X, y_bin, y_multi
+    # # ---------------------------------------------------------
+    # # PART 8: Build numeric & scaled matrices for chosen model_type
+    # # ---------------------------------------------------------
+    # def build_arrays(df_design):
+    #     X = df_design[feature_cols].astype(float).to_numpy()
+    #     y_bin = df_design["Outcome_Worsened"].astype(int).to_numpy()
+    #     y_multi = df_design["Neurosurgeon_Postop_Visual_Outcome"].astype(str).to_numpy()
+    #     return X, y_bin, y_multi
 
-    X_train, y_train_bin, y_train_multi = build_arrays(df_design_train)
-    X_val, y_val_bin, y_val_multi = build_arrays(df_design_val)
-    X_test, y_test_bin, y_test_multi = build_arrays(df_design_test)
+    # X_train, y_train_bin, y_train_multi = build_arrays(df_design_train)
+    # X_val, y_val_bin, y_val_multi = build_arrays(df_design_val)
+    # X_test, y_test_bin, y_test_multi = build_arrays(df_design_test)
 
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_val_scaled = scaler.transform(X_val)
-    X_test_scaled = scaler.transform(X_test)
+    # scaler = StandardScaler()
+    # X_train_scaled = scaler.fit_transform(X_train)
+    # X_val_scaled = scaler.transform(X_val)
+    # X_test_scaled = scaler.transform(X_test)
 
-    def save_npz(path, X, y_bin, y_multi, feature_names):
-        np.savez_compressed(
-            path,
-            X=X,
-            y_bin=y_bin,
-            y_multi=y_multi,
-            feature_names=np.array(feature_names),
-        )
+    # def save_npz(path, X, y_bin, y_multi, feature_names):
+    #     np.savez_compressed(
+    #         path,
+    #         X=X,
+    #         y_bin=y_bin,
+    #         y_multi=y_multi,
+    #         feature_names=np.array(feature_names),
+    #     )
 
-    save_npz(
-        args.output_dir / f"{args.model_type}_train_scaled.npz",
-        X_train_scaled,
-        y_train_bin,
-        y_train_multi,
-        feature_cols,
-    )
-    save_npz(
-        args.output_dir / f"{args.model_type}_val_scaled.npz",
-        X_val_scaled,
-        y_val_bin,
-        y_val_multi,
-        feature_cols,
-    )
-    save_npz(
-        args.output_dir / f"{args.model_type}_test_scaled.npz",
-        X_test_scaled,
-        y_test_bin,
-        y_test_multi,
-        feature_cols,
-    )
+    # save_npz(
+    #     args.output_dir / f"{args.model_type}_train_scaled.npz",
+    #     X_train_scaled,
+    #     y_train_bin,
+    #     y_train_multi,
+    #     feature_cols,
+    # )
+    # save_npz(
+    #     args.output_dir / f"{args.model_type}_val_scaled.npz",
+    #     X_val_scaled,
+    #     y_val_bin,
+    #     y_val_multi,
+    #     feature_cols,
+    # )
+    # save_npz(
+    #     args.output_dir / f"{args.model_type}_test_scaled.npz",
+    #     X_test_scaled,
+    #     y_test_bin,
+    #     y_test_multi,
+    #     feature_cols,
+    # )
 
-    logger.info(
-        f"Saved scaled matrices for model_type={args.model_type} "
-        "(train/val/test npz)."
-    )
+    # logger.info(
+    #     f"Saved scaled matrices for model_type={args.model_type} "
+    #     "(train/val/test npz)."
+    # )
     logger.info("=== DONE PREPARE LASSO DATA ===")
 
 

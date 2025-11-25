@@ -41,6 +41,8 @@ mkdir -p "$LOG_DIR"
 PYTHON="${ENV_PREFIX}/bin/python"
 MAIN="src/nnunet_extract_latent_vectors.py"
 
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 # Configuration
 DATASET_ID=503
 DATASET_NAME=CP
