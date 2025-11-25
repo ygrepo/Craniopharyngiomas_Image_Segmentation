@@ -172,21 +172,37 @@ def main():
             df_clin["Neurosurgeon_Postop_Visual_Outcome"].astype(str) == "Worsened"
         ).astype(int)
 
-    clinical_vars = [
-        "Patient_MRN",
-        "Patient_Num",
-        "Age_at_Surgery_Years",
-        "Sex_Male",
-        "Preop_VIS_Score",
-        "Preop_Visual_Field_Deficit",
-        "CCI",
-        "MFI5",
-        "MFI11",
-        "EEA",
-        "EOR",
-        "Neurosurgeon_Postop_Visual_Outcome",
-        "Outcome_Worsened",
-    ]
+    if args.model_type == "preop":
+        clinical_vars = [
+            "Patient_MRN",
+            "Patient_Num",
+            "Age_at_Surgery_Years",
+            "Sex_Male",
+            "Preop_VIS_Score",
+            "Preop_Visual_Field_Deficit",
+            "CCI",
+            "MFI5",
+            "MFI11",
+            "Neurosurgeon_Postop_Visual_Outcome",
+            "Outcome_Worsened",
+        ]
+    if args.model_type == "postop":
+        clinical_vars = [
+            "Patient_MRN",
+            "Patient_Num",
+            "Age_at_Surgery_Years",
+            "Sex_Male",
+            "Preop_VIS_Score",
+            "Preop_Visual_Field_Deficit",
+            "CCI",
+            "MFI5",
+            "MFI11",
+            "EEA",
+            "EOR",
+            "Neurosurgeon_Postop_Visual_Outcome",
+            "Outcome_Worsened",
+        ]
+
     missing = [c for c in clinical_vars if c not in df_clin.columns]
     if missing:
         logger.error(f"Missing columns in clinical CSV: {missing}")
