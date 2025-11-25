@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -257,14 +258,16 @@ def main():
         "Split",
         "Latent_Split",
         "Patient_MRN",
+        "Neurosurgeon_Postop_Visual_Outcome",
+        "Outcome_Worsened",
     ]
-    # Keep only columns that are not in non_feature_cols and are numeric
+
     candidate_cols = [c for c in df.columns if c not in non_feature_cols]
 
-    # keep only numeric dtypes among candidate columns
     feature_cols = [c for c in candidate_cols if pd.api.types.is_numeric_dtype(df[c])]
 
-    logger.info(f"Feature columns: {feature_cols}")
+    logger.info(f"Number of feature columns: {len(feature_cols)}")
+    logger.debug(f"Feature columns: {feature_cols}")
 
     # ---------------------------------------------------------
     # Split into Train/Val/Test (by radiomics Split)
@@ -330,6 +333,20 @@ def main():
     X_train, y_train_bin, y_train_multi = build_arrays(df_design_train, feature_cols)
     X_val, y_val_bin, y_val_multi = build_arrays(df_design_val, feature_cols)
     X_test, y_test_bin, y_test_multi = build_arrays(df_design_test, feature_cols)
+
+    # ---- Impute missing values (median recommended for mixed-scale numeric features) ----
+    imputer = SimpleImputer(strategy="median")
+    X_train = imputer.fit_transform(X_train)
+    X_val = imputer.transform(X_val)
+    X_test = imputer.transform(X_test)
+
+    # Optionally: quick sanity checks
+    logger.info(
+        f"NaNs after imputation (train/val/test): "
+        f"{np.isnan(X_train).sum()}, "
+        f"{np.isnan(X_val).sum()}, "
+        f"{np.isnan(X_test).sum()}"
+    )
 
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
