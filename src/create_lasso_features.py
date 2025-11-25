@@ -97,7 +97,6 @@ def main():
             row = {"Case_ID": str(case_id), "Latent_Split": "train"}
             for i, v in enumerate(vec):
                 row[f"Latent_{i}"] = float(v)
-            logger.debug(f"Loaded train latent vector for {case_id}: {row}")
             latent_rows.append(row)
         logger.info(
             f"Loaded {len([r for r in latent_rows if r['Latent_Split'] == 'train'])} latent vectors from imagesTr"
@@ -113,7 +112,6 @@ def main():
             row = {"Case_ID": str(case_id), "Latent_Split": "test"}
             for i, v in enumerate(vec):
                 row[f"Latent_{i}"] = float(v)
-            logger.debug(f"Loaded test latent vector for {case_id}: {row}")
             latent_rows.append(row)
             test_count += 1
         logger.info(f"Loaded {test_count} latent vectors from imagesTs")
@@ -151,9 +149,9 @@ def main():
     # ---------------------------------------------------------
     logger.info("Loading clinical...")
     if args.model_type == "preop":
-        clinical_csv = args.clinical_csv / "preop.csv"
+        clinical_csv = args.clinical_csv / "clinical_design_preop.csv"
     if args.model_type == "postop":
-        clinical_csv = args.clinical_csv / "postop.csv"
+        clinical_csv = args.clinical_csv / "clinical_design_postop.csv"
     df_clin = pd.read_csv(clinical_csv)
 
     # Clean MRN and create Case_ID from it
