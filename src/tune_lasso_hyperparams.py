@@ -80,7 +80,7 @@ def main():
     C_grid = [0.01, 0.1, 1.0, 10.0]
 
     # ---------------- Binary LASSO ----------------
-    logger.info("Tuning binary LASSO (Outcome_Worsened)...")
+    logger.info("Tuning binary LASSO (Outcome_Improved)...")
     best_C_bin = None
     best_auc = -np.inf
 

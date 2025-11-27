@@ -42,8 +42,8 @@ MAIN="src/train_lasso.py"
 
 MODEL_TYPE="postop"
 DATA_DIR="data/CP"
-C_BINARY=10
-C_MULTINOMIAL=.1
+C_BINARY=0.1
+C_MULTINOMIAL=.01
 # C_BINARY=1
 # C_MULTINOMIAL=1
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
