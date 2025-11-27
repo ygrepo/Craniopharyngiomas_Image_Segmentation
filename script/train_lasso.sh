@@ -40,7 +40,7 @@ PYTHON="${ENV_PREFIX}/bin/python"
 MAIN="src/train_lasso.py"
 
 
-MODEL_TYPE="postop"
+MODEL_TYPE="preop"
 DATA_DIR="data/CP"
 C_BINARY=0.1
 C_MULTINOMIAL=.01
