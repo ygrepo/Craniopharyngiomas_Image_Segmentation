@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 
 def get_args():
     ap = argparse.ArgumentParser(
-        description="Prepare design matrices for pre-op and post-op LASSO/classifier models."
+        description="Prepare clinical data matrices for pre-op and post-op LASSO/classifier models."
     )
     ap.add_argument(
         "--input_excel",
@@ -35,7 +35,7 @@ def get_args():
         "--output_fn",
         type=Path,
         required=False,
-        default=Path("output/data/clinical_design.csv"),
+        default=Path("output/data/clinical_data.csv"),
         help="Output file path prefix (without _preop/_postop).",
     )
     # logging
@@ -58,23 +58,21 @@ def load_data(path: Path, sheet: str) -> pd.DataFrame:
     df = pd.read_excel(path, sheet_name=sheet)
 
     # Normalize Race typo
-    if "Race" in df.columns:
-        df["Race"] = df["Race"].replace({"Whtie": "White"})
+    df["Race"] = df["Race"].replace({"Whtie": "White"})
 
     # Clean Patient_MRN: remove 'JH' prefix if present
-    if "Patient_MRN" in df.columns:
-        df["Patient_MRN"] = (
-            df["Patient_MRN"]
-            .astype(str)
-            .str.replace(r"^JH", "", regex=True)  # strip leading JH
-        )
+    df["Patient_MRN"] = (
+        df["Patient_MRN"]
+        .astype(str)
+        .str.replace(r"^JH", "", regex=True)  # strip leading JH
+    )
 
     # Drop rows where the final outcome is missing
     df = df[~df["Neurosurgeon_Postop_Visual_Outcome"].isna()].copy()
 
     # Create binary outcome
-    df["Outcome_Worsened"] = (
-        df["Neurosurgeon_Postop_Visual_Outcome"].astype(str) == "Worsened"
+    df["Outcome_Improved"] = (
+        df["Neurosurgeon_Postop_Visual_Outcome"].astype(str) == "Improved"
     ).astype(int)
 
     return df
@@ -84,19 +82,17 @@ def build_preop_matrix(df: pd.DataFrame) -> pd.DataFrame:
     """
     PRE-OP model inputs:
     - Patient_MRN (cleaned, no 'JH')
-    - Patient_Num
     - Age_at_Surgery_Years
     - Sex_Male
     - Preop_VIS_Score
     - Preop_Visual_Field_Deficit
     - CCI, MFI5, MFI11
     - Race (one-hot)
-    Outcome: Outcome_Worsened + Neurosurgeon_Postop_Visual_Outcome
+    Outcome: Outcome_Improved + Neurosurgeon_Postop_Visual_Outcome
     """
 
     preop_cols = [
         "Patient_MRN",
-        "Patient_Num",
         "Age_at_Surgery_Years",
         "Sex_Male",
         "Preop_VIS_Score",
@@ -105,7 +101,7 @@ def build_preop_matrix(df: pd.DataFrame) -> pd.DataFrame:
         "MFI5",
         "MFI11",
         "Race",
-        "Outcome_Worsened",
+        "Outcome_Improved",
         "Neurosurgeon_Postop_Visual_Outcome",
     ]
 
@@ -120,7 +116,7 @@ def build_preop_matrix(df: pd.DataFrame) -> pd.DataFrame:
     df_pre = pd.get_dummies(df_pre, columns=["Race"], drop_first=True)
 
     # Move outcomes to the end, keep Patient_MRN as first column
-    outcomes = ["Outcome_Worsened", "Neurosurgeon_Postop_Visual_Outcome"]
+    outcomes = ["Outcome_Improved", "Neurosurgeon_Postop_Visual_Outcome"]
     cols = [c for c in df_pre.columns if c not in outcomes]
     df_pre = df_pre[cols + outcomes]
 
@@ -135,7 +131,6 @@ def build_postop_matrix(df: pd.DataFrame) -> pd.DataFrame:
     """
     POST-OP model inputs:
     - Patient_MRN (cleaned, no 'JH')
-    - Patient_Num
     - Age_at_Surgery_Years
     - Sex_Male
     - Preop_VIS_Score
@@ -144,12 +139,11 @@ def build_postop_matrix(df: pd.DataFrame) -> pd.DataFrame:
     - Race (one-hot)
     - EEA
     - EOR
-    Outcome: Outcome_Worsened + Neurosurgeon_Postop_Visual_Outcome
+    Outcome: Outcome_Improved + Neurosurgeon_Postop_Visual_Outcome
     """
 
     postop_cols = [
         "Patient_MRN",
-        "Patient_Num",
         "Age_at_Surgery_Years",
         "Sex_Male",
         "Preop_VIS_Score",
@@ -160,7 +154,7 @@ def build_postop_matrix(df: pd.DataFrame) -> pd.DataFrame:
         "Race",
         "EEA",
         "EOR",
-        "Outcome_Worsened",
+        "Outcome_Improved",
         "Neurosurgeon_Postop_Visual_Outcome",
     ]
 
@@ -171,7 +165,7 @@ def build_postop_matrix(df: pd.DataFrame) -> pd.DataFrame:
     df_post = df[postop_cols].copy()
     df_post = pd.get_dummies(df_post, columns=["Race"], drop_first=True)
 
-    outcomes = ["Outcome_Worsened", "Neurosurgeon_Postop_Visual_Outcome"]
+    outcomes = ["Outcome_Improved", "Neurosurgeon_Postop_Visual_Outcome"]
     cols = [c for c in df_post.columns if c not in outcomes]
     df_post = df_post[cols + outcomes]
 
