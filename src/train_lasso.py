@@ -48,7 +48,7 @@ def get_args():
         "--C_binary",
         type=float,
         required=True,
-        help="C value for binary classification (Outcome_Worsened).",
+        help="C value for binary classification (Outcome_Improved).",
     )
     ap.add_argument(
         "--C_multinomial",
@@ -101,7 +101,19 @@ def compute_binary_metrics_df(
     f1 = f1_score(y_true, y_pred, zero_division=0)
 
     # Confusion matrix for specificity
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    cm = confusion_matrix(y_true, y_pred)
+    if cm.size == 4:
+        tn, fp, fn, tp = cm.ravel()
+    else:
+        # All samples in one class – define everything safely
+        tn = fp = fn = tp = 0
+        if np.unique(y_true)[0] == 1:
+            # All positives
+            tp = cm[0, 0]
+        else:
+            # All negatives
+            tn = cm[0, 0]
+
     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
 
     # AUC if probabilities are provided
@@ -113,7 +125,7 @@ def compute_binary_metrics_df(
     metrics_data = {
         "model_type": [model_type],
         "task": ["binary"],
-        "target": ["Outcome_Worsened"],
+        "target": ["Outcome_Improved"],
         "C_value": [C_value],
         "accuracy": [accuracy],
         "precision": [precision],
@@ -243,6 +255,8 @@ def main():
 
     X_train, y_train_bin, y_train_multi, feat_names = load_npz(train_path)
     X_test, y_test_bin, y_test_multi, _ = load_npz(test_path)
+    logger.info(f"Train outcome counts:{np.bincount(y_train_bin)}")
+    logger.info(f"Test outcome counts:{np.bincount(y_test_bin)}")
 
     logger.info(f"Train shape: {X_train.shape}, Test shape: {X_test.shape}")
 
@@ -250,7 +264,7 @@ def main():
     all_dfs = []
 
     # ---------------- Binary Classification ----------------
-    logger.info("Training and evaluating binary LASSO (Outcome_Worsened)...")
+    logger.info("Training and evaluating binary LASSO (Outcome_Improved)...")
 
     binary_model = LogisticRegression(
         penalty="l1",

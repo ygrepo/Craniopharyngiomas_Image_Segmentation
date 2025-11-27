@@ -335,6 +335,12 @@ def main():
     X_train, y_train_bin, y_train_multi = build_arrays(df_train, feature_cols)
     X_val, y_val_bin, y_val_multi = build_arrays(df_val, feature_cols)
     X_test, y_test_bin, y_test_multi = build_arrays(df_test, feature_cols)
+    logger.info(f"Train bin: {np.bincount(y_train_bin)}")
+    logger.info(f"Val bin: {np.bincount(y_val_bin)}")
+    unique, counts = np.unique(y_train_multi, return_counts=True)
+    logger.info(f"Train multi: {dict(zip(unique, counts))}")
+    unique, counts = np.unique(y_val_multi, return_counts=True)
+    logger.info(f"Val multi: {dict(zip(unique, counts))}")
 
     # ---- Impute missing values (median recommended for mixed-scale numeric features) ----
     imputer = SimpleImputer(strategy="median")
