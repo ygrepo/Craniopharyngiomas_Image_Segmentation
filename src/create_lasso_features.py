@@ -39,9 +39,9 @@ def get_args():
         help="Path to radiomics CSV file.",
     )
     ap.add_argument(
-        "--clinical_csv",
+        "--clinical_csv_path",
         type=Path,
-        default=Path("data/CP/clinical_design_"),
+        default=Path("data/CP"),
         help="Path to clinical metadata.",
     )
     ap.add_argument(
@@ -50,6 +50,12 @@ def get_args():
         choices=["preop", "postop"],
         required=True,
         help="Which model design to prepare: 'preop' or 'postop'.",
+    )
+    ap.add_argument(
+        "--test_frac",
+        type=float,
+        default=0.20,
+        help="Fraction of training set to use as test.",
     )
     ap.add_argument(
         "--val_frac",
@@ -120,8 +126,9 @@ def main():
     if not latent_rows:
         raise ValueError(f"No latent vectors found in {args.latent_dir}")
 
-    df_latent = pd.DataFrame(latent_rows)
-    logger.info(f"latent shape = {df_latent.shape}")
+    df = pd.DataFrame(latent_rows)
+    logger.info(f"# caseIDs: {df['Case_ID'].nunique()}")
+    logger.info(f"latent shape = {df.shape}")
 
     # ---------------------------------------------------------
     # Load Radiomics (has Split column)
@@ -129,6 +136,7 @@ def main():
     logger.info("Loading radiomics...")
     df_rad = pd.read_csv(args.radiomics_csv)
     df_rad["Case_ID"] = df_rad["Case_ID"].astype(str)
+    logger.info(f"# caseIDs: {df_rad['Case_ID'].nunique()}")
 
     if "Split" not in df_rad.columns:
         raise ValueError("Radiomics CSV missing required column 'Split'")
@@ -145,22 +153,23 @@ def main():
 
     logger.info(f"radiomics shape = {df_rad.shape}")
 
+    logger.info(f"# caseIDs: {df_rad['Case_ID'].nunique()}")
+    df = df_rad.merge(df, on="Case_ID", how="inner")
+    logger.info(f"After merging radiomics, # caseIDs: {df['Case_ID'].nunique()}")
+
     # ---------------------------------------------------------
     # Load Clinical
     # ---------------------------------------------------------
     logger.info("Loading clinical...")
     if args.model_type == "preop":
-        clinical_csv = args.clinical_csv / "clinical_design_preop.csv"
+        clinical_csv = args.clinical_csv_path / "clinical_data_preop.csv"
     if args.model_type == "postop":
-        clinical_csv = args.clinical_csv / "clinical_design_postop.csv"
+        clinical_csv = args.clinical_csv_path / "clinical_design_postop.csv"
     df_clin = pd.read_csv(clinical_csv)
-
-    # Clean MRN and create Case_ID from it
-    if "Patient_MRN" not in df_clin.columns:
-        raise ValueError("Clinical CSV must contain column: Patient_MRN")
 
     df_clin["Patient_MRN"] = df_clin["Patient_MRN"].astype(str)
     df_clin["Case_ID"] = df_clin["Patient_MRN"].str.replace(r"^JH", "", regex=True)
+    logger.info(f"# caseIDs: {df_clin['Case_ID'].nunique()}")
 
     if "Neurosurgeon_Postop_Visual_Outcome" not in df_clin.columns:
         raise ValueError(
@@ -168,15 +177,14 @@ def main():
         )
 
     # Binary outcome if not already present
-    if "Outcome_Worsened" not in df_clin.columns:
-        df_clin["Outcome_Worsened"] = (
-            df_clin["Neurosurgeon_Postop_Visual_Outcome"].astype(str) == "Worsened"
+    if "Outcome_Improved" not in df_clin.columns:
+        df_clin["Outcome_Improved"] = (
+            df_clin["Neurosurgeon_Postop_Visual_Outcome"].astype(str) == "Improved"
         ).astype(int)
 
     if args.model_type == "preop":
         clinical_vars = [
             "Patient_MRN",
-            "Patient_Num",
             "Age_at_Surgery_Years",
             "Sex_Male",
             "Preop_VIS_Score",
@@ -189,12 +197,11 @@ def main():
             "Race_Other",
             "Race_White",
             "Neurosurgeon_Postop_Visual_Outcome",
-            "Outcome_Worsened",
+            "Outcome_Improved",
         ]
     if args.model_type == "postop":
         clinical_vars = [
             "Patient_MRN",
-            "Patient_Num",
             "Age_at_Surgery_Years",
             "Sex_Male",
             "Preop_VIS_Score",
@@ -209,7 +216,7 @@ def main():
             "Race_Other",
             "Race_White",
             "Neurosurgeon_Postop_Visual_Outcome",
-            "Outcome_Worsened",
+            "Outcome_Improved",
         ]
 
     missing = [c for c in clinical_vars if c not in df_clin.columns]
@@ -223,9 +230,9 @@ def main():
     # ---------------------------------------------------------
     # Merge latent + radiomics + clinical
     # ---------------------------------------------------------
-    logger.info("Merging latent, radiomics, clinical...")
-    df = df_rad.merge(df_latent, on="Case_ID", how="inner")
+    logger.info("Merging clinical, radiomics...")
     df = df.merge(df_clin, on="Case_ID", how="inner")
+    logger.info(f"After merging clinical, # caseIDs: {df['Case_ID'].nunique()}")
 
     # Verify split consistency between radiomics and latent features
     split_mismatch = df[df["Split"] != df["Latent_Split"]]
@@ -248,7 +255,6 @@ def main():
     if args.model_type == "postop":
         merged_path = args.output_dir / "postop_classifier_data.csv"
 
-    df.drop(columns=["Patient_Num"], inplace=True)
     df.to_csv(merged_path, index=False)
     logger.info(f"Saved merged master to {merged_path}")
 
@@ -259,7 +265,7 @@ def main():
         "Latent_Split",
         "Patient_MRN",
         "Neurosurgeon_Postop_Visual_Outcome",
-        "Outcome_Worsened",
+        "Outcome_Improved",
     ]
 
     candidate_cols = [c for c in df.columns if c not in non_feature_cols]
@@ -272,51 +278,47 @@ def main():
     # ---------------------------------------------------------
     # Split into Train/Val/Test (by radiomics Split)
     # ---------------------------------------------------------
-    logger.info("Splitting into Train / Validation / Test based on radiomics Split...")
-    outcome_col_binary = "Outcome_Worsened"
-
-    df_train_all = df[df["Split"] == "train"].copy()
-    df_test_all = df[df["Split"] == "test"].copy()
-
-    logger.info(f"train count (all) = {len(df_train_all)}")
-    logger.info(f"test count (all) = {len(df_test_all)}")
+    logger.info(
+        "Splitting into Train / Validation / Test (random, stratified on Outcome_Improved)..."
+    )
+    outcome_col_binary = "Outcome_Improved"
 
     stratify_labels = None
-    if df_train_all[outcome_col_binary].nunique() > 1:
+    if df[outcome_col_binary].nunique() > 1:
         logger.info(f"Stratifying on {outcome_col_binary}")
-        stratify_labels = df_train_all[outcome_col_binary]
+        stratify_labels = df[outcome_col_binary]
+
+    df_train, df_test = train_test_split(
+        df,
+        test_size=args.test_frac,
+        random_state=42,
+        stratify=stratify_labels,
+    )
+
+    # Now: train vs val inside the trainval pool
+    stratify_labels = None
+    if df_train[outcome_col_binary].nunique() > 1:
+        logger.info(f"Stratifying on {outcome_col_binary} for train/val split")
+        stratify_labels = df_train[outcome_col_binary]
 
     df_train, df_val = train_test_split(
-        df_train_all,
+        df_train,
         test_size=args.val_frac,
         random_state=42,
         stratify=stratify_labels,
     )
 
-    logger.info(f"train_final = {df_train.shape}")
-    logger.info(f"val = {df_val.shape}")
-    logger.info(f"test = {df_test_all.shape}")
-
-    def subset_design(df_design, df_split):
-        return df_design[df_design["Case_ID"].isin(df_split["Case_ID"])].copy()
-
-    df_design_train = subset_design(df, df_train)
-    df_design_val = subset_design(df, df_val)
-    df_design_test = subset_design(df, df_test_all)
+    logger.info(f"train = {df_train['Case_ID'].nunique()}")
+    logger.info(f"val = {df_val['Case_ID'].nunique()}")
+    logger.info(f"test = {df_test['Case_ID'].nunique()}")
 
     # Save full design splits for this model_type
-    df_design_train.to_csv(
-        args.output_dir / f"{args.model_type}_train_full.csv", index=False
-    )
-    df_design_val.to_csv(
-        args.output_dir / f"{args.model_type}_val_full.csv", index=False
-    )
-    df_design_test.to_csv(
-        args.output_dir / f"{args.model_type}_test_full.csv", index=False
-    )
+    df_train.to_csv(args.output_dir / f"{args.model_type}_train.csv", index=False)
+    df_val.to_csv(args.output_dir / f"{args.model_type}_val.csv", index=False)
+    df_test.to_csv(args.output_dir / f"{args.model_type}_test.csv", index=False)
     logger.info(
         f"Saved {args.model_type} full design splits: "
-        f"train {df_design_train.shape}, val {df_design_val.shape}, test {df_design_test.shape}"
+        f"train {df_train.shape}, val {df_val.shape}, test {df_test.shape}"
     )
 
     # ---------------------------------------------------------
@@ -326,13 +328,13 @@ def main():
         df: pd.DataFrame, feature_cols: list
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         X = df[feature_cols].astype(float).to_numpy()
-        y_bin = df["Outcome_Worsened"].astype(int).to_numpy()
+        y_bin = df["Outcome_Improved"].astype(int).to_numpy()
         y_multi = df["Neurosurgeon_Postop_Visual_Outcome"].astype(str).to_numpy()
         return X, y_bin, y_multi
 
-    X_train, y_train_bin, y_train_multi = build_arrays(df_design_train, feature_cols)
-    X_val, y_val_bin, y_val_multi = build_arrays(df_design_val, feature_cols)
-    X_test, y_test_bin, y_test_multi = build_arrays(df_design_test, feature_cols)
+    X_train, y_train_bin, y_train_multi = build_arrays(df_train, feature_cols)
+    X_val, y_val_bin, y_val_multi = build_arrays(df_val, feature_cols)
+    X_test, y_test_bin, y_test_multi = build_arrays(df_test, feature_cols)
 
     # ---- Impute missing values (median recommended for mixed-scale numeric features) ----
     imputer = SimpleImputer(strategy="median")
