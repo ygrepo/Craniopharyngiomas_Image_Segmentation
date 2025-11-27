@@ -47,9 +47,10 @@ LOG_FILE="${LOG_DIR}/create_lasso_features_${TIMESTAMP}.log"
 LATENT_DIR="${MODEL_FOLDER}/latent_features"
 RADIOMICS_CSV="nnUNet_raw/Dataset503_CP/radiomics_results.csv"
 CLINICAL_CSV="data/CP"
-MODEL_TYPE="postop"
+MODEL_TYPE="preop"
 OUTPUT_DIR="data/CP"
 VAL_FRAC=0.20
+TEST_FRAC=0.20
     
 echo "Model folder: ${MODEL_FOLDER}"
 echo "Output dir: ${OUTPUT_DIR}"
@@ -58,6 +59,7 @@ echo "Radiomics CSV: ${RADIOMICS_CSV}"
 echo "Clinical CSV: ${CLINICAL_CSV}"
 echo "Model type: ${MODEL_TYPE}"
 echo "Validation fraction: ${VAL_FRAC}"
+echo "Test fraction: ${TEST_FRAC}"
 echo "Log file: ${LOG_FILE}"
 echo "Log level: ${LOG_LEVEL}"
 
@@ -71,7 +73,8 @@ $PYTHON "$MAIN" \
     --radiomics_csv "$RADIOMICS_CSV" \
     --clinical_csv "$CLINICAL_CSV" \
     --model_type "$MODEL_TYPE" \
-    --val_frac "$VAL_FRAC"
+    --val_frac "$VAL_FRAC" \
+    --test_frac "$TEST_FRAC"
 exit_code=$?
 set -e
 
