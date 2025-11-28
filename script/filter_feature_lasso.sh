@@ -69,13 +69,9 @@ $PYTHON "$MAIN" \
     --log_level "$LOG_LEVEL" \
     --log_file "$LOG_FILE" \
     --model_type "$MODEL_TYPE" \
-    --task "$TASK" \
     --npz_path "$NPZ_PATH" \
     --importance_csv "$IMPORTANCE_CSV" \
     --k "$K" \
-    --C "$C" \
-    --penalty "$PENALTY" \
-    --l1_ratio "$L1_RATIO"
 exit_code=$?
 set -e
 
