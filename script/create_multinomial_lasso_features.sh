@@ -31,7 +31,7 @@ LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
 PYTHON="${ENV_PREFIX}/bin/python"
-MAIN="src/create_lasso_features.py"
+MAIN="src/create_multinomial_lasso_features.py"
 
 # Configuration
 DATASET_ID=503
