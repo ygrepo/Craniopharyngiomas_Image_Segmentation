@@ -121,7 +121,6 @@ def main():
             )
             model.fit(X_tr, y_tr)
 
-            y_prob = None
             auc = np.nan
             # Multiclass macro-ROC AUC (one-vs-rest)
             if len(np.unique(y_val)) > 1:
@@ -137,7 +136,7 @@ def main():
                     )
             else:
                 logger.warning(
-                    f"Fold {fold_idx}: val set has a single class; " f"AUC set to NaN."
+                    f"Fold {fold_idx}: val set has a single class; AUC set to NaN."
                 )
 
             # Macro-F1
@@ -180,14 +179,22 @@ def main():
             "std_f1_macro": std_f1,
         }
 
-        # Select C by mean macro-AUC (F1 is secondary diagnostic)
-        if mean_auc > best_mean_auc:
-            logger.info(
-                f"  [!] New best C (multinomial) = {C}, mean AUC_macro = {mean_auc:.3f}"
-            )
-            best_mean_auc = mean_auc
+        # Select C by mean macro-F1; use AUC as tie-breaker if F1 is equal
+        is_better = False
+        if mean_f1 > best_mean_f1:
+            is_better = True
+        elif np.isclose(mean_f1, best_mean_f1) and mean_auc > best_mean_auc:
+            is_better = True
+
+        if is_better:
             best_mean_f1 = mean_f1
+            best_mean_auc = mean_auc
             best_C_multi = C
+            logger.info(
+                f"  [!] New best C (multinomial) = {best_C_multi}, "
+                f"mean AUC_macro = {best_mean_auc:.3f}, "
+                f"mean F1_macro = {best_mean_f1:.3f}"
+            )
 
     logger.info(
         f"Best C (multinomial) = {best_C_multi}, "
