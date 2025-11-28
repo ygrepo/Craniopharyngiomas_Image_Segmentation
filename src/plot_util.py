@@ -267,3 +267,332 @@ def plot_multinomial_lasso_cv_metrics(
         plt.savefig(fn, dpi=200)
     plt.show()
     plt.close(fig)
+
+
+def plot_feature_importances(
+    df: pd.DataFrame,
+    title: str,
+    figsize: tuple = (16, 8),
+    feature_col: str = "feature",
+    importance_col: str = "importance",
+    rank_col: str = "rank_within_group",
+    output: Path | None = None,
+    top_n: int | None = 20,  # Show only top N features
+    show_values: bool = True,  # Show importance values on bars
+):
+    # Basic validation
+    for col in [feature_col, importance_col, rank_col]:
+        if col not in df.columns:
+            raise ValueError(f"Required column '{col}' not found in DataFrame.")
+
+    # Sort by importance descending and take top N
+    if top_n is not None:
+        df_plot = (
+            df.sort_values(importance_col, ascending=False)
+            .head(top_n)
+            .reset_index(drop=True)
+        )
+    else:
+        df_plot = df.sort_values(importance_col, ascending=False).reset_index(drop=True)
+
+    # Clean feature names (remove prefixes, truncate long names)
+    features = df_plot[feature_col].astype(str).tolist()
+    features_clean = []
+    for feat in features:
+        # Remove common prefixes
+        clean_feat = feat.replace("Preop_", "").replace("_", " ")
+        # Truncate long names
+        if len(clean_feat) > 25:
+            clean_feat = clean_feat[:22] + "..."
+        features_clean.append(clean_feat)
+
+    importances = df_plot[importance_col].astype(float).tolist()
+    ranks = df_plot[rank_col].tolist()
+
+    # Create figure with better proportions
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Use consistent blue color from viridis (around 0.6 gives a nice blue)
+    blue_color = plt.cm.viridis(0.3)
+
+    x = range(len(features_clean))
+    bars = ax.bar(x, importances, color=blue_color, edgecolor="black", linewidth=0.5)
+
+    # Add rank and importance values on top of bars
+    if show_values:
+        for xi, bar, importance, rank in zip(x, bars, importances, ranks):
+            height = bar.get_height()
+            # Show rank (bold) and importance value on top
+            ax.text(
+                xi,
+                height + max(importances) * 0.01,
+                f"{rank}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                fontweight="bold",
+            )
+
+    # Improve x-axis labels
+    ax.set_xticks(list(x))
+    if top_n is not None:
+        ax.set_xticklabels(
+            features_clean,
+            rotation=45,
+            ha="right",
+            fontsize=11,
+            fontweight="normal",
+        )
+    else:
+        ax.set_xticklabels(
+            features_clean,
+            rotation=45,
+            ha="right",
+            fontsize=6,
+            fontweight="normal",
+        )
+
+    # Styling improvements
+    ax.set_ylabel("Feature Importance", fontsize=14, fontweight="bold")
+    ax.set_xlabel("Features", fontsize=14, fontweight="bold")
+    if top_n is not None:
+        ax.set_title(
+            f"{title}\n(Top {top_n} Features)",
+            fontsize=18,
+            fontweight="bold",
+            pad=20,
+        )
+    else:
+        ax.set_title(
+            f"{title}",
+            fontsize=18,
+            fontweight="bold",
+            pad=20,
+        )
+
+    # Improve grid
+    ax.grid(axis="y", linestyle="--", alpha=0.7, color="gray")
+    ax.set_axisbelow(True)
+
+    # Set y-axis to start from 0 and add some padding at top for labels
+    ax.set_ylim(0, max(importances) * 1.25)
+
+    # Improve spines
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(1.5)
+    ax.spines["bottom"].set_linewidth(1.5)
+
+    # Add summary statistics as text box
+    mean_importance = np.mean(importances)
+    if top_n is not None:
+        ax.text(
+            0.02,
+            0.98,
+            f"Mean Importance (top {top_n}): {mean_importance:.4f}\nTotal Features Shown: {len(features_clean)}",
+            transform=ax.transAxes,
+            fontsize=10,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+        )
+    else:
+        ax.text(
+            0.02,
+            0.98,
+            f"Mean Importance: {mean_importance:.4f}",
+            transform=ax.transAxes,
+            fontsize=10,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+        )
+
+    plt.tight_layout()
+
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(output, dpi=300, bbox_inches="tight")
+
+    plt.show()
+    plt.close(fig)
+
+
+def plot_feature_importance_accumulation(
+    df: pd.DataFrame,
+    prefix: str,
+    target_threshold: float = 0.90,
+    output: Path | None = None,
+):
+    # Sort by importance descending
+    df = df.sort_values(by="importance", ascending=False).reset_index(drop=True)
+
+    # Calculate cumulative importance
+    df["cumulative_importance"] = df["importance"].cumsum()
+    total_importance = df["importance"].sum()
+    df["cumulative_importance"] /= total_importance
+
+    # --- Alignment Logic ---
+    # Define the "Elbow" / Cutoff point based on the Cumulative Threshold
+    # Find the rank where cumulative importance hits the target threshold
+    cutoff_idx = df[df["cumulative_importance"] >= target_threshold].index[0]
+    cutoff_rank = cutoff_idx + 1
+    cutoff_importance_val = df.iloc[cutoff_idx]["importance"]
+    cutoff_cumulative_val = df.iloc[cutoff_idx]["cumulative_importance"]
+
+    # --- Plotting ---
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+    # Plot 1: Individual Importance (Left)
+    ax1.plot(df.index + 1, df["importance"], linewidth=2, label="Importance Curve")
+
+    # Mark the point corresponding to the 90% threshold
+    ax1.plot(
+        cutoff_rank,
+        cutoff_importance_val,
+        "ro",
+        markersize=8,
+        label=f"{int(target_threshold*100)}% Cutoff (Rank {cutoff_rank})",
+    )
+    ax1.axhline(
+        y=cutoff_importance_val,
+        color="r",
+        linestyle="--",
+        alpha=0.7,
+        label=f"Importance > {cutoff_importance_val:.4f}",
+    )
+    ax1.axvline(x=cutoff_rank, color="r", linestyle=":", alpha=0.5)
+
+    ax1.set_title(
+        f"{prefix} Feature Importance Decay\n({int(target_threshold*100)}% Cumulative Signal)",
+        fontsize=18,
+        fontweight="bold",
+    )
+    ax1.set_xlabel("Feature Rank", fontsize=14, fontweight="bold")
+    ax1.set_ylabel("Importance Score", fontsize=14, fontweight="bold")
+    ax1.legend()
+    ax1.grid(True, linestyle="--", alpha=0.6)
+
+    # Plot 2: Cumulative Importance (Right)
+    ax2.plot(
+        df.index + 1,
+        df["cumulative_importance"],
+        linewidth=2,
+        color="orange",
+        label="Cumulative Curve",
+    )
+
+    # Mark the Threshold
+    ax2.axhline(
+        y=target_threshold,
+        color="g",
+        linestyle="--",
+        label=f"{int(target_threshold*100)}% Threshold",
+    )
+    ax2.axvline(
+        x=cutoff_rank, color="g", linestyle=":", label=f"Met at Rank {cutoff_rank}"
+    )
+    ax2.plot(cutoff_rank, cutoff_cumulative_val, "ro", markersize=8)
+
+    ax2.set_title(
+        f"{prefix} Cumulative Feature Importance", fontsize=18, fontweight="bold"
+    )
+    ax2.set_xlabel("Number of Features Kept", fontsize=14, fontweight="bold")
+    ax2.set_ylabel("Cumulative Importance", fontsize=14, fontweight="bold")
+    ax2.legend(loc="lower right")
+    ax2.grid(True, linestyle="--", alpha=0.6)
+
+    plt.tight_layout()
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(output, dpi=300, bbox_inches="tight")
+    plt.show()
+    plt.close(fig)
+
+
+# Alternative: Single elbow plot with enhanced features
+def plot_simple_elbow(
+    df: pd.DataFrame,
+    prefix: str,
+    figsize: tuple = (12, 8),
+    output: Path | None = None,
+    top_n: int = 50,
+):
+
+    df_plot = df.sort_values(by="importance", ascending=False).reset_index(drop=True)
+
+    if top_n is not None:
+        df_plot = df_plot.head(top_n)
+
+    # Create single plot
+    fig, ax = plt.subplots(figsize=figsize)
+
+    x_vals = df_plot.index + 1
+
+    # Main elbow curve
+    ax.plot(
+        x_vals,
+        df_plot["importance"],
+        "o-",
+        linewidth=3,
+        markersize=6,
+        color="steelblue",
+        alpha=0.8,
+        label="Feature Importance",
+    )
+
+    # Add trend line for comparison
+    if len(df_plot) > 3:
+        z = np.polyfit(x_vals, df_plot["importance"], 2)  # Quadratic fit
+        p = np.poly1d(z)
+        ax.plot(
+            x_vals,
+            p(x_vals),
+            "--",
+            color="red",
+            alpha=0.6,
+            linewidth=2,
+            label="Trend (Quadratic)",
+        )
+
+    # Styling
+    ax.set_title(
+        f"{prefix} Feature Importance Elbow Plot", fontsize=16, fontweight="bold"
+    )
+    ax.set_xlabel("Feature Rank", fontsize=14, fontweight="bold")
+    #    ax.set_xticklabels([f"{x}" for x in x_vals], rotation=45, ha="right", fontsize=10)
+    ax.set_ylabel("Importance Score", fontsize=14, fontweight="bold")
+    # ax.set_yticklabels(
+    #     [f"{y:.4f}" for y in ax.get_yticks()], fontsize=10, fontweight="normal"
+    # )
+    ax.grid(True, linestyle="--", alpha=0.4)
+    ax.legend()
+
+    # Remove top and right spines
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(2)
+    ax.spines["bottom"].set_linewidth(2)
+
+    # Add statistics box
+    stats_text = f"Total Features: {len(df_plot)}\n"
+    stats_text += f'Max Importance: {df_plot["importance"].max():.4f}\n'
+    stats_text += f'Min Importance: {df_plot["importance"].min():.4f}\n'
+    stats_text += f'Mean: {df_plot["importance"].mean():.4f}'
+
+    ax.text(
+        0.02,
+        0.98,
+        stats_text,
+        transform=ax.transAxes,
+        fontsize=11,
+        verticalalignment="top",
+        bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.8),
+    )
+
+    plt.tight_layout()
+
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(output, dpi=300, bbox_inches="tight")
+
+    plt.show()
+    plt.close(fig)
