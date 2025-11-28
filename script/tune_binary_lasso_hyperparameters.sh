@@ -42,7 +42,7 @@ MAIN="src/tune_binary_lasso_hyperparams.py"
 
 MODEL_TYPE="preop"
 DATA_DIR="data/CP"
-L1_RATIO=0.5
+L1_RATIO=0.3
 PENALTY="elasticnet"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")

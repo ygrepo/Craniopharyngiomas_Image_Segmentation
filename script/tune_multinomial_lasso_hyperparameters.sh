@@ -41,8 +41,8 @@ MAIN="src/tune_multinomial_lasso_hyperparams.py"
 
 
 MODEL_TYPE="preop"
-PENALTY="l2"
-L1_RATIO=0.5
+PENALTY="elasticnet"
+L1_RATIO=0.3
 
 DATA_DIR="data/CP"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
