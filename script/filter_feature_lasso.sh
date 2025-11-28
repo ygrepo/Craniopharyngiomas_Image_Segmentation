@@ -1,12 +1,5 @@
 #!/bin/bash
 #   filter_feature_lasso.sh    —  Filter features based on Lasso importance.
-#SBATCH --job-name=filter_feature_lasso
-#SBATCH --partition=cpu
-#SBATCH --cpus-per-task=6
-#SBATCH --mem=48G
-#SBATCH --time=04:00:00
-#SBATCH --output=logs/filter_feature_lasso_%j.out
-#SBATCH --error=logs/filter_feature_lasso_%j.err
 
 set -euo pipefail
 
