@@ -69,7 +69,6 @@ set +e
 $PYTHON "$MAIN" \
     --log_level "$LOG_LEVEL" \
     --log_file "$LOG_FILE" \
-    --data_dir "$DATA_DIR" \
     --model_type "$MODEL_TYPE" \
     --task "$TASK" \
     --npz_path "$NPZ_PATH" \
