@@ -58,6 +58,12 @@ def get_args():
         help="Fraction of training set to use as test.",
     )
     ap.add_argument(
+        "--val_frac",
+        type=float,
+        default=0.20,
+        help="Fraction of training set to use as validation.",
+    )
+    ap.add_argument(
         "--output_dir",
         type=Path,
         default=Path("data/CP"),
@@ -95,12 +101,12 @@ def main():
             case_id = npy_file.stem
             vec = np.load(npy_file)
 
-            row = {"Case_ID": str(case_id)}
+            row = {"Case_ID": str(case_id), "Latent_Split": "train"}
             for i, v in enumerate(vec):
                 row[f"Latent_{i}"] = float(v)
             latent_rows.append(row)
         logger.info(
-            f"Loaded {len([r for r in latent_rows])} latent vectors from imagesTr"
+            f"Loaded {len([r for r in latent_rows if r['Latent_Split'] == 'train'])} latent vectors from imagesTr"
         )
     # Load from imagesTs (these will be test cases)
     test_latent_dir = args.latent_dir / "imagesTs"
@@ -110,7 +116,7 @@ def main():
             case_id = npy_file.stem
             vec = np.load(npy_file)
 
-            row = {"Case_ID": str(case_id)}
+            row = {"Case_ID": str(case_id), "Latent_Split": "test"}
             for i, v in enumerate(vec):
                 row[f"Latent_{i}"] = float(v)
             latent_rows.append(row)
@@ -145,7 +151,6 @@ def main():
         if col in df_rad.columns:
             df_rad[col] = pd.to_numeric(df_rad[col], errors="coerce")
 
-    df_rad = df_rad.drop(columns=["Split"])
     logger.info(f"radiomics shape = {df_rad.shape}")
 
     logger.info(f"# caseIDs: {df_rad['Case_ID'].nunique()}")
@@ -159,7 +164,7 @@ def main():
     if args.model_type == "preop":
         clinical_csv = args.clinical_csv_path / "clinical_data_preop.csv"
     if args.model_type == "postop":
-        clinical_csv = args.clinical_csv_path / "clinical_data_postop.csv"
+        clinical_csv = args.clinical_csv_path / "clinical_design_postop.csv"
     df_clin = pd.read_csv(clinical_csv)
 
     df_clin["Patient_MRN"] = df_clin["Patient_MRN"].astype(str)
@@ -172,9 +177,10 @@ def main():
         )
 
     # Binary outcome if not already present
-    df_clin["Outcome_Improved"] = (
-        df_clin["Neurosurgeon_Postop_Visual_Outcome"].astype(str) == "Improved"
-    ).astype(int)
+    if "Outcome_Improved" not in df_clin.columns:
+        df_clin["Outcome_Improved"] = (
+            df_clin["Neurosurgeon_Postop_Visual_Outcome"].astype(str) == "Improved"
+        ).astype(int)
 
     if args.model_type == "preop":
         clinical_vars = [
@@ -228,6 +234,22 @@ def main():
     df = df.merge(df_clin, on="Case_ID", how="inner")
     logger.info(f"After merging clinical, # caseIDs: {df['Case_ID'].nunique()}")
 
+    # Verify split consistency between radiomics and latent features
+    split_mismatch = df[df["Split"] != df["Latent_Split"]]
+    if len(split_mismatch) > 0:
+        logger.warning(
+            f"Found {len(split_mismatch)} cases with mismatched splits between radiomics and latent features"
+        )
+        logger.warning("Cases with mismatches:")
+        for _, row in split_mismatch.iterrows():
+            logger.warning(
+                f"  {row['Case_ID']}: radiomics={row['Split']}, latent={row['Latent_Split']}"
+            )
+
+    # Use radiomics split as the authoritative split
+    # df = df.drop(columns=["Latent_Split"])
+    logger.info(f"merged master shape = {df.shape}")
+
     if args.model_type == "preop":
         merged_path = args.output_dir / "preop_classifier_data.csv"
     if args.model_type == "postop":
@@ -239,6 +261,8 @@ def main():
     # Identify feature columns (exclude IDs, splits, and outcome labels)
     non_feature_cols = [
         "Case_ID",
+        "Split",
+        "Latent_Split",
         "Patient_MRN",
         "Neurosurgeon_Postop_Visual_Outcome",
         "Outcome_Improved",
@@ -252,25 +276,49 @@ def main():
     logger.debug(f"Feature columns: {feature_cols}")
 
     # ---------------------------------------------------------
-    # Split into Train/Test (by radiomics Split)
+    # Split into Train/Val/Test (by radiomics Split)
     # ---------------------------------------------------------
     logger.info(
-        "Splitting into Train / Test (random, stratified on Outcome_Improved)..."
+        "Splitting into Train / Validation / Test (random, stratified on Outcome_Improved)..."
     )
+    #    outcome_col_binary = "Outcome_Improved"
+
+    # stratify_labels = None
+    # if df[outcome_col_binary].nunique() > 1:
+    #     logger.info(f"Stratifying on {outcome_col_binary}")
+    #     stratify_labels = df[outcome_col_binary]
+
     df_train, df_test = train_test_split(
         df,
         test_size=args.test_frac,
         random_state=42,
+        # stratify=stratify_labels,
     )
 
+    # # Now: train vs val inside the trainval pool
+    # stratify_labels = None
+    # if df_train[outcome_col_binary].nunique() > 1:
+    #     logger.info(f"Stratifying on {outcome_col_binary} for train/val split")
+    #     stratify_labels = df_train[outcome_col_binary]
+
+    # df_train, df_val = train_test_split(
+    #     df_train,
+    #     test_size=args.val_frac,
+    #     random_state=42,
+    #     stratify=stratify_labels,
+    # )
+
     logger.info(f"train = {df_train['Case_ID'].nunique()}")
+    # logger.info(f"val = {df_val['Case_ID'].nunique()}")
     logger.info(f"test = {df_test['Case_ID'].nunique()}")
 
     # Save full design splits for this model_type
     df_train.to_csv(args.output_dir / f"{args.model_type}_train.csv", index=False)
+    # df_val.to_csv(args.output_dir / f"{args.model_type}_val.csv", index=False)
     df_test.to_csv(args.output_dir / f"{args.model_type}_test.csv", index=False)
     logger.info(
-        f"Saved {args.model_type}: " f"train {df_train.shape}, test {df_test.shape}"
+        f"Saved {args.model_type} full design splits: "
+        f"train {df_train.shape}, val {df_val.shape}, test {df_test.shape}"
     )
 
     # ---------------------------------------------------------
@@ -285,25 +333,32 @@ def main():
         return X, y_bin, y_multi
 
     X_train, y_train_bin, y_train_multi = build_arrays(df_train, feature_cols)
+    # X_val, y_val_bin, y_val_multi = build_arrays(df_val, feature_cols)
     X_test, y_test_bin, y_test_multi = build_arrays(df_test, feature_cols)
     logger.info(f"Train bin: {np.bincount(y_train_bin)}")
+    # logger.info(f"Val bin: {np.bincount(y_val_bin)}")
     unique, counts = np.unique(y_train_multi, return_counts=True)
     logger.info(f"Train multi: {dict(zip(unique, counts))}")
+    # unique, counts = np.unique(y_val_multi, return_counts=True)
+    # logger.info(f"Val multi: {dict(zip(unique, counts))}")
 
     # ---- Impute missing values (median recommended for mixed-scale numeric features) ----
     imputer = SimpleImputer(strategy="median")
     X_train = imputer.fit_transform(X_train)
+    # X_val = imputer.transform(X_val)
     X_test = imputer.transform(X_test)
 
     # Optionally: quick sanity checks
     logger.info(
-        f"NaNs after imputation (train/test): "
+        f"NaNs after imputation (train/val/test): "
         f"{np.isnan(X_train).sum()}, "
+        # f"{np.isnan(X_val).sum()}, "
         f"{np.isnan(X_test).sum()}"
     )
 
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
+    # X_val_scaled = scaler.transform(X_val)
     X_test_scaled = scaler.transform(X_test)
 
     def save_npz(
@@ -328,6 +383,13 @@ def main():
         y_train_multi,
         feature_cols,
     )
+    # save_npz(
+    #    args.output_dir / f"{args.model_type}_val_scaled.npz",
+    #    X_val_scaled,
+    #    y_val_bin,
+    #    y_val_multi,
+    #    feature_cols,
+    # )
     save_npz(
         args.output_dir / f"{args.model_type}_test_scaled.npz",
         X_test_scaled,
