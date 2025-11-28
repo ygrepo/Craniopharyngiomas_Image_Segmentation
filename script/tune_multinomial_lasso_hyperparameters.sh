@@ -40,7 +40,7 @@ PYTHON="${ENV_PREFIX}/bin/python"
 MAIN="src/tune_multinomial_lasso_hyperparams.py"
 
 
-MODEL_TYPE="postop"
+MODEL_TYPE="preop"
 DATA_DIR="data/CP"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_tune_multinomial_lasso_hyperparams_${TIMESTAMP}.log"
