@@ -85,7 +85,6 @@ def main():
     classes, counts = np.unique(y_train, return_counts=True)
     logger.info(f"Train class counts: {dict(zip(classes, counts))}")
 
-    # Same broad grid you used before
     C_grid = [0.0001, 0.001, 0.01, 0.1, 1.0, 3.0, 10.0, 30.0, 100.0]
 
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)

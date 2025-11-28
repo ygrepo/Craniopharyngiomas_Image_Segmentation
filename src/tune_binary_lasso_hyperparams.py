@@ -74,8 +74,7 @@ def main():
         f"Train class counts: {dict(zip(*np.unique(y_train, return_counts=True)))}"
     )
 
-    # Current refined grid
-    C_grid = [30, 50, 100, 150, 200, 300]
+    C_grid = [0.0001, 0.001, 0.01, 0.1, 1.0, 3.0, 10.0, 30.0, 100.0]
 
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
