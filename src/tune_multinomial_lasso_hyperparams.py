@@ -139,7 +139,8 @@ def main():
         logger.info(f"l1_ratio   = {args.l1_ratio}")
 
     # Expecting file like preop_train_multinomial_scaled.npz
-    train_path = args.data_dir / f"{args.model_type}_train_multinomial_scaled.npz"
+    train_path = args.data_dir / f"{args.model_type}_train_multinomial_top40_scaled.npz"
+    # train_path = args.data_dir / f"{args.model_type}_train_multinomial_scaled.npz"
 
     X_train, y_train, feat_names = load_npz(train_path)
     logger.info(f"Train shape: {X_train.shape}")
@@ -336,11 +337,13 @@ def main():
 
     if args.output_csv is None:
         if args.penalty == "l1":
-            suffix = "multinomial_l1_lasso_cv_metrics.csv"
+            suffix = "multinomial_l1_lasso_top40_cv_metrics.csv"
         elif args.penalty == "l2":
-            suffix = "multinomial_l2_ridge_cv_metrics.csv"
+            suffix = "multinomial_l2_ridge_top40_cv_metrics.csv"
         else:  # elasticnet
-            suffix = f"multinomial_elasticnet_l1ratio_{args.l1_ratio:g}_cv_metrics.csv"
+            suffix = (
+                f"multinomial_elasticnet_l1ratio_{args.l1_ratio:g}_top40_cv_metrics.csv"
+            )
 
         args.output_csv = args.data_dir / f"{args.model_type}_{suffix}"
 
