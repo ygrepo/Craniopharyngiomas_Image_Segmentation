@@ -21,8 +21,9 @@ logger = get_logger(__name__)
 def get_args():
     ap = argparse.ArgumentParser(
         description=(
-            "Grid search LASSO hyperparameters (C) using 5-fold stratified CV "
-            "on the training set for a given model_type (preop/postop)."
+            "Grid search regularized logistic regression hyperparameters (C) using "
+            "5-fold stratified CV on the training set for a given model_type "
+            "(preop/postop). Supports L1 (LASSO), L2 (ridge), and ElasticNet penalties."
         )
     )
     ap.add_argument(
@@ -37,10 +38,36 @@ def get_args():
         choices=["preop", "postop"],
     )
     ap.add_argument(
+        "--penalty",
+        "--loss",
+        dest="penalty",
+        type=str,
+        default="l1",
+        choices=["l1", "l2", "elasticnet"],
+        help=(
+            "Regularization penalty: 'l1' (LASSO), 'l2' (ridge), or 'elasticnet'. "
+            "Default: 'l1'."
+        ),
+    )
+    ap.add_argument(
+        "--l1_ratio",
+        type=float,
+        default=0.5,
+        help=(
+            "ElasticNet mixing parameter (0.0 = pure L2, 1.0 = pure L1). "
+            "Used only if --penalty elasticnet. Default: 0.5."
+        ),
+    )
+    ap.add_argument(
         "--output_csv",
         type=Path,
         default=None,
-        help="If None, saved as <data_dir>/<model_type>_binary_l1_lasso_cv_metrics.csv",
+        help=(
+            "Path to save aggregated CV metrics. "
+            "If None, defaults to "
+            "<data_dir>/<model_type>_binary_<penalty>_cv_metrics.csv "
+            "(for L1, keeps the legacy name *_binary_l1_lasso_cv_metrics.csv)."
+        ),
     )
     ap.add_argument("--log_file", type=Path, default="tune_lasso_hyperparams.log")
     ap.add_argument(
@@ -75,18 +102,18 @@ def normal_p_value(mean: float, target: float, std: float, n: int) -> float:
     return p
 
 
-def normal_ci(mean: float, std: float, n: int, alpha: float = 0.05) -> tuple[float, float]:
+def normal_ci(
+    mean: float, std: float, n: int, alpha: float = 0.05
+) -> tuple[float, float]:
     """
     (1 - alpha) CI under normal approximation based on sample mean/std and n observations.
-    Default is 95% CI.
+    Currently implements 95% CI (alpha=0.05) using z=1.96.
     """
     if n <= 1 or np.isnan(std) or std == 0.0:
         return (np.nan, np.nan)
     se = std / math.sqrt(n)
     # 1.96 is z_{0.975} for 95% CI
-    z = 1.96 if alpha == 0.05 else abs(
-        math.sqrt(2) * math.erfcinv(alpha)
-    )  # generic fallback if needed
+    z = 1.96
     lower = mean - z * se
     upper = mean + z * se
     return lower, upper
@@ -96,8 +123,11 @@ def main():
     args = get_args()
     setup_logging(args.log_file, args.log_level)
 
-    logger.info("=== BEGIN LASSO HYPERPARAM TUNING (5-fold CV) ===")
+    logger.info("=== BEGIN REGULARIZED LOGISTIC HYPERPARAM TUNING (5-fold CV) ===")
     logger.info(f"model_type = {args.model_type}")
+    logger.info(f"penalty    = {args.penalty}")
+    if args.penalty == "elasticnet":
+        logger.info(f"l1_ratio   = {args.l1_ratio}")
 
     train_path = args.data_dir / f"{args.model_type}_train_binary_scaled.npz"
     X_train, y_train, feat_names = load_npz(train_path)
@@ -129,14 +159,28 @@ def main():
             X_tr, X_val = X_train[tr_idx], X_train[val_idx]
             y_tr, y_val = y_train[tr_idx], y_train[val_idx]
 
-            model = LogisticRegression(
-                penalty="l1",
-                solver="saga",
-                class_weight="balanced",
-                C=C,
-                max_iter=5000,
-                n_jobs=-1,
-            )
+            # Construct model according to penalty
+            if args.penalty == "elasticnet":
+                model = LogisticRegression(
+                    penalty="elasticnet",
+                    solver="saga",
+                    class_weight="balanced",
+                    C=C,
+                    l1_ratio=args.l1_ratio,
+                    max_iter=5000,
+                    n_jobs=-1,
+                )
+            else:
+                # 'l1' or 'l2'
+                model = LogisticRegression(
+                    penalty=args.penalty,
+                    solver="saga",  # saga supports l1, l2
+                    class_weight="balanced",
+                    C=C,
+                    max_iter=5000,
+                    n_jobs=-1,
+                )
+
             model.fit(X_tr, y_tr)
 
             # AUC for this fold
@@ -212,6 +256,8 @@ def main():
         results.append(
             {
                 "C": C,
+                "penalty": args.penalty,
+                "l1_ratio": args.l1_ratio if args.penalty == "elasticnet" else np.nan,
                 "mean_auc": mean_auc,
                 "std_auc": std_auc,
                 "ci_auc_lower_95": ci_auc_lower,
@@ -240,17 +286,22 @@ def main():
 
     df = pd.DataFrame(results).sort_values("C").reset_index(drop=True)
 
-    # Save CSV
+    # Save CSV (penalty-specific default; keep legacy name for L1)
     if args.output_csv is None:
-        args.output_csv = (
-            args.data_dir / f"{args.model_type}_binary_l1_lasso_cv_metrics.csv"
-        )
+        if args.penalty == "l1":
+            suffix = "binary_l1_lasso_cv_metrics.csv"
+        elif args.penalty == "l2":
+            suffix = "binary_l2_ridge_cv_metrics.csv"
+        else:  # elasticnet
+            suffix = f"binary_elasticnet_l1ratio_{args.l1_ratio:g}_cv_metrics.csv"
+
+        args.output_csv = args.data_dir / f"{args.model_type}_{suffix}"
 
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.output_csv, index=False)
 
     logger.info(f"Saved CV metrics (with p-values and AUC CIs) to {args.output_csv}")
-    logger.info("=== DONE LASSO HYPERPARAM TUNING (5-fold CV) ===")
+    logger.info("=== DONE REGULARIZED LOGISTIC HYPERPARAM TUNING (5-fold CV) ===")
 
 
 if __name__ == "__main__":
