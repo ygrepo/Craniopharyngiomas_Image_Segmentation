@@ -41,13 +41,18 @@ MAIN="src/tune_multinomial_lasso_hyperparams.py"
 
 
 MODEL_TYPE="preop"
+PENALTY="l2"
+L1_RATIO=0.5
+
 DATA_DIR="data/CP"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_tune_multinomial_lasso_hyperparams_${TIMESTAMP}.log"
+LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_${PENALTY}_l1ratio_${L1_RATIO}_tune_multinomial_lasso_hyperparams_${TIMESTAMP}.log"
 
     
 echo "Data dir: ${DATA_DIR}"
 echo "Model type: ${MODEL_TYPE}"
+echo "Penalty: ${PENALTY}"
+echo "L1 ratio: ${L1_RATIO}"
 echo "Log file: ${LOG_FILE}"
 echo "Log level: ${LOG_LEVEL}"
 
@@ -57,7 +62,9 @@ $PYTHON "$MAIN" \
     --log_level "$LOG_LEVEL" \
     --log_file "$LOG_FILE" \
     --data_dir "$DATA_DIR" \
-    --model_type "$MODEL_TYPE" 
+    --model_type "$MODEL_TYPE" \
+    --penalty "$PENALTY" \
+    --l1_ratio "$L1_RATIO"
 exit_code=$?
 set -e
 
