@@ -315,7 +315,7 @@ def main():
     else:
         df["drop_flag"] = False
 
-    df = df.sort_values("rank_global", ascending=False).reset_index(drop=True)
+    df = df.sort_values("rank_global", ascending=True).reset_index(drop=True)
     # Summary logging
     logger.info("Top 10 features by importance:")
     for _, row in df.sort_values("importance", ascending=False).head(10).iterrows():
