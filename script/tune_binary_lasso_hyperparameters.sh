@@ -43,7 +43,8 @@ MAIN="src/tune_binary_lasso_hyperparams.py"
 MODEL_TYPE="preop"
 DATA_DIR="data/CP"
 L1_RATIO=0.3
-PENALTY="elasticnet"
+PENALTY="l2"
+#PENALTY="elasticnet"
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_${PENALTY}_l1ratio_${L1_RATIO}_tune_binary_lasso_hyperparams_${TIMESTAMP}.log"

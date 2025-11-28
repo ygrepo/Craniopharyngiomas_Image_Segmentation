@@ -129,7 +129,8 @@ def main():
     if args.penalty == "elasticnet":
         logger.info(f"l1_ratio   = {args.l1_ratio}")
 
-    train_path = args.data_dir / f"{args.model_type}_train_binary_scaled.npz"
+    train_path = args.data_dir / f"{args.model_type}_train_binary_top60_scaled.npz"
+    #    train_path = args.data_dir / f"{args.model_type}_train_binary_scaled.npz"
     X_train, y_train, feat_names = load_npz(train_path)
 
     logger.info(f"Train shape: {X_train.shape}")
@@ -289,11 +290,11 @@ def main():
     # Save CSV (penalty-specific default; keep legacy name for L1)
     if args.output_csv is None:
         if args.penalty == "l1":
-            suffix = "binary_l1_lasso_cv_metrics.csv"
+            suffix = "binary_l1_lasso_top60_cv_metrics.csv"
         elif args.penalty == "l2":
-            suffix = "binary_l2_ridge_cv_metrics.csv"
+            suffix = "binary_l2_ridge_top60_cv_metrics.csv"
         else:  # elasticnet
-            suffix = f"binary_elasticnet_l1ratio_{args.l1_ratio:g}_cv_metrics.csv"
+            suffix = f"binary_elasticnet_l1ratio_{args.l1_ratio:g}_top60_cv_metrics.csv"
 
         args.output_csv = args.data_dir / f"{args.model_type}_{suffix}"
 
