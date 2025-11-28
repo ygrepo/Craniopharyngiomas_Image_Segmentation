@@ -1,12 +1,12 @@
 #!/bin/bash
-#   tune_lasso_hyperparameters.sh    —  Tune Lasso hyperparameters.
-#SBATCH --job-name=tune_lasso_hyperparameters
+#   tune_multinomial_lasso_hyperparameters.sh    —  Tune Multinomial Lasso hyperparameters.
+#SBATCH --job-name=tune_multinomial_lasso_hyperparameters
 #SBATCH --partition=cpu
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=48G
 #SBATCH --time=04:00:00
-#SBATCH --output=logs/tune_lasso_hyperparameters_%j.out
-#SBATCH --error=logs/tune_lasso_hyperparameters_%j.err
+#SBATCH --output=logs/tune_multinomial_lasso_hyperparameters_%j.out
+#SBATCH --error=logs/tune_multinomial_lasso_hyperparameters_%j.err
 
 set -euo pipefail
 
@@ -37,13 +37,13 @@ LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
 PYTHON="${ENV_PREFIX}/bin/python"
-MAIN="src/tune_lasso_hyperparams.py"
+MAIN="src/tune_multinomial_lasso_hyperparams.py"
 
 
 MODEL_TYPE="postop"
 DATA_DIR="data/CP"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_tune_lasso_hyperparams_${TIMESTAMP}.log"
+LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_tune_multinomial_lasso_hyperparams_${TIMESTAMP}.log"
 
     
 echo "Data dir: ${DATA_DIR}"

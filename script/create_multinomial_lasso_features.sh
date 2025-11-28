@@ -1,5 +1,5 @@
 #!/bin/bash
-#   create_lasso_features.sh    —  Create Lasso features.
+#   create_multinomial_lasso_features.sh    —  Create Multinomial Lasso features.
 
 
 set -euo pipefail

@@ -1,6 +1,12 @@
 #!/bin/bash
-#   create_binary_lasso_features.sh    —  Create Binary Lasso features.
-
+#   tune_binary_lasso_hyperparameters.sh    —  Tune Binary Lasso hyperparameters.
+#SBATCH --job-name=tune_binary_lasso_hyperparameters
+#SBATCH --partition=cpu
+#SBATCH --cpus-per-task=6
+#SBATCH --mem=48G
+#SBATCH --time=04:00:00
+#SBATCH --output=logs/tune_binary_lasso_hyperparameters_%j.out
+#SBATCH --error=logs/tune_binary_lasso_hyperparameters_%j.err
 
 set -euo pipefail
 
@@ -31,33 +37,17 @@ LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
 PYTHON="${ENV_PREFIX}/bin/python"
-MAIN="src/create_binary_lasso_features.py"
+MAIN="src/tune_binary_lasso_hyperparams.py"
 
-# Configuration
-DATASET_ID=503
-DATASET_NAME=CP
-CFG=3d_fullres
-TR=nnUNetTrainerEarlyStopping
-PLANS_ID=nnUNetResEncUNetMPlans
 
-MODEL_FOLDER="${nnUNet_results}/Dataset${DATASET_ID}_${DATASET_NAME}/${TR}__${PLANS_ID}__${CFG}"
-
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="${LOG_DIR}/create_lasso_features_${TIMESTAMP}.log"
-LATENT_DIR="${MODEL_FOLDER}/latent_features"
-RADIOMICS_CSV="nnUNet_raw/Dataset503_CP/radiomics_results.csv"
-CLINICAL_CSV="data/CP"
 MODEL_TYPE="preop"
-OUTPUT_DIR="data/CP"
-TEST_FRAC=0.20
+DATA_DIR="data/CP"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_tune_binary_lasso_hyperparams_${TIMESTAMP}.log"
+
     
-echo "Model folder: ${MODEL_FOLDER}"
-echo "Output dir: ${OUTPUT_DIR}"
-echo "Latent dir: ${LATENT_DIR}"
-echo "Radiomics CSV: ${RADIOMICS_CSV}"
-echo "Clinical CSV: ${CLINICAL_CSV}"
+echo "Data dir: ${DATA_DIR}"
 echo "Model type: ${MODEL_TYPE}"
-echo "Test fraction: ${TEST_FRAC}"
 echo "Log file: ${LOG_FILE}"
 echo "Log level: ${LOG_LEVEL}"
 
@@ -66,12 +56,8 @@ set +e
 $PYTHON "$MAIN" \
     --log_level "$LOG_LEVEL" \
     --log_file "$LOG_FILE" \
-    --output_dir "$OUTPUT_DIR" \
-    --latent_dir "$LATENT_DIR" \
-    --radiomics_csv "$RADIOMICS_CSV" \
-    --clinical_csv "$CLINICAL_CSV" \
-    --model_type "$MODEL_TYPE" \
-    --test_frac "$TEST_FRAC"
+    --data_dir "$DATA_DIR" \
+    --model_type "$MODEL_TYPE" 
 exit_code=$?
 set -e
 
