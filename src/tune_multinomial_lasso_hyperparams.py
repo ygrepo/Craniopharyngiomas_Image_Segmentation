@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import argparse
-import json
 import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score, f1_score
 from sklearn.model_selection import StratifiedKFold
@@ -41,13 +41,13 @@ def get_args():
         help="Which model design to tune: 'preop' or 'postop'.",
     )
     ap.add_argument(
-        "--output_json",
+        "--output_csv",
         type=Path,
         default=None,
         help=(
-            "Path to save best hyperparameters. "
+            "Path to save aggregated CV metrics for plotting. "
             "If not provided, defaults to "
-            "<data_dir>/<model_type>_multinomial_lasso_hyperparams.json"
+            "<data_dir>/<model_type>_multinomial_lasso_cv_metrics.csv"
         ),
     )
     ap.add_argument(
@@ -80,12 +80,12 @@ def main():
     # Expecting file like preop_train_multinomial_scaled.npz
     train_path = args.data_dir / f"{args.model_type}_train_multinomial_scaled.npz"
 
-    X_train, y_train_multi, feat_names = load_npz(train_path)
+    X_train, y_train, feat_names = load_npz(train_path)
     logger.info(f"Train shape: {X_train.shape}")
-    classes, counts = np.unique(y_train_multi, return_counts=True)
+    classes, counts = np.unique(y_train, return_counts=True)
     logger.info(f"Train class counts: {dict(zip(classes, counts))}")
 
-    # C_grid = [0.01, 0.1, 1.0, 10.0]
+    # Same broad grid you used before
     C_grid = [0.0001, 0.001, 0.01, 0.1, 1.0, 3.0, 10.0, 30.0, 100.0]
 
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
@@ -94,11 +94,12 @@ def main():
         "Tuning multinomial LASSO "
         "(Neurosurgeon_Postop_Visual_Outcome) with 5-fold stratified CV..."
     )
-    best_C_multi = None
+
+    best_C = None
     best_mean_f1 = -np.inf
     best_mean_auc = -np.inf
 
-    cv_results = {}
+    results = []
 
     for C in C_grid:
         logger.info(f"Evaluating C = {C} (multinomial) with 5-fold CV")
@@ -106,10 +107,10 @@ def main():
         fold_f1s = []
 
         for fold_idx, (train_idx, val_idx) in enumerate(
-            skf.split(X_train, y_train_multi), start=1
+            skf.split(X_train, y_train), start=1
         ):
             X_tr, X_val = X_train[train_idx], X_train[val_idx]
-            y_tr, y_val = y_train_multi[train_idx], y_train_multi[val_idx]
+            y_tr, y_val = y_train[train_idx], y_train[val_idx]
 
             model = LogisticRegression(
                 penalty="l1",
@@ -118,11 +119,10 @@ def main():
                 class_weight="balanced",
                 n_jobs=-1,
                 C=C,
-                # multi_class="multinomial"  # optional, "auto" will pick this for >2 classes
+                # multi_class="multinomial"  # "auto" will usually pick multinomial for multi-class
             )
             model.fit(X_tr, y_tr)
 
-            auc = np.nan
             # Multiclass macro-ROC AUC (one-vs-rest)
             if len(np.unique(y_val)) > 1:
                 try:
@@ -135,10 +135,12 @@ def main():
                         f"Fold {fold_idx}: could not compute multiclass AUC; "
                         f"setting AUC to NaN. Error: {e}"
                     )
+                    auc = np.nan
             else:
                 logger.warning(
                     f"Fold {fold_idx}: val set has a single class; AUC set to NaN."
                 )
+                auc = np.nan
 
             # Macro-F1
             y_pred = model.predict(X_val)
@@ -171,14 +173,15 @@ def main():
             f"mean F1_macro = {mean_f1:.3f} (std {std_f1:.3f})"
         )
 
-        cv_results[C] = {
-            "fold_aucs_macro": [None if np.isnan(a) else float(a) for a in fold_aucs],
-            "fold_f1s_macro": [None if np.isnan(f) else float(f) for f in fold_f1s],
-            "mean_auc_macro": mean_auc,
-            "std_auc_macro": std_auc,
-            "mean_f1_macro": mean_f1,
-            "std_f1_macro": std_f1,
-        }
+        results.append(
+            {
+                "C": C,
+                "mean_auc_macro": mean_auc,
+                "std_auc_macro": std_auc,
+                "mean_f1_macro": mean_f1,
+                "std_f1_macro": std_f1,
+            }
+        )
 
         # Select C by mean macro-F1; use AUC as tie-breaker if F1 is equal
         is_better = False
@@ -190,40 +193,35 @@ def main():
         if is_better:
             best_mean_f1 = mean_f1
             best_mean_auc = mean_auc
-            best_C_multi = C
+            best_C = C
             logger.info(
-                f"  [!] New best C (multinomial) = {best_C_multi}, "
+                f"  [!] New best C (multinomial) = {best_C}, "
                 f"mean AUC_macro = {best_mean_auc:.3f}, "
                 f"mean F1_macro = {best_mean_f1:.3f}"
             )
 
     logger.info(
-        f"Best C (multinomial) = {best_C_multi}, "
+        f"Best C (multinomial) = {best_C}, "
         f"CV mean AUC_macro = {best_mean_auc:.3f}, "
         f"CV mean F1_macro = {best_mean_f1:.3f}"
     )
 
-    # Save best hyperparameters + CV summary
-    hparams = {
-        "model_type": args.model_type,
-        "multinomial": {
-            "C": best_C_multi,
-            "cv_mean_auc_macro": best_mean_auc,
-            "cv_mean_f1_macro": best_mean_f1,
-            "cv_results_per_C": cv_results,
-        },
-    }
+    # Mark best row
+    for row in results:
+        row["is_best"] = row["C"] == best_C
 
-    if args.output_json is None:
-        args.output_json = (
-            args.data_dir / f"{args.model_type}_multinomial_lasso_hyperparams.json"
+    # Save aggregated metrics to CSV for plotting
+    df = pd.DataFrame(results).sort_values("C").reset_index(drop=True)
+
+    if args.output_csv is None:
+        args.output_csv = (
+            args.data_dir / f"{args.model_type}_multinomial_lasso_cv_metrics.csv"
         )
 
-    args.output_json.parent.mkdir(parents=True, exist_ok=True)
-    with open(args.output_json, "w") as f:
-        json.dump(hparams, f, indent=2)
+    args.output_csv.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(args.output_csv, index=False)
+    logger.info(f"Saved CV metrics CSV to {args.output_csv}")
 
-    logger.info(f"Saved best hyperparameters to {args.output_json}")
     logger.info("=== DONE MULTINOMIAL LASSO HYPERPARAM TUNING (5-fold CV) ===")
 
 
