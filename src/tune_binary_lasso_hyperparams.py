@@ -40,7 +40,7 @@ def get_args():
         "--output_csv",
         type=Path,
         default=None,
-        help="If None, saved as <data_dir>/<model_type>_binary_lasso_cv_metrics.csv",
+        help="If None, saved as <data_dir>/<model_type>_binary_l1_lasso_cv_metrics.csv",
     )
     ap.add_argument("--log_file", type=Path, default="tune_lasso_hyperparams.log")
     ap.add_argument(
@@ -73,6 +73,23 @@ def normal_p_value(mean: float, target: float, std: float, n: int) -> float:
     phi = 0.5 * (1.0 + math.erf(abs(z) / math.sqrt(2.0)))
     p = 2.0 * (1.0 - phi)
     return p
+
+
+def normal_ci(mean: float, std: float, n: int, alpha: float = 0.05) -> tuple[float, float]:
+    """
+    (1 - alpha) CI under normal approximation based on sample mean/std and n observations.
+    Default is 95% CI.
+    """
+    if n <= 1 or np.isnan(std) or std == 0.0:
+        return (np.nan, np.nan)
+    se = std / math.sqrt(n)
+    # 1.96 is z_{0.975} for 95% CI
+    z = 1.96 if alpha == 0.05 else abs(
+        math.sqrt(2) * math.erfcinv(alpha)
+    )  # generic fallback if needed
+    lower = mean - z * se
+    upper = mean + z * se
+    return lower, upper
 
 
 def main():
@@ -144,7 +161,6 @@ def main():
                 f1 = np.nan
 
             # Baseline F1 for majority-class classifier in this fold
-            # (predict the majority class in y_val)
             majority_class = 1 if np.sum(y_val) >= len(y_val) / 2 else 0
             y_pred_maj = np.full_like(y_val, majority_class)
             try:
@@ -172,6 +188,9 @@ def main():
         mean_f1_base = float(np.nanmean(fold_f1_baseline))
         std_f1_base = float(np.nanstd(fold_f1_baseline))
 
+        # 95% CI for AUC across folds
+        ci_auc_lower, ci_auc_upper = normal_ci(mean_auc, std_auc, n=len(fold_aucs))
+
         # Approximate p-values:
         #   - AUC vs 0.5 (random)
         p_auc = normal_p_value(mean_auc, 0.5, std_auc, n=len(fold_aucs))
@@ -183,7 +202,8 @@ def main():
         p_f1_vs_base = normal_p_value(mean_f1_diff, 0.0, std_f1_diff, n=len(f1_diffs))
 
         logger.info(
-            f"C={C}: mean AUC={mean_auc:.3f} (std={std_auc:.3f}), "
+            f"C={C}: mean AUC={mean_auc:.3f} (std={std_auc:.3f}, "
+            f"95% CI=[{ci_auc_lower:.3f}, {ci_auc_upper:.3f}]), "
             f"mean F1={mean_f1:.3f} (std={std_f1:.3f}), "
             f"baseline F1={mean_f1_base:.3f}, "
             f"p_auc_vs_0.5={p_auc:.3g}, p_f1_vs_baseline={p_f1_vs_base:.3g}"
@@ -194,6 +214,8 @@ def main():
                 "C": C,
                 "mean_auc": mean_auc,
                 "std_auc": std_auc,
+                "ci_auc_lower_95": ci_auc_lower,
+                "ci_auc_upper_95": ci_auc_upper,
                 "p_auc_vs_0_5": p_auc,
                 "mean_f1": mean_f1,
                 "std_f1": std_f1,
@@ -227,7 +249,7 @@ def main():
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.output_csv, index=False)
 
-    logger.info(f"Saved CV metrics (with p-values) to {args.output_csv}")
+    logger.info(f"Saved CV metrics (with p-values and AUC CIs) to {args.output_csv}")
     logger.info("=== DONE LASSO HYPERPARAM TUNING (5-fold CV) ===")
 
 

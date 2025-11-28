@@ -86,6 +86,21 @@ def normal_p_value(mean: float, target: float, std: float, n: int) -> float:
     return p
 
 
+def normal_ci(mean: float, std: float, n: int, alpha: float = 0.05):
+    """
+    (1 - alpha) CI under normal approximation based on sample mean/std and n observations.
+    Default: alpha=0.05 -> 95% CI.
+    """
+    if n <= 1 or np.isnan(std) or std == 0.0:
+        return (np.nan, np.nan)
+    se = std / math.sqrt(n)
+    # z for 95% CI
+    z = 1.96
+    lower = mean - z * se
+    upper = mean + z * se
+    return lower, upper
+
+
 def main():
     args = get_args()
     setup_logging(args.log_file, args.log_level)
@@ -179,7 +194,7 @@ def main():
             except ValueError:
                 logger.warning(
                     f"Fold {fold_idx}: could not compute F1_baseline; "
-                    f"setting F1_baseline to NaN. Error: {e}"
+                    f"setting F1_baseline to NaN."
                 )
                 f1_base = np.nan
 
@@ -203,6 +218,9 @@ def main():
         mean_f1_base = float(np.nanmean(fold_f1_baseline))
         std_f1_base = float(np.nanstd(fold_f1_baseline))
 
+        # 95% CI for macro-AUC across folds
+        ci_auc_lower, ci_auc_upper = normal_ci(mean_auc, std_auc, n=len(fold_aucs))
+
         # Approximate p-values:
         #   - macro-AUC vs 0.5 (random-like)
         p_auc = normal_p_value(mean_auc, 0.5, std_auc, n=len(fold_aucs))
@@ -215,7 +233,8 @@ def main():
 
         logger.info(
             f"C = {C}: "
-            f"mean AUC_macro = {mean_auc:.3f} (std {std_auc:.3f}), "
+            f"mean AUC_macro = {mean_auc:.3f} "
+            f"(std {std_auc:.3f}, 95% CI=[{ci_auc_lower:.3f}, {ci_auc_upper:.3f}]), "
             f"mean F1_macro = {mean_f1:.3f} (std {std_f1:.3f}), "
             f"baseline F1_macro = {mean_f1_base:.3f}, "
             f"p_auc_macro_vs_0.5 = {p_auc:.3g}, "
@@ -227,6 +246,8 @@ def main():
                 "C": C,
                 "mean_auc_macro": mean_auc,
                 "std_auc_macro": std_auc,
+                "ci_auc_macro_lower_95": ci_auc_lower,
+                "ci_auc_macro_upper_95": ci_auc_upper,
                 "p_auc_macro_vs_0_5": p_auc,
                 "mean_f1_macro": mean_f1,
                 "std_f1_macro": std_f1,
