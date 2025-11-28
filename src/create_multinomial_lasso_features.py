@@ -314,6 +314,7 @@ def main():
         y_multi: np.ndarray,
         feature_names: list,
     ):
+        logger.info(f"Saving npz to {path}")
         np.savez_compressed(
             path,
             X=X,
