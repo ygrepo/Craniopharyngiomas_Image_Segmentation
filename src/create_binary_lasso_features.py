@@ -224,9 +224,9 @@ def main():
     logger.info(f"After merging clinical, # caseIDs: {df['Case_ID'].nunique()}")
 
     if args.model_type == "preop":
-        merged_path = args.output_dir / "preop_classifier_data.csv"
+        merged_path = args.output_dir / "preop_binary_classifier_data.csv"
     if args.model_type == "postop":
-        merged_path = args.output_dir / "postop_classifier_data.csv"
+        merged_path = args.output_dir / "postop_binary_classifier_data.csv"
 
     df.to_csv(merged_path, index=False)
     logger.info(f"Saved merged master to {merged_path}")
@@ -284,7 +284,7 @@ def main():
     X_train, y_train_bin = build_arrays(df_train, feature_cols)
     logger.info(f"Train bin: {np.bincount(y_train_bin)}")
     X_test, y_test_bin = build_arrays(df_test, feature_cols)
-    logger.info(f"Train bin: {np.bincount(y_test_bin)}")
+    logger.info(f"Test bin: {np.bincount(y_test_bin)}")
 
     # ---- Impute missing values (median recommended for mixed-scale numeric features) ----
     imputer = SimpleImputer(strategy="median")

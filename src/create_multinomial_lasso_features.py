@@ -226,9 +226,9 @@ def main():
     logger.info(f"After merging clinical, # caseIDs: {df['Case_ID'].nunique()}")
 
     if args.model_type == "preop":
-        merged_path = args.output_dir / "preop_classifier_data.csv"
+        merged_path = args.output_dir / "preop_multinomial_classifier_data.csv"
     if args.model_type == "postop":
-        merged_path = args.output_dir / "postop_classifier_data.csv"
+        merged_path = args.output_dir / "postop_multinomial_classifier_data.csv"
 
     df.to_csv(merged_path, index=False)
     logger.info(f"Saved merged master to {merged_path}")
