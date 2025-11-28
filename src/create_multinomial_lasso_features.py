@@ -125,15 +125,12 @@ def main():
     logger.info(f"latent shape = {df.shape}")
 
     # ---------------------------------------------------------
-    # Load Radiomics (has Split column)
+    # Load Radiomics
     # ---------------------------------------------------------
     logger.info("Loading radiomics...")
     df_rad = pd.read_csv(args.radiomics_csv)
     df_rad["Case_ID"] = df_rad["Case_ID"].astype(str)
     logger.info(f"# caseIDs: {df_rad['Case_ID'].nunique()}")
-
-    if "Split" not in df_rad.columns:
-        raise ValueError("Radiomics CSV missing required column 'Split'")
 
     rad_features = [
         "Min_Distance_mm",
@@ -255,20 +252,25 @@ def main():
     # Split into Train/Test (by radiomics Split)
     # ---------------------------------------------------------
     logger.info(
-        "Splitting into Train / Test (random, stratified on Outcome_Improved)..."
+        "Splitting into Train / Test (random, stratified on Neurosurgeon_Postop_Visual_Outcome)..."
     )
     df_train, df_test = train_test_split(
         df,
         test_size=args.test_frac,
         random_state=42,
+        stratify=df["Neurosurgeon_Postop_Visual_Outcome"],
     )
 
     logger.info(f"train = {df_train['Case_ID'].nunique()}")
     logger.info(f"test = {df_test['Case_ID'].nunique()}")
 
     # Save full design splits for this model_type
-    df_train.to_csv(args.output_dir / f"{args.model_type}_train.csv", index=False)
-    df_test.to_csv(args.output_dir / f"{args.model_type}_test.csv", index=False)
+    df_train.to_csv(
+        args.output_dir / f"{args.model_type}_train_multinomial.csv", index=False
+    )
+    df_test.to_csv(
+        args.output_dir / f"{args.model_type}_test_multinomial.csv", index=False
+    )
     logger.info(
         f"Saved {args.model_type}: " f"train {df_train.shape}, test {df_test.shape}"
     )
@@ -278,17 +280,17 @@ def main():
     # ---------------------------------------------------------
     def build_arrays(
         df: pd.DataFrame, feature_cols: list
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         X = df[feature_cols].astype(float).to_numpy()
-        y_bin = df["Outcome_Improved"].astype(int).to_numpy()
         y_multi = df["Neurosurgeon_Postop_Visual_Outcome"].astype(str).to_numpy()
-        return X, y_bin, y_multi
+        return X, y_multi
 
-    X_train, y_train_bin, y_train_multi = build_arrays(df_train, feature_cols)
-    X_test, y_test_bin, y_test_multi = build_arrays(df_test, feature_cols)
-    logger.info(f"Train bin: {np.bincount(y_train_bin)}")
+    X_train, y_train_multi = build_arrays(df_train, feature_cols)
     unique, counts = np.unique(y_train_multi, return_counts=True)
     logger.info(f"Train multi: {dict(zip(unique, counts))}")
+    X_test, y_test_multi = build_arrays(df_test, feature_cols)
+    unique_test, counts_test = np.unique(y_test_multi, return_counts=True)
+    logger.info(f"Test multi:  {dict(zip(unique_test, counts_test))}")
 
     # ---- Impute missing values (median recommended for mixed-scale numeric features) ----
     imputer = SimpleImputer(strategy="median")
@@ -309,29 +311,25 @@ def main():
     def save_npz(
         path: Path,
         X: np.ndarray,
-        y_bin: np.ndarray,
         y_multi: np.ndarray,
         feature_names: list,
     ):
         np.savez_compressed(
             path,
             X=X,
-            y_bin=y_bin,
             y_multi=y_multi,
             feature_names=np.array(feature_names),
         )
 
     save_npz(
-        args.output_dir / f"{args.model_type}_train_scaled.npz",
+        args.output_dir / f"{args.model_type}_train_multinomial_scaled.npz",
         X_train_scaled,
-        y_train_bin,
         y_train_multi,
         feature_cols,
     )
     save_npz(
-        args.output_dir / f"{args.model_type}_test_scaled.npz",
+        args.output_dir / f"{args.model_type}_test_multinomial_scaled.npz",
         X_test_scaled,
-        y_test_bin,
         y_test_multi,
         feature_cols,
     )
