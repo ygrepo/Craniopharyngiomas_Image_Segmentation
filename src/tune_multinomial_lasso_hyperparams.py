@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import sys
+import math
 from pathlib import Path
 
 import numpy as np
@@ -70,6 +71,21 @@ def load_npz(path: Path):
     return X, y_multi, feature_names
 
 
+def normal_p_value(mean: float, target: float, std: float, n: int) -> float:
+    """
+    Two-sided p-value under a normal approximation for H0: mean = target,
+    using sample mean/std over n observations (here: folds).
+    """
+    if n <= 1 or np.isnan(std) or std == 0.0:
+        return np.nan
+    se = std / math.sqrt(n)
+    z = (mean - target) / se
+    # standard normal CDF via erf
+    phi = 0.5 * (1.0 + math.erf(abs(z) / math.sqrt(2.0)))
+    p = 2.0 * (1.0 - phi)
+    return p
+
+
 def main():
     args = get_args()
     setup_logging(args.log_file, args.log_level)
@@ -104,6 +120,7 @@ def main():
         logger.info(f"Evaluating C = {C} (multinomial) with 5-fold CV")
         fold_aucs = []
         fold_f1s = []
+        fold_f1_baseline = []
 
         for fold_idx, (train_idx, val_idx) in enumerate(
             skf.split(X_train, y_train), start=1
@@ -141,7 +158,7 @@ def main():
                 )
                 auc = np.nan
 
-            # Macro-F1
+            # Macro-F1 for the model
             y_pred = model.predict(X_val)
             try:
                 f1 = f1_score(y_val, y_pred, average="macro")
@@ -152,24 +169,57 @@ def main():
                 )
                 f1 = np.nan
 
+            # Macro-F1 for majority-class baseline in this fold
+            # Majority class based on y_val
+            vals, val_counts = np.unique(y_val, return_counts=True)
+            maj_class = vals[np.argmax(val_counts)]
+            y_pred_maj = np.full_like(y_val, maj_class)
+            try:
+                f1_base = f1_score(y_val, y_pred_maj, average="macro")
+            except ValueError:
+                logger.warning(
+                    f"Fold {fold_idx}: could not compute F1_baseline; "
+                    f"setting F1_baseline to NaN. Error: {e}"
+                )
+                f1_base = np.nan
+
             fold_aucs.append(auc)
             fold_f1s.append(f1)
+            fold_f1_baseline.append(f1_base)
 
             logger.info(
                 f"  Fold {fold_idx}: "
                 f"AUC_macro = {auc if not np.isnan(auc) else 'NaN'}, "
-                f"F1_macro = {f1 if not np.isnan(f1) else 'NaN'}"
+                f"F1_macro = {f1 if not np.isnan(f1) else 'NaN'}, "
+                f"F1_macro_baseline = {f1_base if not np.isnan(f1_base) else 'NaN'} "
+                f"(maj_class={maj_class})"
             )
 
+        # Aggregate across folds
         mean_auc = float(np.nanmean(fold_aucs))
         std_auc = float(np.nanstd(fold_aucs))
         mean_f1 = float(np.nanmean(fold_f1s))
         std_f1 = float(np.nanstd(fold_f1s))
+        mean_f1_base = float(np.nanmean(fold_f1_baseline))
+        std_f1_base = float(np.nanstd(fold_f1_baseline))
+
+        # Approximate p-values:
+        #   - macro-AUC vs 0.5 (random-like)
+        p_auc = normal_p_value(mean_auc, 0.5, std_auc, n=len(fold_aucs))
+
+        #   - macro-F1 improvement vs majority-class baseline
+        f1_diffs = np.array(fold_f1s) - np.array(fold_f1_baseline)
+        mean_f1_diff = float(np.nanmean(f1_diffs))
+        std_f1_diff = float(np.nanstd(f1_diffs))
+        p_f1_vs_base = normal_p_value(mean_f1_diff, 0.0, std_f1_diff, n=len(f1_diffs))
 
         logger.info(
             f"C = {C}: "
             f"mean AUC_macro = {mean_auc:.3f} (std {std_auc:.3f}), "
-            f"mean F1_macro = {mean_f1:.3f} (std {std_f1:.3f})"
+            f"mean F1_macro = {mean_f1:.3f} (std {std_f1:.3f}), "
+            f"baseline F1_macro = {mean_f1_base:.3f}, "
+            f"p_auc_macro_vs_0.5 = {p_auc:.3g}, "
+            f"p_f1_macro_vs_baseline = {p_f1_vs_base:.3g}"
         )
 
         results.append(
@@ -177,8 +227,14 @@ def main():
                 "C": C,
                 "mean_auc_macro": mean_auc,
                 "std_auc_macro": std_auc,
+                "p_auc_macro_vs_0_5": p_auc,
                 "mean_f1_macro": mean_f1,
                 "std_f1_macro": std_f1,
+                "mean_f1_macro_baseline": mean_f1_base,
+                "std_f1_macro_baseline": std_f1_base,
+                "mean_f1_macro_diff_vs_baseline": mean_f1_diff,
+                "std_f1_macro_diff_vs_baseline": std_f1_diff,
+                "p_f1_macro_vs_baseline": p_f1_vs_base,
             }
         )
 
@@ -214,7 +270,7 @@ def main():
 
     if args.output_csv is None:
         args.output_csv = (
-            args.data_dir / f"{args.model_type}_multinomial_lasso_cv_metrics.csv"
+            args.data_dir / f"{args.model_type}_multinomial_l1_lasso_cv_metrics.csv"
         )
 
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)

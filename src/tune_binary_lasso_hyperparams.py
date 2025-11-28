@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import sys
+import math
 from pathlib import Path
 
 import numpy as np
@@ -59,6 +60,21 @@ def load_npz(path: Path):
     return X, y_bin, feature_names
 
 
+def normal_p_value(mean: float, target: float, std: float, n: int) -> float:
+    """
+    Two-sided p-value under a normal approximation for H0: mean = target,
+    using sample mean/std over n observations (here: folds).
+    """
+    if n <= 1 or np.isnan(std) or std == 0.0:
+        return np.nan
+    se = std / math.sqrt(n)
+    z = (mean - target) / se
+    # Phi(z) via erf
+    phi = 0.5 * (1.0 + math.erf(abs(z) / math.sqrt(2.0)))
+    p = 2.0 * (1.0 - phi)
+    return p
+
+
 def main():
     args = get_args()
     setup_logging(args.log_file, args.log_level)
@@ -74,6 +90,7 @@ def main():
         f"Train class counts: {dict(zip(*np.unique(y_train, return_counts=True)))}"
     )
 
+    # You can extend/adjust this grid as needed
     C_grid = [0.0001, 0.001, 0.01, 0.1, 1.0, 3.0, 10.0, 30.0, 100.0]
 
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
@@ -89,6 +106,7 @@ def main():
         logger.info(f"Evaluating C = {C}")
         fold_aucs = []
         fold_f1s = []
+        fold_f1_baseline = []
 
         for fold_idx, (tr_idx, val_idx) in enumerate(skf.split(X_train, y_train), 1):
             X_tr, X_val = X_train[tr_idx], X_train[val_idx]
@@ -104,35 +122,71 @@ def main():
             )
             model.fit(X_tr, y_tr)
 
-            # AUC
+            # AUC for this fold
             if len(np.unique(y_val)) > 1:
                 try:
                     y_prob = model.predict_proba(X_val)[:, 1]
                     auc = roc_auc_score(y_val, y_prob)
                 except ValueError:
+                    logger.warning(
+                        f"Fold {fold_idx}: could not compute AUC, setting NaN."
+                    )
                     auc = np.nan
             else:
                 auc = np.nan
 
-            # F1
+            # F1 for this fold
             try:
-                f1 = f1_score(y_val, model.predict(X_val), average="binary")
+                y_pred = model.predict(X_val)
+                f1 = f1_score(y_val, y_pred, average="binary")
             except ValueError:
+                logger.warning(f"Fold {fold_idx}: could not compute F1, setting NaN.")
                 f1 = np.nan
+
+            # Baseline F1 for majority-class classifier in this fold
+            # (predict the majority class in y_val)
+            majority_class = 1 if np.sum(y_val) >= len(y_val) / 2 else 0
+            y_pred_maj = np.full_like(y_val, majority_class)
+            try:
+                f1_base = f1_score(y_val, y_pred_maj, average="binary")
+            except ValueError:
+                logger.warning(
+                    f"Fold {fold_idx}: could not compute F1_baseline, setting NaN."
+                )
+                f1_base = np.nan
 
             fold_aucs.append(auc)
             fold_f1s.append(f1)
+            fold_f1_baseline.append(f1_base)
 
-            logger.debug(f"    Fold {fold_idx}: AUC={auc}, F1={f1}")
+            logger.debug(
+                f"    Fold {fold_idx}: "
+                f"AUC={auc}, F1={f1}, F1_baseline={f1_base} (maj_class={majority_class})"
+            )
 
+        # Aggregate across folds
         mean_auc = float(np.nanmean(fold_aucs))
         std_auc = float(np.nanstd(fold_aucs))
         mean_f1 = float(np.nanmean(fold_f1s))
         std_f1 = float(np.nanstd(fold_f1s))
+        mean_f1_base = float(np.nanmean(fold_f1_baseline))
+        std_f1_base = float(np.nanstd(fold_f1_baseline))
+
+        # Approximate p-values:
+        #   - AUC vs 0.5 (random)
+        p_auc = normal_p_value(mean_auc, 0.5, std_auc, n=len(fold_aucs))
+
+        #   - F1 improvement vs majority-class baseline (per-fold improvement)
+        f1_diffs = np.array(fold_f1s) - np.array(fold_f1_baseline)
+        mean_f1_diff = float(np.nanmean(f1_diffs))
+        std_f1_diff = float(np.nanstd(f1_diffs))
+        p_f1_vs_base = normal_p_value(mean_f1_diff, 0.0, std_f1_diff, n=len(f1_diffs))
 
         logger.info(
             f"C={C}: mean AUC={mean_auc:.3f} (std={std_auc:.3f}), "
-            f"mean F1={mean_f1:.3f} (std={std_f1:.3f})"
+            f"mean F1={mean_f1:.3f} (std={std_f1:.3f}), "
+            f"baseline F1={mean_f1_base:.3f}, "
+            f"p_auc_vs_0.5={p_auc:.3g}, p_f1_vs_baseline={p_f1_vs_base:.3g}"
         )
 
         results.append(
@@ -140,8 +194,14 @@ def main():
                 "C": C,
                 "mean_auc": mean_auc,
                 "std_auc": std_auc,
+                "p_auc_vs_0_5": p_auc,
                 "mean_f1": mean_f1,
                 "std_f1": std_f1,
+                "mean_f1_baseline": mean_f1_base,
+                "std_f1_baseline": std_f1_base,
+                "mean_f1_diff_vs_baseline": mean_f1_diff,
+                "std_f1_diff_vs_baseline": std_f1_diff,
+                "p_f1_vs_baseline": p_f1_vs_base,
             }
         )
 
@@ -161,13 +221,13 @@ def main():
     # Save CSV
     if args.output_csv is None:
         args.output_csv = (
-            args.data_dir / f"{args.model_type}_binary_lasso_cv_metrics.csv"
+            args.data_dir / f"{args.model_type}_binary_l1_lasso_cv_metrics.csv"
         )
 
     args.output_csv.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.output_csv, index=False)
 
-    logger.info(f"Saved CV metrics to {args.output_csv}")
+    logger.info(f"Saved CV metrics (with p-values) to {args.output_csv}")
     logger.info("=== DONE LASSO HYPERPARAM TUNING (5-fold CV) ===")
 
 
