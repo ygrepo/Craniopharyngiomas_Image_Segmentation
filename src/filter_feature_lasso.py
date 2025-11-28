@@ -135,7 +135,7 @@ def select_top_k_features(
 
     # ---------- load importance ----------
     imp = pd.read_csv(importance_csv)
-    if "feature_names" not in imp.columns or "rank_global" not in imp.columns:
+    if "feature_name" not in imp.columns or "rank_global" not in imp.columns:
         raise ValueError(
             "Importance CSV must contain columns 'feature_name' and 'rank_global'. "
             f"Columns found: {imp.columns.tolist()}"
