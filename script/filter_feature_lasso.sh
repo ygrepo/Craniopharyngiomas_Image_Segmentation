@@ -71,7 +71,7 @@ $PYTHON "$MAIN" \
     --model_type "$MODEL_TYPE" \
     --npz_path "$NPZ_PATH" \
     --importance_csv "$IMPORTANCE_CSV" \
-    --k "$K" \
+    --k "$K"
 exit_code=$?
 set -e
 
