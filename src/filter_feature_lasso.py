@@ -135,19 +135,19 @@ def select_top_k_features(
 
     # ---------- load importance ----------
     imp = pd.read_csv(importance_csv)
-    if "global_rank" not in imp.columns or "feature" not in imp.columns:
+    if "feature_names" not in imp.columns or "rank_global" not in imp.columns:
         raise ValueError(
-            "Importance CSV must contain columns 'feature' and 'global_rank'. "
+            "Importance CSV must contain columns 'feature_name' and 'rank_global'. "
             f"Columns found: {imp.columns.tolist()}"
         )
 
     # sort by global rank
-    imp_sorted = imp.sort_values("global_rank", ascending=True)
+    imp_sorted = imp.sort_values("rank_global", ascending=True)
 
     # select top-K features
-    selected_features = imp_sorted["feature"].head(k).tolist()
+    selected_features = imp_sorted["feature_name"].head(k).tolist()
     logger.info(
-        f"Selecting top-K={k} features based on global_rank "
+        f"Selecting top-K={k} features based on rank_global "
         f"(first 5: {selected_features[:5]})"
     )
 
