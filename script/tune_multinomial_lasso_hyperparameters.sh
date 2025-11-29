@@ -42,7 +42,10 @@ MAIN="src/tune_multinomial_lasso_hyperparams.py"
 
 MODEL_TYPE="preop"
 PENALTY="elasticnet"
+C_GRID="0.001,0.01,0.1,1.0,3.0,10.0,30.0,100.0,150.0,200.0,250.0,300.0"
+K="40"
 L1_RATIO=0.3
+L1_RATIO_GRID="0.1,0.3,0.5,0.7,0.9"
 
 DATA_DIR="data/CP"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -53,6 +56,10 @@ echo "Data dir: ${DATA_DIR}"
 echo "Model type: ${MODEL_TYPE}"
 echo "Penalty: ${PENALTY}"
 echo "L1 ratio: ${L1_RATIO}"
+echo "K: ${K}"
+echo "C grid: ${C_GRID}"
+echo "L1 ratio grid: ${L1_RATIO_GRID}"
+
 echo "Log file: ${LOG_FILE}"
 echo "Log level: ${LOG_LEVEL}"
 
@@ -64,7 +71,10 @@ $PYTHON "$MAIN" \
     --data_dir "$DATA_DIR" \
     --model_type "$MODEL_TYPE" \
     --penalty "$PENALTY" \
-    --l1_ratio "$L1_RATIO"
+    --l1_ratio "$L1_RATIO" \
+    --K "$K" \
+    --C_grid "$C_GRID" \
+    --l1_ratio_grid "$L1_RATIO_GRID"
 exit_code=$?
 set -e
 

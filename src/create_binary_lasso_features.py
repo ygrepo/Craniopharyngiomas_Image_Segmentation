@@ -17,6 +17,50 @@ from src.util import get_logger, setup_logging
 logger = get_logger(__name__)
 
 
+RADIOMICS_FEATURES = [
+    "Min_Distance_mm",
+    "Hausdorff95_mm",
+    "Overlap_Volume_mm3",
+    "Contact",
+]
+
+CLINICAL_PREOP = [
+    "Patient_MRN",
+    "Age_at_Surgery_Years",
+    "Sex_Male",
+    "Preop_VIS_Score",
+    "Preop_Visual_Field_Deficit",
+    "CCI",
+    "MFI5",
+    "MFI11",
+    "Race_Asian Indian",
+    "Race_Black or African American",
+    "Race_Other",
+    "Race_White",
+    "Neurosurgeon_Postop_Visual_Outcome",
+    "Outcome_Improved",
+]
+
+CLINICAL_POSTOP = [
+    "Patient_MRN",
+    "Age_at_Surgery_Years",
+    "Sex_Male",
+    "Preop_VIS_Score",
+    "Preop_Visual_Field_Deficit",
+    "CCI",
+    "MFI5",
+    "MFI11",
+    "EEA",
+    "EOR",
+    "Race_Asian Indian",
+    "Race_Black or African American",
+    "Race_Other",
+    "Race_White",
+    "Neurosurgeon_Postop_Visual_Outcome",
+    "Outcome_Improved",
+]
+
+
 def get_args():
     ap = argparse.ArgumentParser(
         description=(
@@ -172,41 +216,10 @@ def main():
     ).astype(int)
 
     if args.model_type == "preop":
-        clinical_vars = [
-            "Patient_MRN",
-            "Age_at_Surgery_Years",
-            "Sex_Male",
-            "Preop_VIS_Score",
-            "Preop_Visual_Field_Deficit",
-            "CCI",
-            "MFI5",
-            "MFI11",
-            "Race_Asian Indian",
-            "Race_Black or African American",
-            "Race_Other",
-            "Race_White",
-            "Neurosurgeon_Postop_Visual_Outcome",
-            "Outcome_Improved",
-        ]
+        clinical_vars = CLINICAL_PREOP
+
     if args.model_type == "postop":
-        clinical_vars = [
-            "Patient_MRN",
-            "Age_at_Surgery_Years",
-            "Sex_Male",
-            "Preop_VIS_Score",
-            "Preop_Visual_Field_Deficit",
-            "CCI",
-            "MFI5",
-            "MFI11",
-            "EEA",
-            "EOR",
-            "Race_Asian Indian",
-            "Race_Black or African American",
-            "Race_Other",
-            "Race_White",
-            "Neurosurgeon_Postop_Visual_Outcome",
-            "Outcome_Improved",
-        ]
+        clinical_vars = CLINICAL_POSTOP
 
     missing = [c for c in clinical_vars if c not in df_clin.columns]
     if missing:

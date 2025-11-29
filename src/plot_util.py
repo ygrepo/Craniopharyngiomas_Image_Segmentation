@@ -30,6 +30,8 @@ def plot_binary_lasso_cv_metrics(
     df: pd.DataFrame,
     fn: Optional[Path] = None,
     title: str = "Binary LASSO: 5-fold CV Results",
+    title_fontsize: int = 20,
+    title_fontweight: str = "bold",
 ) -> None:
     """
     Plot CV AUC and F1 vs C using the metrics saved by
@@ -114,7 +116,7 @@ def plot_binary_lasso_cv_metrics(
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc="best")
 
-    plt.title(title, fontsize=20, fontweight="bold")
+    plt.title(title, fontsize=title_fontsize, fontweight=title_fontweight)
     plt.tight_layout()
 
     if fn is not None:

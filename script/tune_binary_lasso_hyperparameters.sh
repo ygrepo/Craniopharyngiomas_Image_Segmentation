@@ -45,6 +45,9 @@ DATA_DIR="data/CP"
 L1_RATIO=0.3
 PENALTY="l2"
 #PENALTY="elasticnet"
+K="60"
+C_GRID="0.001,0.01,0.1,1.0,3.0,10.0,30.0,100.0"
+
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_${PENALTY}_l1ratio_${L1_RATIO}_tune_binary_lasso_hyperparams_${TIMESTAMP}.log"
@@ -54,6 +57,9 @@ echo "Data dir: ${DATA_DIR}"
 echo "Model type: ${MODEL_TYPE}"
 echo "Penalty: ${PENALTY}"
 echo "L1 ratio: ${L1_RATIO}"
+echo "K: ${K}"
+echo "C grid: ${C_GRID}"
+
 echo "Log file: ${LOG_FILE}"
 echo "Log level: ${LOG_LEVEL}"
 
@@ -65,7 +71,9 @@ $PYTHON "$MAIN" \
     --data_dir "$DATA_DIR" \
     --model_type "$MODEL_TYPE" \
     --penalty "$PENALTY" \
-    --l1_ratio "$L1_RATIO"
+    --l1_ratio "$L1_RATIO" \
+    --K "$K" \
+    --C_grid "$C_GRID"
 exit_code=$?
 set -e
 
