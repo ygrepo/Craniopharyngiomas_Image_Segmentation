@@ -43,10 +43,11 @@ MAIN="src/tune_binary_lasso_hyperparams.py"
 MODEL_TYPE="preop"
 DATA_DIR="data/CP"
 L1_RATIO=0.3
-PENALTY="l2"
-#PENALTY="elasticnet"
+#PENALTY="l2"
+PENALTY="elasticnet"
 K="60"
 C_GRID="0.001,0.01,0.1,1.0,3.0,10.0,30.0,100.0"
+L1_RATIO_GRID="0.1,0.3,0.5,0.7,0.9"
 
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
