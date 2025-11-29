@@ -127,61 +127,249 @@ def plot_binary_lasso_cv_metrics(
     plt.close(fig)
 
 
-def plot_multinomial_lasso_cv_metrics(
+def plot_binary_lasso_cv_metrics_grid(
     df: pd.DataFrame,
     fn: Optional[Path] = None,
-    title: str = "Multinomial LASSO: 5-fold CV Results",
-):
+    title: str = "Binary ElasticNet: 5-fold CV Results",
+    title_fontsize: int = 20,
+    title_fontweight: str = "bold",
+) -> None:
     """
-    Plot CV macro-AUC and macro-F1 vs C using metrics saved in
-    *_multinomial_l1_lasso_cv_metrics.csv.
+    Plot CV AUC and F1 vs C for a grid search over C and l1_ratio.
 
     Expected columns:
-        C,
-        mean_auc_macro, std_auc_macro,
-        ci_auc_macro_lower_95, ci_auc_macro_upper_95,
-        mean_f1_macro, std_f1_macro,
-        mean_f1_macro_baseline, std_f1_macro_baseline,
-        is_best
+        C, l1_ratio,
+        mean_auc, std_auc,
+        ci_auc_lower_95, ci_auc_upper_95,
+        mean_f1, std_f1,
+        mean_f1_baseline, std_f1_baseline
     """
 
-    df = df.sort_values("C").reset_index(drop=True)
-    x = df["C"].to_numpy()
+    # Consistent ordering
+    df = df.sort_values(["l1_ratio", "C"]).reset_index(drop=True)
+
+    # Unique l1_ratio values
+    l1_vals = sorted(df["l1_ratio"].dropna().unique())
+    print(l1_vals)
+    n_l1 = len(l1_vals)
 
     fig, ax1 = plt.subplots(figsize=(9, 6))
     ax1.set_xscale("log")
 
-    # ============================================================
-    # LEFT AXIS: Macro-F1
-    # ============================================================
-    mean_f1 = df["mean_f1_macro"].to_numpy()
-    std_f1 = df["std_f1_macro"].to_numpy()
+    # Color palette
+    cmap = plt.get_cmap("tab10")
+    colors = [cmap(i % 10) for i in range(n_l1)]
 
+    # ------------------------------------------------------------------
+    # LEFT AXIS: F1 curves (one per l1_ratio) + baseline (no legend)
+    # ------------------------------------------------------------------
+    for color, l1 in zip(colors, l1_vals):
+        sub = df[df["l1_ratio"] == l1].sort_values("C")
+        x = sub["C"].to_numpy()
+        mean_f1 = sub["mean_f1"].to_numpy()
+        std_f1 = sub["std_f1"].to_numpy()
+
+        ax1.plot(
+            x,
+            mean_f1,
+            marker="o",
+            color=color,
+            linewidth=2,
+            label="_nolegend_",  # suppressed from legend
+        )
+        ax1.fill_between(
+            x,
+            mean_f1 - std_f1,
+            mean_f1 + std_f1,
+            color=color,
+            alpha=0.15,
+        )
+
+    # F1 baseline (depends only on C)
+    base_df = df.drop_duplicates(subset="C").sort_values("C")
+    x_base = base_df["C"].to_numpy()
+    mean_f1_base = base_df["mean_f1_baseline"].to_numpy()
     ax1.plot(
-        x,
-        mean_f1,
-        marker="o",
-        color="tab:blue",
-        label="Macro F1 (model)",
+        x_base,
+        mean_f1_base,
+        linestyle="--",
+        marker="^",
+        color="tab:gray",
         linewidth=2,
-    )
-    ax1.fill_between(
-        x,
-        mean_f1 - std_f1,
-        mean_f1 + std_f1,
-        color="tab:blue",
-        alpha=0.2,
+        label="_nolegend_",
     )
 
-    # Baseline F1
-    mean_f1_base = df["mean_f1_macro_baseline"].to_numpy()
+    ax1.set_xlabel("C (log scale)", fontsize=14, fontweight="bold")
+    ax1.set_ylabel("F1 score", fontsize=14, fontweight="bold")
+    ax1.grid(True, which="both", linestyle="--", alpha=0.5)
+
+    # ------------------------------------------------------------------
+    # RIGHT AXIS: AUC curves (one per l1_ratio)
+    # ------------------------------------------------------------------
+    ax2 = ax1.twinx()
+
+    for color, l1 in zip(colors, l1_vals):
+        sub = df[df["l1_ratio"] == l1].sort_values("C")
+        x = sub["C"].to_numpy()
+        mean_auc = sub["mean_auc"].to_numpy()
+
+        ax2.plot(
+            x,
+            mean_auc,
+            marker="s",
+            linestyle="--",
+            color=color,
+            linewidth=2,
+            label="_nolegend_",
+        )
+
+    # AUC = 0.5 reference line (will be in legend)
+    auc05_line = ax2.axhline(
+        0.5,
+        color="black",
+        linestyle=":",
+        linewidth=1,
+        label="AUC = 0.5",
+    )
+    ax2.set_ylabel("AUC", fontsize=14, fontweight="bold")
+
+    # ------------------------------------------------------------------
+    # Determine best (C, l1_ratio) from metrics
+    #   criterion: max mean_f1, tie-break by mean_auc
+    # ------------------------------------------------------------------
+    best = df.sort_values(["mean_f1", "mean_auc"], ascending=[False, False]).iloc[0]
+    best_C = best["C"]
+    best_l1 = best["l1_ratio"]
+    best_f1 = best["mean_f1"]
+    best_auc = best["mean_auc"]
+
+    # Shade AUC 95% CI only for best l1_ratio
+    best_sub = df[df["l1_ratio"] == best_l1].sort_values("C")
+    x_best = best_sub["C"].to_numpy()
+    ci_lower = best_sub["ci_auc_lower_95"].to_numpy()
+    ci_upper = best_sub["ci_auc_upper_95"].to_numpy()
+
+    best_color = colors[l1_vals.index(best_l1)]
+    ci_patch = ax2.fill_between(
+        x_best,
+        ci_lower,
+        ci_upper,
+        color=best_color,
+        alpha=0.2,
+        label="AUC 95% CI",
+    )
+
+    # Highlight best point (in legend)
+    best_scatter = ax1.scatter(
+        best_C,
+        best_f1,
+        s=140,
+        color="gold",
+        edgecolor="black",
+        zorder=6,
+        label=f"Best: C={best_C:g}, l1_ratio={best_l1:g}",
+    )
+    ax2.scatter(
+        best_C,
+        best_auc,
+        s=140,
+        color="gold",
+        edgecolor="black",
+        zorder=6,
+        label="_nolegend_",
+    )
+    ax1.axvline(best_C, color="gold", linestyle=":", alpha=0.6)
+
+    # ------------------------------------------------------------------
+    # Legend: only Best, AUC = 0.5, AUC 95% CI
+    # ------------------------------------------------------------------
+    ax1.legend(
+        [best_scatter, auc05_line, ci_patch],
+        [best_scatter.get_label(), "AUC = 0.5", "AUC 95% CI"],
+        loc="lower left",
+        fontsize=11,
+    )
+
+    plt.title(title, fontsize=title_fontsize, fontweight=title_fontweight)
+    plt.tight_layout()
+
+    if fn is not None:
+        fn.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Saving to {fn}")
+        plt.savefig(fn, dpi=200)
+    plt.show()
+    plt.close(fig)
+
+
+def plot_multinomial_lasso_cv_metrics(
+    df: pd.DataFrame,
+    title: str = "Multinomial LASSO: 5-fold CV Results",
+    title_fontsize: int = 20,
+    title_fontweight: str = "bold",
+    fn: Optional[Path] = None,
+):
+    """
+    Plot CV macro-AUC and macro-F1 vs C for a grid over C and l1_ratio.
+
+    Expected columns (per row):
+        C, l1_ratio,
+        mean_auc_macro, std_auc_macro,
+        ci_auc_macro_lower_95, ci_auc_macro_upper_95,
+        mean_f1_macro, std_f1_macro,
+        mean_f1_macro_baseline, std_f1_macro_baseline
+    """
+
+    # Consistent ordering
+    df = df.sort_values(["l1_ratio", "C"]).reset_index(drop=True)
+
+    # Unique l1_ratio values
+    l1_vals = sorted(df["l1_ratio"].dropna().unique())
+    n_l1 = len(l1_vals)
+
+    fig, ax1 = plt.subplots(figsize=(9, 6))
+    ax1.set_xscale("log")
+
+    # Color palette for different l1_ratio curves
+    cmap = plt.get_cmap("tab10")
+    colors = [cmap(i % 10) for i in range(n_l1)]
+
+    # ------------------------------------------------------------
+    # LEFT AXIS: Macro-F1 (one curve per l1_ratio)
+    # ------------------------------------------------------------
+    for color, l1 in zip(colors, l1_vals):
+        sub = df[df["l1_ratio"] == l1].sort_values("C")
+        x = sub["C"].to_numpy()
+        mean_f1 = sub["mean_f1_macro"].to_numpy()
+        std_f1 = sub["std_f1_macro"].to_numpy()
+
+        # label starts with '_' so it is ignored by legend
+        ax1.plot(
+            x,
+            mean_f1,
+            marker="o",
+            color=color,
+            label="_nolegend_",
+            linewidth=2,
+        )
+        # ax1.fill_between(
+        #     x,
+        #     mean_f1 - std_f1,
+        #     mean_f1 + std_f1,
+        #     color=color,
+        #     alpha=0.15,
+        # )
+
+    # Baseline F1 (depends only on C; plot once, no legend entry)
+    base_df = df.drop_duplicates(subset="C").sort_values("C")
+    x_base = base_df["C"].to_numpy()
+    mean_f1_base = base_df["mean_f1_macro_baseline"].to_numpy()
     ax1.plot(
-        x,
+        x_base,
         mean_f1_base,
         marker="^",
         linestyle="--",
         color="tab:gray",
-        label="Macro F1 (baseline)",
+        label="_nolegend_",
         linewidth=2,
     )
 
@@ -189,79 +377,100 @@ def plot_multinomial_lasso_cv_metrics(
     ax1.set_ylabel("Macro F1 score", fontsize=14, fontweight="bold")
     ax1.grid(True, which="both", linestyle="--", alpha=0.5)
 
-    # ============================================================
-    # RIGHT AXIS: Macro-AUC
-    # ============================================================
+    # ------------------------------------------------------------
+    # RIGHT AXIS: Macro-AUC (one curve per l1_ratio)
+    # ------------------------------------------------------------
     ax2 = ax1.twinx()
 
-    mean_auc = df["mean_auc_macro"].to_numpy()
-    ci_lower = df["ci_auc_macro_lower_95"].to_numpy()
-    ci_upper = df["ci_auc_macro_upper_95"].to_numpy()
+    for color, l1 in zip(colors, l1_vals):
+        sub = df[df["l1_ratio"] == l1].sort_values("C")
+        x = sub["C"].to_numpy()
+        mean_auc = sub["mean_auc_macro"].to_numpy()
 
-    ax2.plot(
-        x,
-        mean_auc,
-        marker="s",
-        linestyle="--",
-        color="tab:red",
-        label="Macro AUC",
-        linewidth=2,
+        ax2.plot(
+            x,
+            mean_auc,
+            marker="s",
+            linestyle="--",
+            color=color,
+            linewidth=2,
+            label="_nolegend_",  # not in legend
+        )
+
+    # AUC = 0.5 reference line (will appear in legend)
+    auc05_line = ax2.axhline(
+        0.5,
+        color="black",
+        linestyle=":",
+        linewidth=1,
+        label="AUC = 0.5",
     )
+    ax2.set_ylabel("Macro AUC", fontsize=14, fontweight="bold")
 
-    ax2.fill_between(
-        x,
+    # ------------------------------------------------------------
+    # Compute BEST (C, l1_ratio) directly from df
+    #   criterion: max mean_f1_macro, tie-break by mean_auc_macro
+    # ------------------------------------------------------------
+    best = df.sort_values(
+        ["mean_f1_macro", "mean_auc_macro"],
+        ascending=[False, False],
+    ).iloc[0]
+    best_C = best["C"]
+    best_l1 = best["l1_ratio"]
+    best_f1 = best["mean_f1_macro"]
+    best_auc = best["mean_auc_macro"]
+
+    # Shade AUC 95% CI for the best l1_ratio only
+    best_sub = df[df["l1_ratio"] == best_l1].sort_values("C")
+    x_best = best_sub["C"].to_numpy()
+    ci_lower = best_sub["ci_auc_macro_lower_95"].to_numpy()
+    ci_upper = best_sub["ci_auc_macro_upper_95"].to_numpy()
+
+    best_color = colors[l1_vals.index(best_l1)]
+    ci_patch = ax2.fill_between(
+        x_best,
         ci_lower,
         ci_upper,
-        color="tab:red",
+        color=best_color,
         alpha=0.2,
         label="Macro AUC 95% CI",
     )
 
-    ax2.axhline(0.5, color="black", linestyle=":", linewidth=1, label="AUC = 0.5")
+    # Highlight best point (will appear in legend)
+    best_scatter = ax1.scatter(
+        best_C,
+        best_f1,
+        s=140,
+        color="gold",
+        edgecolor="black",
+        zorder=6,
+        label=f"Best: C={best_C:g}, l1_ratio={best_l1:g}",
+    )
+    ax2.scatter(
+        best_C,
+        best_auc,
+        s=140,
+        color="gold",
+        edgecolor="black",
+        zorder=6,
+        label="_nolegend_",
+    )
+    ax1.axvline(best_C, color="gold", linestyle=":", alpha=0.6)
 
-    ax2.set_ylabel("Macro AUC", fontsize=14, fontweight="bold")
-
-    # ============================================================
-    # Highlight BEST C
-    # ============================================================
-    if "is_best" in df.columns and df["is_best"].any():
-        best = df[df["is_best"]].iloc[0]
-
-        ax1.scatter(
-            best["C"],
-            best["mean_f1_macro"],
-            s=120,
-            color="gold",
-            edgecolor="black",
-            zorder=5,
-            label="Best C (F1)",
-        )
-        ax2.scatter(
-            best["C"],
-            best["mean_auc_macro"],
-            s=120,
-            color="gold",
-            edgecolor="black",
-            zorder=5,
-        )
-        ax1.axvline(best["C"], color="gold", linestyle=":", alpha=0.5)
-
-    # ============================================================
-    # Legend
-    # ============================================================
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
+    # ------------------------------------------------------------
+    # Legend: ONLY Best, AUC = 0.5, Macro AUC 95% CI
+    # ------------------------------------------------------------
     ax1.legend(
-        lines1 + lines2,
-        labels1 + labels2,
-        loc="lower left",
+        [best_scatter, auc05_line, ci_patch],
+        [best_scatter.get_label(), "AUC = 0.5", "Macro AUC 95% CI"],
+        loc="lower right",
         fontsize=11,
     )
 
-    # ============================================================
-    # Title
-    # ============================================================
-    plt.title(title, fontsize=20, fontweight="bold")
+    # ------------------------------------------------------------
+    # Title & save/show
+    # ------------------------------------------------------------
+    plt.title(title, fontsize=title_fontsize, fontweight=title_fontweight)
     plt.tight_layout()
 
     if fn is not None:

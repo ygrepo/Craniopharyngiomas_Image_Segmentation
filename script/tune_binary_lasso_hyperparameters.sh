@@ -60,6 +60,7 @@ echo "Penalty: ${PENALTY}"
 echo "L1 ratio: ${L1_RATIO}"
 echo "K: ${K}"
 echo "C grid: ${C_GRID}"
+echo "L1 ratio grid: ${L1_RATIO_GRID}"
 
 echo "Log file: ${LOG_FILE}"
 echo "Log level: ${LOG_LEVEL}"
@@ -73,6 +74,7 @@ $PYTHON "$MAIN" \
     --model_type "$MODEL_TYPE" \
     --penalty "$PENALTY" \
     --l1_ratio "$L1_RATIO" \
+    --l1_ratio_grid "$L1_RATIO_GRID" \
     --K "$K" \
     --C_grid "$C_GRID"
 exit_code=$?

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -57,6 +56,12 @@ def get_args():
         help="C value for multinomial classification (Neurosurgeon_Postop_Visual_Outcome).",
     )
     ap.add_argument(
+        "--K",
+        type=int,
+        default=None,
+        help="Number of top features to load from the NPZ file.",
+    )
+    ap.add_argument(
         "--hyperparams_json",
         type=Path,
         default=None,
@@ -67,7 +72,7 @@ def get_args():
         "--output_dir",
         type=Path,
         default=None,
-        help="Directory to save CSV files. " "If not provided, defaults to <data_dir>",
+        help="Directory to save CSV files. If not provided, defaults to <data_dir>",
     )
     ap.add_argument("--log_file", type=Path, default="evaluate_lasso.log")
     ap.add_argument(
@@ -187,10 +192,8 @@ def compute_multiclass_metrics_df(
         y_true, y_pred, average=None, labels=unique_classes, zero_division=0
     )
 
-    # Per-class DataFrame - handle both string and numeric labels
     per_class_data = []
     for i, class_label in enumerate(unique_classes):
-        # Convert class_label to string to handle both numeric and string labels
         class_str = str(class_label)
         per_class_data.append(
             {
@@ -198,7 +201,7 @@ def compute_multiclass_metrics_df(
                 "task": "multinomial",
                 "target": "Neurosurgeon_Postop_Visual_Outcome",
                 "C_value": C_value,
-                "class": class_str,  # Keep as string
+                "class": class_str,
                 "precision": float(precision_per_class[i]),
                 "recall": float(recall_per_class[i]),
                 "sensitivity": float(recall_per_class[i]),
@@ -212,8 +215,8 @@ def compute_multiclass_metrics_df(
     cm = confusion_matrix(y_true, y_pred, labels=unique_classes)
     cm_df = pd.DataFrame(
         cm,
-        index=[f"True_{str(cls)}" for cls in unique_classes],  # Convert to string
-        columns=[f"Pred_{str(cls)}" for cls in unique_classes],  # Convert to string
+        index=[f"True_{str(cls)}" for cls in unique_classes],
+        columns=[f"Pred_{str(cls)}" for cls in unique_classes],
     )
     # Add metadata columns
     cm_df.insert(0, "model_type", model_type)
@@ -230,10 +233,13 @@ def main():
     logger.info("=== BEGIN LASSO MODEL EVALUATION ===")
     logger.info(f"model_type = {args.model_type}")
     logger.info(f"C_binary = {args.C_binary}, C_multinomial = {args.C_multinomial}")
+    logger.info(f"K = {args.K}")
 
     # Load C values from hyperparameters JSON if provided
     if args.hyperparams_json is not None:
         logger.info(f"Loading hyperparameters from {args.hyperparams_json}")
+        import json  # local import since only used here
+
         with open(args.hyperparams_json, "r") as f:
             hparams = json.load(f)
         C_binary = hparams["binary"]["C"]
@@ -250,8 +256,12 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load data
-    train_path = args.data_dir / f"{args.model_type}_train_scaled.npz"
-    test_path = args.data_dir / f"{args.model_type}_test_scaled.npz"
+    if args.K is not None:
+        train_path = args.data_dir / f"{args.model_type}_train_top{args.K}_scaled.npz"
+        test_path = args.data_dir / f"{args.model_type}_test_top{args.K}_scaled.npz"
+    else:
+        train_path = args.data_dir / f"{args.model_type}_train_scaled.npz"
+        test_path = args.data_dir / f"{args.model_type}_test_scaled.npz"
 
     X_train, y_train_bin, y_train_multi, feat_names = load_npz(train_path)
     X_test, y_test_bin, y_test_multi, _ = load_npz(test_path)
@@ -260,7 +270,7 @@ def main():
 
     logger.info(f"Train shape: {X_train.shape}, Test shape: {X_test.shape}")
 
-    # Initialize list to store all DataFrames
+    # Initialize list to store all DataFrames for overall metrics
     all_dfs = []
 
     # ---------------- Binary Classification ----------------
@@ -350,7 +360,10 @@ def main():
         logger.info(f"    Sensitivity: {row['sensitivity']:.3f}")
         logger.info(f"    F1-Score: {row['f1_score']:.3f}")
 
+    # ------------------------------------------------------------------
     # Save DataFrames as CSV files
+    # ------------------------------------------------------------------
+
     # 1. Combined overall metrics (binary + multinomial overall)
     combined_overall_df = pd.concat(all_dfs, ignore_index=True)
     overall_csv_path = args.output_dir / f"{args.model_type}_lasso_overall_metrics.csv"
@@ -371,12 +384,11 @@ def main():
     confusion_matrix_df.to_csv(confusion_csv_path, index=False)
     logger.info(f"Saved confusion matrix to {confusion_csv_path}")
 
-    # 4. Also save a single comprehensive CSV with all metrics
+    # 4. Comprehensive CSV with all metrics (binary + multiclass overall + per-class)
     comprehensive_csv_path = (
         args.output_dir / f"{args.model_type}_lasso_all_metrics.csv"
     )
 
-    # Create a comprehensive dataset
     comprehensive_data = []
 
     # Add binary metrics
@@ -387,10 +399,9 @@ def main():
     for _, row in multiclass_overall_df.iterrows():
         comprehensive_data.append(row.to_dict())
 
-    # Add per-class metrics with proper column alignment
+    # Add per-class metrics; align columns to binary_df's columns for consistency
     for _, row in multiclass_per_class_df.iterrows():
         row_dict = row.to_dict()
-        # Add missing columns with None values to match binary metrics structure
         for col in binary_df.columns:
             if col not in row_dict:
                 row_dict[col] = None
@@ -400,38 +411,29 @@ def main():
     comprehensive_df.to_csv(comprehensive_csv_path, index=False)
     logger.info(f"Saved comprehensive metrics to {comprehensive_csv_path}")
 
-    # Also keep the JSON output for backward compatibility
-    results = {
+    # 5. Summary CSV replacing previous JSON summary
+    summary_row = {
         "model_type": args.model_type,
-        "hyperparameters": {"C_binary": C_binary, "C_multinomial": C_multinomial},
-        "binary_classification": binary_df.iloc[0].to_dict(),
-        "multinomial_classification": {
-            "overall": multiclass_overall_df.iloc[0].to_dict(),
-            "per_class": multiclass_per_class_df.to_dict("records"),
-            "confusion_matrix": confusion_matrix_df.to_dict(),
-        },
+        "C_binary": C_binary,
+        "C_multinomial": C_multinomial,
+        "binary_accuracy": binary_df["accuracy"].iloc[0],
+        "binary_sensitivity": binary_df["sensitivity"].iloc[0],
+        "binary_specificity": binary_df["specificity"].iloc[0],
+        "binary_precision": binary_df["precision"].iloc[0],
+        "binary_f1": binary_df["f1_score"].iloc[0],
+        "binary_auc_roc": binary_df["auc_roc"].iloc[0],
+        "multinomial_accuracy": multiclass_overall_df["accuracy"].iloc[0],
+        "multinomial_precision_macro": multiclass_overall_df["precision_macro"].iloc[0],
+        "multinomial_recall_macro": multiclass_overall_df["recall_macro"].iloc[0],
+        "multinomial_f1_macro": multiclass_overall_df["f1_macro"].iloc[0],
+        "multinomial_f1_weighted": multiclass_overall_df["f1_weighted"].iloc[0],
     }
-
-    # Convert numpy types for JSON serialization
-    def convert_numpy_types(obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, dict):
-            return {key: convert_numpy_types(value) for key, value in obj.items()}
-        elif isinstance(obj, list):
-            return [convert_numpy_types(item) for item in obj]
-        return obj
-
-    results = convert_numpy_types(results)
-
-    json_path = args.output_dir / f"{args.model_type}_lasso_evaluation.json"
-    with open(json_path, "w") as f:
-        json.dump(results, f, indent=2)
-    logger.info(f"Saved JSON results to {json_path}")
+    summary_df = pd.DataFrame([summary_row])
+    summary_csv_path = (
+        args.output_dir / f"{args.model_type}_lasso_evaluation_summary.csv"
+    )
+    summary_df.to_csv(summary_csv_path, index=False)
+    logger.info(f"Saved evaluation summary to {summary_csv_path}")
 
     logger.info("=== DONE LASSO MODEL EVALUATION ===")
 
@@ -441,6 +443,7 @@ def main():
         "per_class_metrics": multiclass_per_class_df,
         "confusion_matrix": confusion_matrix_df,
         "comprehensive_metrics": comprehensive_df,
+        "summary": summary_df,
     }
 
 
