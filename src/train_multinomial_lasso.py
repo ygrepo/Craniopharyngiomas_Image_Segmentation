@@ -11,7 +11,6 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     f1_score,
-    roc_auc_score,
     confusion_matrix,
 )
 
@@ -26,15 +25,19 @@ logger = get_logger(__name__)
 def get_args():
     ap = argparse.ArgumentParser(
         description=(
-            "Train and evaluate LASSO models with given C values "
-            "for a given model_type (preop/postop)."
+            "Train and evaluate multinomial regularized logistic models "
+            "with a given C for a given model_type (preop/postop)."
         )
     )
     ap.add_argument(
         "--data_dir",
         type=Path,
         default=Path("merged_lasso_inputs"),
-        help="Directory containing *_train_scaled.npz and *_test_scaled.npz.",
+        help=(
+            "Directory containing "
+            "<model_type>_train_multinomial_scaled.npz and "
+            "<model_type>_test_multinomial_scaled.npz or their top-K variants."
+        ),
     )
     ap.add_argument(
         "--model_type",
@@ -47,7 +50,8 @@ def get_args():
         "--C",
         type=float,
         required=True,
-        help="C value for binary classification (Outcome_Improved).",
+        help="C value for multinomial classification "
+        "(Neurosurgeon_Postop_Visual_Outcome).",
     )
     ap.add_argument(
         "--penalty",
@@ -67,36 +71,25 @@ def get_args():
         default=0.5,
         help=(
             "ElasticNet mixing parameter (0.0 = pure L2, 1.0 = pure L1). "
-            "Used only if --penalty elasticnet and --l1_ratio_grid is not set. "
-            "Default: 0.5."
+            "Used only if --penalty elasticnet. Default: 0.5."
         ),
     )
     ap.add_argument(
         "--K",
         type=int,
         default=None,
-        help="Number of top features to load from the binary NPZ file.",
-    )
-    ap.add_argument(
-        "--Multinomial_K",
-        type=int,
-        default=None,
-        help="Number of top features to load from the multinomial NPZ file.",
-    )
-    ap.add_argument(
-        "--hyperparams_json",
-        type=Path,
-        default=None,
-        help="Optional: Load C values from hyperparameters JSON file. "
-        "If provided, overrides --C_binary and --C_multinomial.",
+        help=(
+            "If set, use *_multinomial_top{K}_scaled.npz instead of "
+            "*_multinomial_scaled.npz."
+        ),
     )
     ap.add_argument(
         "--output_dir",
         type=Path,
         default=None,
-        help="Directory to save CSV files. If not provided, defaults to <data_dir>",
+        help="Directory to save CSV files. If not provided, defaults to <data_dir>.",
     )
-    ap.add_argument("--log_file", type=Path, default="evaluate_lasso.log")
+    ap.add_argument("--log_file", type=Path, default="evaluate_multinomial_lasso.log")
     ap.add_argument(
         "--log_level",
         type=str,
@@ -106,7 +99,10 @@ def get_args():
     return ap.parse_args()
 
 
-def load_npz(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, list]:
+def load_multinomial_npz(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Load multinomial NPZ with keys: X, y_multi, feature_names.
+    """
     d = np.load(path, allow_pickle=True)
     X = d["X"]
     y_multi = d["y_multi"]
@@ -114,66 +110,16 @@ def load_npz(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, list]:
     return X, y_multi, feature_names
 
 
-def compute_binary_metrics_df(
-    y_true, y_pred, y_prob=None, model_type="", C_value=None
-) -> pd.DataFrame:
-    """Compute comprehensive binary classification metrics and return as DataFrame."""
-
-    # Basic metrics
-    accuracy = accuracy_score(y_true, y_pred)
-    precision = precision_score(y_true, y_pred, zero_division=0)
-    recall = recall_score(y_true, y_pred, zero_division=0)
-    sensitivity = recall  # Same as recall
-    f1 = f1_score(y_true, y_pred, zero_division=0)
-
-    # Confusion matrix for specificity
-    cm = confusion_matrix(y_true, y_pred)
-    if cm.size == 4:
-        tn, fp, fn, tp = cm.ravel()
-    else:
-        # All samples in one class – define everything safely
-        tn = fp = fn = tp = 0
-        if np.unique(y_true)[0] == 1:
-            # All positives
-            tp = cm[0, 0]
-        else:
-            # All negatives
-            tn = cm[0, 0]
-
-    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
-
-    # AUC if probabilities are provided
-    auc_roc = None
-    if y_prob is not None and len(np.unique(y_true)) > 1:
-        auc_roc = roc_auc_score(y_true, y_prob)
-
-    # Create DataFrame
-    metrics_data = {
-        "model_type": [model_type],
-        "task": ["binary"],
-        "target": ["Outcome_Improved"],
-        "C_value": [C_value],
-        "accuracy": [accuracy],
-        "precision": [precision],
-        "recall": [recall],
-        "sensitivity": [sensitivity],
-        "specificity": [specificity],
-        "f1_score": [f1],
-        "auc_roc": [auc_roc],
-        "true_positives": [int(tp)],
-        "true_negatives": [int(tn)],
-        "false_positives": [int(fp)],
-        "false_negatives": [int(fn)],
-    }
-
-    return pd.DataFrame(metrics_data)
-
-
 def compute_multiclass_metrics_df(
-    y_true: np.ndarray, y_pred: np.ndarray, model_type="", C_value=None
-):
-    """Compute comprehensive multiclass classification metrics and return as DataFrames."""
-
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    model_type: str = "",
+    C_value: float | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Compute multiclass classification metrics (overall, per-class, confusion matrix)
+    and return them as DataFrames.
+    """
     # Overall metrics
     accuracy = accuracy_score(y_true, y_pred)
     precision_macro = precision_score(y_true, y_pred, average="macro", zero_division=0)
@@ -185,7 +131,6 @@ def compute_multiclass_metrics_df(
     f1_macro = f1_score(y_true, y_pred, average="macro", zero_division=0)
     f1_weighted = f1_score(y_true, y_pred, average="weighted", zero_division=0)
 
-    # Overall metrics DataFrame
     overall_data = {
         "model_type": [model_type],
         "task": ["multinomial"],
@@ -239,7 +184,6 @@ def compute_multiclass_metrics_df(
         index=[f"True_{str(cls)}" for cls in unique_classes],
         columns=[f"Pred_{str(cls)}" for cls in unique_classes],
     )
-    # Add metadata columns
     cm_df.insert(0, "model_type", model_type)
     cm_df.insert(1, "task", "multinomial")
     cm_df.insert(2, "C_value", C_value)
@@ -251,135 +195,106 @@ def main():
     args = get_args()
     setup_logging(args.log_file, args.log_level)
 
-    logger.info("=== BEGIN LASSO MODEL EVALUATION ===")
+    logger.info("=== BEGIN MULTINOMIAL LASSO MODEL EVALUATION ===")
     logger.info(f"model_type = {args.model_type}")
-    logger.info(f"C_binary = {args.C_binary}, C_multinomial = {args.C_multinomial}")
-    logger.info(f"Binary_K = {args.Binary_K}, Multinomial_K = {args.Multinomial_K}")
-
-    # Load C values from hyperparameters JSON if provided
-    if args.hyperparams_json is not None:
-        logger.info(f"Loading hyperparameters from {args.hyperparams_json}")
-        import json  # local import since only used here
-
-        with open(args.hyperparams_json, "r") as f:
-            hparams = json.load(f)
-        C_binary = hparams["binary"]["C"]
-        C_multinomial = hparams["multinomial"]["C"]
-    else:
-        C_binary = args.C_binary
-        C_multinomial = args.C_multinomial
-
-    logger.info(f"C_binary = {C_binary}, C_multinomial = {C_multinomial}")
+    logger.info(f"C = {args.C}")
+    logger.info(f"K = {args.K}")
+    logger.info(f"penalty = {args.penalty}")
+    logger.info(f"l1_ratio = {args.l1_ratio}")
+    logger.info(f"output_dir = {args.output_dir}")
 
     # Set output directory
     if args.output_dir is None:
         args.output_dir = args.data_dir
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load data
-    if args.Binary_K is not None and args.Multinomial_K is not None:
+    # ------------------------------------------------------------------
+    # Load data (multinomial NPZs)
+    # ------------------------------------------------------------------
+    if args.K is not None:
         train_path = (
             args.data_dir
-            / f"{args.model_type}_train_top_{args.Binary_K}_top_{args.Multinomial_K}_scaled.npz"
+            / f"{args.model_type}_train_multinomial_top{args.K}_scaled.npz"
         )
         test_path = (
-            args.data_dir
-            / f"{args.model_type}_test_top_{args.Binary_K}_top_{args.Multinomial_K}_scaled.npz"
+            args.data_dir / f"{args.model_type}_test_multinomial_top{args.K}_scaled.npz"
         )
+        suffix_top = f"_top{args.K}"
     else:
-        train_path = args.data_dir / f"{args.model_type}_train_scaled.npz"
-        test_path = args.data_dir / f"{args.model_type}_test_scaled.npz"
+        train_path = args.data_dir / f"{args.model_type}_train_multinomial_scaled.npz"
+        test_path = args.data_dir / f"{args.model_type}_test_multinomial_scaled.npz"
+        suffix_top = ""
 
-    X_train, y_train_bin, y_train_multi, feat_names = load_npz(train_path)
-    X_test, y_test_bin, y_test_multi, _ = load_npz(test_path)
-    logger.info(f"Train outcome counts:{np.bincount(y_train_bin)}")
-    logger.info(f"Test outcome counts:{np.bincount(y_test_bin)}")
+    logger.info(f"Loading train from {train_path}")
+    logger.info(f"Loading test  from {test_path}")
 
+    X_train, y_train_multi, _ = load_multinomial_npz(train_path)
+    X_test, y_test_multi, _ = load_multinomial_npz(test_path)
+
+    logger.info(
+        f"Train class counts: {dict(zip(*np.unique(y_train_multi, return_counts=True)))}"
+    )
+    logger.info(
+        f"Test class counts: {dict(zip(*np.unique(y_test_multi, return_counts=True)))}"
+    )
     logger.info(f"Train shape: {X_train.shape}, Test shape: {X_test.shape}")
 
-    # Initialize list to store all DataFrames for overall metrics
-    all_dfs = []
+    # ------------------------------------------------------------------
+    # Build multinomial logistic model
+    # ------------------------------------------------------------------
+    if args.penalty == "elasticnet":
+        multinomial_model = LogisticRegression(
+            penalty="elasticnet",
+            solver="saga",
+            multi_class="multinomial",
+            max_iter=5000,
+            class_weight="balanced",
+            n_jobs=-1,
+            C=args.C,
+            l1_ratio=args.l1_ratio,
+            random_state=42,
+        )
+    else:
+        multinomial_model = LogisticRegression(
+            penalty=args.penalty,  # 'l1' or 'l2'
+            solver="saga",
+            multi_class="multinomial",
+            max_iter=5000,
+            class_weight="balanced",
+            n_jobs=-1,
+            C=args.C,
+            random_state=42,
+        )
 
-    # ---------------- Binary Classification ----------------
-    logger.info("Training and evaluating binary LASSO (Outcome_Improved)...")
-
-    binary_model = LogisticRegression(
-        penalty="l1",
-        solver="saga",
-        max_iter=5000,
-        class_weight="balanced",
-        n_jobs=-1,
-        C=C_binary,
-        random_state=42,
-    )
-
-    binary_model.fit(X_train, y_train_bin)
-
-    # Predictions
-    y_pred_bin = binary_model.predict(X_test)
-    y_prob_bin = (
-        binary_model.predict_proba(X_test)[:, 1]
-        if len(np.unique(y_test_bin)) > 1
-        else None
-    )
-
-    # Compute metrics as DataFrame
-    binary_df = compute_binary_metrics_df(
-        y_test_bin, y_pred_bin, y_prob_bin, args.model_type, C_binary
-    )
-    all_dfs.append(binary_df)
-
-    logger.info("Binary Classification Results:")
-    logger.info(f"  Accuracy: {binary_df['accuracy'].iloc[0]:.3f}")
-    logger.info(f"  Sensitivity (Recall): {binary_df['sensitivity'].iloc[0]:.3f}")
-    logger.info(f"  Specificity: {binary_df['specificity'].iloc[0]:.3f}")
-    logger.info(f"  Precision: {binary_df['precision'].iloc[0]:.3f}")
-    logger.info(f"  F1-Score: {binary_df['f1_score'].iloc[0]:.3f}")
-    if binary_df["auc_roc"].iloc[0] is not None:
-        logger.info(f"  AUC-ROC: {binary_df['auc_roc'].iloc[0]:.3f}")
-
-    # ---------------- Multinomial Classification ----------------
-    logger.info(
-        "Training and evaluating multinomial LASSO (Neurosurgeon_Postop_Visual_Outcome)..."
-    )
-
-    multinomial_model = LogisticRegression(
-        penalty="l1",
-        solver="saga",
-        max_iter=5000,
-        class_weight="balanced",
-        n_jobs=-1,
-        C=C_multinomial,
-        random_state=42,
-    )
-
+    logger.info("Fitting multinomial logistic model...")
     multinomial_model.fit(X_train, y_train_multi)
 
     # Predictions
     y_pred_multi = multinomial_model.predict(X_test)
 
     # Compute metrics as DataFrames
-    multiclass_overall_df, multiclass_per_class_df, confusion_matrix_df = (
-        compute_multiclass_metrics_df(
-            y_test_multi, y_pred_multi, args.model_type, C_multinomial
-        )
+    (
+        multiclass_overall_df,
+        multiclass_per_class_df,
+        confusion_matrix_df,
+    ) = compute_multiclass_metrics_df(
+        y_test_multi, y_pred_multi, args.model_type, args.C
     )
-    all_dfs.append(multiclass_overall_df)
 
     logger.info("Multinomial Classification Results:")
     logger.info(f"  Accuracy: {multiclass_overall_df['accuracy'].iloc[0]:.3f}")
     logger.info(
-        f"  Precision (macro): {multiclass_overall_df['precision_macro'].iloc[0]:.3f}"
+        f"  Precision (macro): "
+        f"{multiclass_overall_df['precision_macro'].iloc[0]:.3f}"
     )
     logger.info(
         f"  Recall (macro): {multiclass_overall_df['recall_macro'].iloc[0]:.3f}"
     )
     logger.info(f"  F1-Score (macro): {multiclass_overall_df['f1_macro'].iloc[0]:.3f}")
     logger.info(
-        f"  F1-Score (weighted): {multiclass_overall_df['f1_weighted'].iloc[0]:.3f}"
+        f"  F1-Score (weighted): " f"{multiclass_overall_df['f1_weighted'].iloc[0]:.3f}"
     )
 
-    # Log per-class metrics
     logger.info("Per-class metrics:")
     for _, row in multiclass_per_class_df.iterrows():
         logger.info(f"  Class {row['class']}:")
@@ -390,93 +305,56 @@ def main():
     # ------------------------------------------------------------------
     # Save DataFrames as CSV files
     # ------------------------------------------------------------------
-
-    # 1. Combined overall metrics (binary + multinomial overall)
-    combined_overall_df = pd.concat(all_dfs, ignore_index=True)
-    if args.K is not None:
-        overall_csv_path = (
-            args.output_dir / f"{args.model_type}_lasso_overall_metrics_top{args.K}.csv"
-        )
-    else:
-        overall_csv_path = (
-            args.output_dir / f"{args.model_type}_lasso_overall_metrics.csv"
-        )
-    combined_overall_df.to_csv(overall_csv_path, index=False)
+    overall_csv_path = (
+        args.output_dir
+        / f"{args.model_type}_lasso_multinomial_overall_metrics{suffix_top}.csv"
+    )
+    multiclass_overall_df.to_csv(overall_csv_path, index=False)
     logger.info(f"Saved overall metrics to {overall_csv_path}")
 
-    # 2. Per-class metrics for multinomial
     per_class_csv_path = (
-        args.output_dir / f"{args.model_type}_lasso_per_class_metrics.csv"
+        args.output_dir
+        / f"{args.model_type}_lasso_multinomial_per_class_metrics{suffix_top}.csv"
     )
     multiclass_per_class_df.to_csv(per_class_csv_path, index=False)
     logger.info(f"Saved per-class metrics to {per_class_csv_path}")
 
-    # 3. Confusion matrix
     confusion_csv_path = (
-        args.output_dir / f"{args.model_type}_lasso_confusion_matrix.csv"
+        args.output_dir
+        / f"{args.model_type}_lasso_multinomial_confusion_matrix{suffix_top}.csv"
     )
     confusion_matrix_df.to_csv(confusion_csv_path, index=False)
     logger.info(f"Saved confusion matrix to {confusion_csv_path}")
 
-    # 4. Comprehensive CSV with all metrics (binary + multiclass overall + per-class)
-    comprehensive_csv_path = (
-        args.output_dir / f"{args.model_type}_lasso_all_metrics.csv"
-    )
-
-    comprehensive_data = []
-
-    # Add binary metrics
-    for _, row in binary_df.iterrows():
-        comprehensive_data.append(row.to_dict())
-
-    # Add multinomial overall metrics
-    for _, row in multiclass_overall_df.iterrows():
-        comprehensive_data.append(row.to_dict())
-
-    # Add per-class metrics; align columns to binary_df's columns for consistency
-    for _, row in multiclass_per_class_df.iterrows():
-        row_dict = row.to_dict()
-        for col in binary_df.columns:
-            if col not in row_dict:
-                row_dict[col] = None
-        comprehensive_data.append(row_dict)
-
-    comprehensive_df = pd.DataFrame(comprehensive_data)
-    comprehensive_df.to_csv(comprehensive_csv_path, index=False)
-    logger.info(f"Saved comprehensive metrics to {comprehensive_csv_path}")
-
-    # 5. Summary CSV replacing previous JSON summary
+    # Summary CSV (flat one-row)
     summary_row = {
         "model_type": args.model_type,
-        "C_binary": C_binary,
-        "C_multinomial": C_multinomial,
-        "binary_accuracy": binary_df["accuracy"].iloc[0],
-        "binary_sensitivity": binary_df["sensitivity"].iloc[0],
-        "binary_specificity": binary_df["specificity"].iloc[0],
-        "binary_precision": binary_df["precision"].iloc[0],
-        "binary_f1": binary_df["f1_score"].iloc[0],
-        "binary_auc_roc": binary_df["auc_roc"].iloc[0],
-        "multinomial_accuracy": multiclass_overall_df["accuracy"].iloc[0],
-        "multinomial_precision_macro": multiclass_overall_df["precision_macro"].iloc[0],
-        "multinomial_recall_macro": multiclass_overall_df["recall_macro"].iloc[0],
-        "multinomial_f1_macro": multiclass_overall_df["f1_macro"].iloc[0],
-        "multinomial_f1_weighted": multiclass_overall_df["f1_weighted"].iloc[0],
+        "C": args.C,
+        "penalty": args.penalty,
+        "l1_ratio": args.l1_ratio if args.penalty == "elasticnet" else None,
+        "accuracy": multiclass_overall_df["accuracy"].iloc[0],
+        "precision_macro": multiclass_overall_df["precision_macro"].iloc[0],
+        "precision_weighted": multiclass_overall_df["precision_weighted"].iloc[0],
+        "recall_macro": multiclass_overall_df["recall_macro"].iloc[0],
+        "recall_weighted": multiclass_overall_df["recall_weighted"].iloc[0],
+        "f1_macro": multiclass_overall_df["f1_macro"].iloc[0],
+        "f1_weighted": multiclass_overall_df["f1_weighted"].iloc[0],
     }
     summary_df = pd.DataFrame([summary_row])
     summary_csv_path = (
-        args.output_dir / f"{args.model_type}_lasso_evaluation_summary.csv"
+        args.output_dir
+        / f"{args.model_type}_lasso_multinomial_evaluation_summary{suffix_top}.csv"
     )
     summary_df.to_csv(summary_csv_path, index=False)
     logger.info(f"Saved evaluation summary to {summary_csv_path}")
 
-    logger.info("=== DONE LASSO MODEL EVALUATION ===")
+    logger.info("=== DONE MULTINOMIAL LASSO MODEL EVALUATION ===")
 
     # Return DataFrames for programmatic use
     return {
-        "overall_metrics": combined_overall_df,
+        "overall_metrics": multiclass_overall_df,
         "per_class_metrics": multiclass_per_class_df,
         "confusion_matrix": confusion_matrix_df,
-        "comprehensive_metrics": comprehensive_df,
         "summary": summary_df,
     }
 
