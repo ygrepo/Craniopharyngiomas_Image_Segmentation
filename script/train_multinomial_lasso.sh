@@ -37,17 +37,17 @@ LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
 PYTHON="${ENV_PREFIX}/bin/python"
-MAIN="src/train_lasso.py"
+MAIN="src/train_multinomial_lasso.py"
 
 
 MODEL_TYPE="preop"
 DATA_DIR="data/CP"
-C_BINARY=0.1
-C_MULTINOMIAL=.01
-# C_BINARY=1
-# C_MULTINOMIAL=1
+C=3
+L1_RATIO=0.1
+PENALTY="elasticnet"
+K=40
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_train_lasso_${TIMESTAMP}.log"
+LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_${PENALTY}_l1ratio_${L1_RATIO}_train_multinomial_lasso_${TIMESTAMP}.log"
 
     
 echo "Data dir: ${DATA_DIR}"
@@ -62,8 +62,10 @@ $PYTHON "$MAIN" \
     --log_file "$LOG_FILE" \
     --data_dir "$DATA_DIR" \
     --model_type "$MODEL_TYPE" \
-    --C_binary "$C_BINARY" \
-    --C_multinomial "$C_MULTINOMIAL"
+    --C "$C" \
+    --l1_ratio "$L1_RATIO" \
+    --penalty "$PENALTY" \
+    --K "$K"
 exit_code=$?
 set -e
 

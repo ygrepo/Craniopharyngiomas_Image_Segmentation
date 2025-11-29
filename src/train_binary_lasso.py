@@ -196,7 +196,7 @@ def main():
     logger.info(f"Loading train from {train_path}")
     logger.info(f"Loading test  from {test_path}")
 
-    X_train, y_train_bin, feat_names = load_npz(train_path)
+    X_train, y_train_bin, _ = load_npz(train_path)
     X_test, y_test_bin, _ = load_npz(test_path)
 
     logger.info(f"Train outcome counts: {np.bincount(y_train_bin)}")
@@ -291,7 +291,7 @@ def main():
     }
     summary_df = pd.DataFrame([summary_row])
     summary_csv_path = (
-        args.output_dir / f"{args.model_type}_lasso_evaluation_summary_{suffix_top}.csv"
+        args.output_dir / f"{args.model_type}_lasso_evaluation_summary{suffix_top}.csv"
     )
     summary_df.to_csv(summary_csv_path, index=False)
     logger.info(f"Saved evaluation summary to {summary_csv_path}")
