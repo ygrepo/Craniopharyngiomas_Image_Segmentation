@@ -50,13 +50,9 @@ LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_${PENALTY}_l1ratio_${L1_RATIO}_filter_feature
     
 echo "Data dir: ${DATA_DIR}"
 echo "Model type: ${MODEL_TYPE}"
-echo "Penalty: ${PENALTY}"
-echo "L1 ratio: ${L1_RATIO}"
-echo "C: ${C}"
 echo "NPZ path: ${NPZ_PATH}"
 echo "Importance CSV: ${IMPORTANCE_CSV}"
 echo "K: ${K}"
-echo "Task: ${TASK}"
 echo "Log file: ${LOG_FILE}"
 echo "Log level: ${LOG_LEVEL}"
 
