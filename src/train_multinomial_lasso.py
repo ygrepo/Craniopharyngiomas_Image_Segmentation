@@ -44,22 +44,44 @@ def get_args():
         help="Which model design to evaluate: 'preop' or 'postop'.",
     )
     ap.add_argument(
-        "--C_binary",
+        "--C",
         type=float,
         required=True,
         help="C value for binary classification (Outcome_Improved).",
     )
     ap.add_argument(
-        "--C_multinomial",
+        "--penalty",
+        "--loss",
+        dest="penalty",
+        type=str,
+        default="l1",
+        choices=["l1", "l2", "elasticnet"],
+        help=(
+            "Regularization penalty: 'l1' (LASSO), 'l2' (ridge), or 'elasticnet'. "
+            "Default: 'l1'."
+        ),
+    )
+    ap.add_argument(
+        "--l1_ratio",
         type=float,
-        required=True,
-        help="C value for multinomial classification (Neurosurgeon_Postop_Visual_Outcome).",
+        default=0.5,
+        help=(
+            "ElasticNet mixing parameter (0.0 = pure L2, 1.0 = pure L1). "
+            "Used only if --penalty elasticnet and --l1_ratio_grid is not set. "
+            "Default: 0.5."
+        ),
     )
     ap.add_argument(
         "--K",
         type=int,
         default=None,
-        help="Number of top features to load from the NPZ file.",
+        help="Number of top features to load from the binary NPZ file.",
+    )
+    ap.add_argument(
+        "--Multinomial_K",
+        type=int,
+        default=None,
+        help="Number of top features to load from the multinomial NPZ file.",
     )
     ap.add_argument(
         "--hyperparams_json",
@@ -87,10 +109,9 @@ def get_args():
 def load_npz(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, list]:
     d = np.load(path, allow_pickle=True)
     X = d["X"]
-    y_bin = d["y_bin"]
     y_multi = d["y_multi"]
     feature_names = d["feature_names"]
-    return X, y_bin, y_multi, feature_names
+    return X, y_multi, feature_names
 
 
 def compute_binary_metrics_df(
@@ -233,7 +254,7 @@ def main():
     logger.info("=== BEGIN LASSO MODEL EVALUATION ===")
     logger.info(f"model_type = {args.model_type}")
     logger.info(f"C_binary = {args.C_binary}, C_multinomial = {args.C_multinomial}")
-    logger.info(f"K = {args.K}")
+    logger.info(f"Binary_K = {args.Binary_K}, Multinomial_K = {args.Multinomial_K}")
 
     # Load C values from hyperparameters JSON if provided
     if args.hyperparams_json is not None:
@@ -256,9 +277,15 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load data
-    if args.K is not None:
-        train_path = args.data_dir / f"{args.model_type}_train_top{args.K}_scaled.npz"
-        test_path = args.data_dir / f"{args.model_type}_test_top{args.K}_scaled.npz"
+    if args.Binary_K is not None and args.Multinomial_K is not None:
+        train_path = (
+            args.data_dir
+            / f"{args.model_type}_train_top_{args.Binary_K}_top_{args.Multinomial_K}_scaled.npz"
+        )
+        test_path = (
+            args.data_dir
+            / f"{args.model_type}_test_top_{args.Binary_K}_top_{args.Multinomial_K}_scaled.npz"
+        )
     else:
         train_path = args.data_dir / f"{args.model_type}_train_scaled.npz"
         test_path = args.data_dir / f"{args.model_type}_test_scaled.npz"
@@ -366,7 +393,14 @@ def main():
 
     # 1. Combined overall metrics (binary + multinomial overall)
     combined_overall_df = pd.concat(all_dfs, ignore_index=True)
-    overall_csv_path = args.output_dir / f"{args.model_type}_lasso_overall_metrics.csv"
+    if args.K is not None:
+        overall_csv_path = (
+            args.output_dir / f"{args.model_type}_lasso_overall_metrics_top{args.K}.csv"
+        )
+    else:
+        overall_csv_path = (
+            args.output_dir / f"{args.model_type}_lasso_overall_metrics.csv"
+        )
     combined_overall_df.to_csv(overall_csv_path, index=False)
     logger.info(f"Saved overall metrics to {overall_csv_path}")
 

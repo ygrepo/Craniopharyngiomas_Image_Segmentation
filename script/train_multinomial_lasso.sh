@@ -1,5 +1,12 @@
 #!/bin/bash
-#   filter_feature_lasso.sh    —  Filter features based on Lasso importance.
+#   train_lasso.sh    —  Train Lasso model.
+#SBATCH --job-name=train_lasso
+#SBATCH --partition=cpu
+#SBATCH --cpus-per-task=6
+#SBATCH --mem=48G
+#SBATCH --time=04:00:00
+#SBATCH --output=logs/train_lasso_%j.out
+#SBATCH --error=logs/train_lasso_%j.err
 
 set -euo pipefail
 
@@ -30,33 +37,21 @@ LOG_LEVEL="DEBUG"
 mkdir -p "$LOG_DIR"
 
 PYTHON="${ENV_PREFIX}/bin/python"
-MAIN="src/filter_feature_lasso.py"
+MAIN="src/train_lasso.py"
 
 
 MODEL_TYPE="preop"
-#TASK="multinomial"
-TASK="binary"
-#NPZ_PATH="data/CP/preop_train_multinomial_scaled.npz"
-#NPZ_PATH="data/CP/preop_train_binary_scaled.npz"
-NPZ_PATH="data/CP/preop_test_binary_scaled.npz"
-#IMPORTANCE_CSV="data/CP/preop_multinomial_elasticnet_l1ratio_0.3_feature_importance.csv"
-IMPORTANCE_CSV="data/CP/preop_binary_l2_feature_importance.csv"
-#K=40
-K=60
 DATA_DIR="data/CP"
+C_BINARY=0.1
+C_MULTINOMIAL=.01
+# C_BINARY=1
+# C_MULTINOMIAL=1
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_${PENALTY}_l1ratio_${L1_RATIO}_filter_feature_lasso_${TIMESTAMP}.log"
+LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_train_lasso_${TIMESTAMP}.log"
 
     
 echo "Data dir: ${DATA_DIR}"
 echo "Model type: ${MODEL_TYPE}"
-echo "Penalty: ${PENALTY}"
-echo "L1 ratio: ${L1_RATIO}"
-echo "C: ${C}"
-echo "NPZ path: ${NPZ_PATH}"
-echo "Importance CSV: ${IMPORTANCE_CSV}"
-echo "K: ${K}"
-echo "Task: ${TASK}"
 echo "Log file: ${LOG_FILE}"
 echo "Log level: ${LOG_LEVEL}"
 
@@ -65,10 +60,10 @@ set +e
 $PYTHON "$MAIN" \
     --log_level "$LOG_LEVEL" \
     --log_file "$LOG_FILE" \
+    --data_dir "$DATA_DIR" \
     --model_type "$MODEL_TYPE" \
-    --npz_path "$NPZ_PATH" \
-    --importance_csv "$IMPORTANCE_CSV" \
-    --k "$K"
+    --C_binary "$C_BINARY" \
+    --C_multinomial "$C_MULTINOMIAL"
 exit_code=$?
 set -e
 

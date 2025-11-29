@@ -150,8 +150,17 @@ def plot_binary_lasso_cv_metrics_grid(
 
     # Unique l1_ratio values
     l1_vals = sorted(df["l1_ratio"].dropna().unique())
-    print(l1_vals)
     n_l1 = len(l1_vals)
+
+    # ------------------------------------------------------------------
+    # Determine best (C, l1_ratio) from metrics
+    #   criterion: max mean_f1, tie-break by mean_auc
+    # ------------------------------------------------------------------
+    best = df.sort_values(["mean_f1", "mean_auc"], ascending=[False, False]).iloc[0]
+    best_C = best["C"]
+    best_l1 = best["l1_ratio"]
+    best_f1 = best["mean_f1"]
+    best_auc = best["mean_auc"]
 
     fig, ax1 = plt.subplots(figsize=(9, 6))
     ax1.set_xscale("log")
@@ -161,13 +170,12 @@ def plot_binary_lasso_cv_metrics_grid(
     colors = [cmap(i % 10) for i in range(n_l1)]
 
     # ------------------------------------------------------------------
-    # LEFT AXIS: F1 curves (one per l1_ratio) + baseline (no legend)
+    # LEFT AXIS: F1 curves (one per l1_ratio) + baseline (no CI)
     # ------------------------------------------------------------------
     for color, l1 in zip(colors, l1_vals):
         sub = df[df["l1_ratio"] == l1].sort_values("C")
         x = sub["C"].to_numpy()
         mean_f1 = sub["mean_f1"].to_numpy()
-        std_f1 = sub["std_f1"].to_numpy()
 
         ax1.plot(
             x,
@@ -176,13 +184,6 @@ def plot_binary_lasso_cv_metrics_grid(
             color=color,
             linewidth=2,
             label="_nolegend_",  # suppressed from legend
-        )
-        ax1.fill_between(
-            x,
-            mean_f1 - std_f1,
-            mean_f1 + std_f1,
-            color=color,
-            alpha=0.15,
         )
 
     # F1 baseline (depends only on C)
@@ -205,8 +206,10 @@ def plot_binary_lasso_cv_metrics_grid(
 
     # ------------------------------------------------------------------
     # RIGHT AXIS: AUC curves (one per l1_ratio)
+    #   CI shading ONLY for curve with best l1_ratio
     # ------------------------------------------------------------------
     ax2 = ax1.twinx()
+    ci_patch = None
 
     for color, l1 in zip(colors, l1_vals):
         sub = df[df["l1_ratio"] == l1].sort_values("C")
@@ -223,7 +226,22 @@ def plot_binary_lasso_cv_metrics_grid(
             label="_nolegend_",
         )
 
-    # AUC = 0.5 reference line (will be in legend)
+        # # CI shading only for the curve corresponding to best l1_ratio
+        # if l1 == best_l1:
+        #     ci_lower = sub["ci_auc_lower_95"].to_numpy()
+        #     ci_upper = sub["ci_auc_upper_95"].to_numpy()
+        #     mask = ~(np.isnan(ci_lower) | np.isnan(ci_upper))
+        #     if np.any(mask):
+        #         ci_patch = ax2.fill_between(
+        #             x[mask],
+        #             ci_lower[mask],
+        #             ci_upper[mask],
+        #             color=color,
+        #             alpha=0.15,
+        #             label="_nolegend_",
+        #         )
+
+    # AUC = 0.5 reference line (legend item)
     auc05_line = ax2.axhline(
         0.5,
         color="black",
@@ -234,32 +252,8 @@ def plot_binary_lasso_cv_metrics_grid(
     ax2.set_ylabel("AUC", fontsize=14, fontweight="bold")
 
     # ------------------------------------------------------------------
-    # Determine best (C, l1_ratio) from metrics
-    #   criterion: max mean_f1, tie-break by mean_auc
+    # Highlight best point (legend item)
     # ------------------------------------------------------------------
-    best = df.sort_values(["mean_f1", "mean_auc"], ascending=[False, False]).iloc[0]
-    best_C = best["C"]
-    best_l1 = best["l1_ratio"]
-    best_f1 = best["mean_f1"]
-    best_auc = best["mean_auc"]
-
-    # Shade AUC 95% CI only for best l1_ratio
-    best_sub = df[df["l1_ratio"] == best_l1].sort_values("C")
-    x_best = best_sub["C"].to_numpy()
-    ci_lower = best_sub["ci_auc_lower_95"].to_numpy()
-    ci_upper = best_sub["ci_auc_upper_95"].to_numpy()
-
-    best_color = colors[l1_vals.index(best_l1)]
-    ci_patch = ax2.fill_between(
-        x_best,
-        ci_lower,
-        ci_upper,
-        color=best_color,
-        alpha=0.2,
-        label="AUC 95% CI",
-    )
-
-    # Highlight best point (in legend)
     best_scatter = ax1.scatter(
         best_C,
         best_f1,
@@ -281,14 +275,16 @@ def plot_binary_lasso_cv_metrics_grid(
     ax1.axvline(best_C, color="gold", linestyle=":", alpha=0.6)
 
     # ------------------------------------------------------------------
-    # Legend: only Best, AUC = 0.5, AUC 95% CI
+    # Legend: Best, AUC = 0.5, AUC 95% CI (for best curve)
     # ------------------------------------------------------------------
-    ax1.legend(
-        [best_scatter, auc05_line, ci_patch],
-        [best_scatter.get_label(), "AUC = 0.5", "AUC 95% CI"],
-        loc="lower left",
-        fontsize=11,
-    )
+    handles = [best_scatter, auc05_line]
+    labels = [best_scatter.get_label(), "AUC = 0.5"]
+
+    if ci_patch is not None:
+        handles.append(ci_patch)
+        labels.append("AUC 95% CI (best)")
+
+    ax1.legend(handles, labels, loc="lower right", fontsize=11)
 
     plt.title(title, fontsize=title_fontsize, fontweight=title_fontweight)
     plt.tight_layout()

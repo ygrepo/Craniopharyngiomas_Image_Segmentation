@@ -206,7 +206,7 @@ def main():
             new_stem = f"{stem}_top{args.k}"
         args.output_npz = args.npz_path.with_name(new_stem + ".npz")
 
-    X_reduced, y, selected_features, y_key = select_top_k_features(
+    X_reduced, y, _, y_key = select_top_k_features(
         npz_path=args.npz_path,
         importance_csv=args.importance_csv,
         k=args.k,

@@ -193,7 +193,6 @@ def main():
     # -------------------------------------------------------------------------
     # C grid logic: like previous script
     # -------------------------------------------------------------------------
-    default_C_grid = [0.0001, 0.001, 0.01, 0.1, 1.0, 3.0, 10.0, 30.0, 100.0]
 
     if args.C_grid is not None:
         C_grid = [float(x) for x in args.C_grid.split(",")]
@@ -202,9 +201,7 @@ def main():
         C_grid = [args.C]
         logger.info(f"Using single C from CLI: {C_grid}")
     else:
-        C_grid = default_C_grid
-        logger.info(f"Using default C_grid: {C_grid}")
-
+        raise ValueError("Must provide either --C or --C_grid")
     # -------------------------------------------------------------------------
     # l1_ratio grid logic (only relevant for ElasticNet)
     # -------------------------------------------------------------------------
