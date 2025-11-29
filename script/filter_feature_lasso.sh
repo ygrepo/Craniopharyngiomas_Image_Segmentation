@@ -53,9 +53,6 @@ LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_${PENALTY}_filter_feature_lasso_${TIMESTAMP}.
     
 echo "Data dir: ${DATA_DIR}"
 echo "Model type: ${MODEL_TYPE}"
-echo "Penalty: ${PENALTY}"
-echo "L1 ratio: ${L1_RATIO}"
-echo "C: ${C}"
 echo "NPZ path: ${NPZ_PATH}"
 echo "Importance CSV: ${IMPORTANCE_CSV}"
 echo "K: ${K}"
