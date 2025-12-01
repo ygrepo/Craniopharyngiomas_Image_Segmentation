@@ -27,6 +27,12 @@ def get_args():
         help="Path to output CSV with stats.",
     )
     ap.add_argument(
+        "--output_binary_csv",
+        type=Path,
+        default=Path("data/CP/radiomics_binary_stats.csv"),
+        help="Path to output CSV with stats.",
+    )
+    ap.add_argument(
         "--log_level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default="INFO",
@@ -68,6 +74,22 @@ def main():
     output_csv = args.output_csv.resolve()
     logger.info(f"Saving stats to {output_csv}")
     stats.to_csv(output_csv, index=True)
+
+    # Binary variable stats
+    binary_col = "Contact"
+    contact_count = df[binary_col].sum()  # number of 1's
+    contact_total = df[binary_col].count()  # non-missing
+    contact_pct = contact_count / contact_total * 100
+
+    binary_stats = pd.DataFrame(
+        {"count_1": [contact_count], "percentage_1": [contact_pct]}, index=[binary_col]
+    )
+
+    logger.info(binary_stats)
+    args.output_binary_csv.parent.mkdir(parents=True, exist_ok=True)
+    output_csv = args.output_binary_csv.resolve()
+    logger.info(f"Saving stats to {output_csv}")
+    binary_stats.to_csv(output_csv, index=True)
 
 
 if __name__ == "__main__":
