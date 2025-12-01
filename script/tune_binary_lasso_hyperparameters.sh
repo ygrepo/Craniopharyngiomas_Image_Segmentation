@@ -43,9 +43,8 @@ MAIN="src/tune_binary_lasso_hyperparams.py"
 MODEL_TYPE="preop"
 DATA_DIR="data/CP"
 L1_RATIO=0.3
-#PENALTY="l2"
-PENALTY="elasticnet"
-K="60"
+PENALTY="l1"
+#K="60"
 C_GRID="0.001,0.01,0.1,1.0,3.0,10.0,30.0,100.0"
 L1_RATIO_GRID="0.1,0.3,0.5,0.7,0.9"
 
@@ -58,7 +57,7 @@ echo "Data dir: ${DATA_DIR}"
 echo "Model type: ${MODEL_TYPE}"
 echo "Penalty: ${PENALTY}"
 echo "L1 ratio: ${L1_RATIO}"
-echo "K: ${K}"
+#echo "K: ${K}"
 echo "C grid: ${C_GRID}"
 echo "L1 ratio grid: ${L1_RATIO_GRID}"
 
@@ -75,7 +74,6 @@ $PYTHON "$MAIN" \
     --penalty "$PENALTY" \
     --l1_ratio "$L1_RATIO" \
     --l1_ratio_grid "$L1_RATIO_GRID" \
-    --K "$K" \
     --C_grid "$C_GRID"
 exit_code=$?
 set -e
