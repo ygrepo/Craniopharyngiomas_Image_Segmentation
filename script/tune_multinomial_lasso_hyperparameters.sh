@@ -40,8 +40,8 @@ PYTHON="${ENV_PREFIX}/bin/python"
 MAIN="src/tune_multinomial_lasso_hyperparams.py"
 
 
-MODEL_TYPE="preop"
-PENALTY="elasticnet"
+MODEL_TYPE="postop"
+PENALTY="l1"
 C_GRID="0.001,0.01,0.1,1.0,3.0,10.0,30.0,100.0,150.0,200.0,250.0,300.0"
 #K="40"
 L1_RATIO=0.3
