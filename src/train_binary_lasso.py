@@ -239,6 +239,7 @@ def main():
         if len(np.unique(y_test_bin)) > 1
         else None
     )
+    logger.info(list(zip(y_test_bin, np.round(y_prob_bin, 3))))
 
     # Compute metrics as DataFrame
     binary_df = compute_binary_metrics_df(
