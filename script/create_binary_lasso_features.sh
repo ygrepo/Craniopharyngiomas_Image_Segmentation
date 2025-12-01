@@ -47,7 +47,7 @@ LOG_FILE="${LOG_DIR}/create_lasso_features_${TIMESTAMP}.log"
 LATENT_DIR="${MODEL_FOLDER}/latent_features"
 RADIOMICS_CSV="nnUNet_raw/Dataset503_CP/radiomics_results.csv"
 CLINICAL_CSV="data/CP"
-MODEL_TYPE="preop"
+MODEL_TYPE="postop"
 OUTPUT_DIR="data/CP"
 TEST_FRAC=0.20
     
