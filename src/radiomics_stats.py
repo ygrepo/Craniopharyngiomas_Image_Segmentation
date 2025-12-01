@@ -76,20 +76,25 @@ def main():
     stats.to_csv(output_csv, index=True)
 
     # Binary variable stats
-    binary_col = "Contact"
-    contact_count = df[binary_col].sum()  # number of 1's
-    contact_total = df[binary_col].count()  # non-missing
-    contact_pct = contact_count / contact_total * 100
+    df["Contact"] = pd.to_numeric(df["Contact"], errors="coerce")
 
-    binary_stats = pd.DataFrame(
-        {"count_1": [contact_count], "percentage_1": [contact_pct]}, index=[binary_col]
-    )
+    # Count values
+    contact_counts = df["Contact"].value_counts(dropna=False).sort_index()
 
-    logger.info(binary_stats)
+    # Total non-missing
+    total = df["Contact"].count()
+
+    # Compute percentages
+    contact_percent = (contact_counts / total * 100).round(2)
+
+    # Combine into a table
+    contact_table = pd.DataFrame({"N": contact_counts, "Percentage": contact_percent})
+
+    logger.info(contact_table)
     args.output_binary_csv.parent.mkdir(parents=True, exist_ok=True)
     output_csv = args.output_binary_csv.resolve()
     logger.info(f"Saving stats to {output_csv}")
-    binary_stats.to_csv(output_csv, index=True)
+    contact_table.to_csv(output_csv, index=True)
 
 
 if __name__ == "__main__":
