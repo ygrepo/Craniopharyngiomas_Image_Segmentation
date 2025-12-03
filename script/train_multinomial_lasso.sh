@@ -42,9 +42,9 @@ MAIN="src/train_multinomial_lasso.py"
 
 MODEL_TYPE="preop"
 DATA_DIR="data/CP"
-C=3
+C=0.1
 L1_RATIO=0.1
-PENALTY="elasticnet"
+PENALTY="l2"
 K=40
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_${PENALTY}_l1ratio_${L1_RATIO}_train_multinomial_lasso_${TIMESTAMP}.log"
