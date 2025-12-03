@@ -190,6 +190,7 @@ def main():
     logger.info(f"# caseIDs: {df_rad['Case_ID'].nunique()}")
     df = df_rad.merge(df, on="Case_ID", how="inner")
     logger.info(f"After merging radiomics, # caseIDs: {df['Case_ID'].nunique()}")
+    logger.info(f"Latent + Radiomics shape = {df.shape}")
 
     # ---------------------------------------------------------
     # Load Clinical
@@ -235,6 +236,7 @@ def main():
     logger.info("Merging clinical, radiomics...")
     df = df.merge(df_clin, on="Case_ID", how="inner")
     logger.info(f"After merging clinical, # caseIDs: {df['Case_ID'].nunique()}")
+    logger.info(f"Latent + Radiomics + Clinical shape = {df.shape}")
 
     if args.model_type == "preop":
         merged_path = args.output_dir / "preop_binary_classifier_data.csv"
