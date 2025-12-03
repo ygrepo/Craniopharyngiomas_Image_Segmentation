@@ -40,9 +40,9 @@ PYTHON="${ENV_PREFIX}/bin/python"
 MAIN="src/train_multinomial_lasso.py"
 
 
-MODEL_TYPE="postop"
+MODEL_TYPE="preop"
 DATA_DIR="data/CP"
-C=0.01
+C=0.1
 L1_RATIO=0.1
 PENALTY="l2"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
