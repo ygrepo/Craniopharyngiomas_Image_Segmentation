@@ -292,6 +292,7 @@ def main():
     def build_arrays(
         df: pd.DataFrame, feature_cols: list
     ) -> tuple[np.ndarray, np.ndarray]:
+        logger.info(f"Building arrays for {df[feature_cols].shape} cases")
         X = df[feature_cols].astype(float).to_numpy()
         y_bin = df["Outcome_Improved"].astype(int).to_numpy()
         return X, y_bin
