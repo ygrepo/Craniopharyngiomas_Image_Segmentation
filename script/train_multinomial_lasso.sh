@@ -40,12 +40,11 @@ PYTHON="${ENV_PREFIX}/bin/python"
 MAIN="src/train_multinomial_lasso.py"
 
 
-MODEL_TYPE="preop"
+MODEL_TYPE="postop"
 DATA_DIR="data/CP"
-C=0.1
+C=0.01
 L1_RATIO=0.1
 PENALTY="l2"
-K=40
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_${PENALTY}_l1ratio_${L1_RATIO}_train_multinomial_lasso_${TIMESTAMP}.log"
 
@@ -64,8 +63,7 @@ $PYTHON "$MAIN" \
     --model_type "$MODEL_TYPE" \
     --C "$C" \
     --l1_ratio "$L1_RATIO" \
-    --penalty "$PENALTY" \
-    --K "$K"
+    --penalty "$PENALTY"
 exit_code=$?
 set -e
 
