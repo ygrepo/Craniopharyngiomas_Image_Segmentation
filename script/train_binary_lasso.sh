@@ -43,9 +43,8 @@ MAIN="src/train_binary_lasso.py"
 MODEL_TYPE="preop"
 DATA_DIR="data/CP"
 C=0.1
-L1_RATIO=0.1
-PENALTY="l2"
-K=60
+L1_RATIO=0.3
+PENALTY="elasticnet"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="${LOG_DIR}/${MODEL_TYPE}_${PENALTY}_l1ratio_${L1_RATIO}_train_binary_lasso_${TIMESTAMP}.log"
 
@@ -64,9 +63,8 @@ $PYTHON "$MAIN" \
     --model_type "$MODEL_TYPE" \
     --C "$C" \
     --l1_ratio "$L1_RATIO" \
-    --penalty "$PENALTY" \
-    --K "$K"
-exit_code=$?
+    --penalty "$PENALTY"
+    exit_code=$?
 set -e
 
 if [[ ${exit_code} -eq 0 ]]; then
