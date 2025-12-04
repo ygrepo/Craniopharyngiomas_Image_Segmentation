@@ -41,8 +41,8 @@ MAIN="src/compute_lasso_feature_importance.py"
 
 
 MODEL_TYPE="preop"
-TASK="multinomial"
-#TASK="binary"
+#TASK="multinomial"
+TASK="binary"
 C=0.1
 #C=0.0010
 PENALTY="elasticnet"
