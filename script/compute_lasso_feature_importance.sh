@@ -48,8 +48,8 @@ C=0.1
 PENALTY="elasticnet"
 #PENALTY="l2"
 L1_RATIO=0.3
-NPZ_PATH="data/CP/preop_train_multinomial_scaled.npz"
-#NPZ_PATH="data/CP/preop_train_binary_scaled.npz"
+#NPZ_PATH="data/CP/preop_train_multinomial_scaled.npz"
+NPZ_PATH="data/CP/preop_train_binary_scaled.npz"
 
 DATA_DIR="data/CP"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
