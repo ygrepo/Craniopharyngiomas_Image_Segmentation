@@ -88,6 +88,7 @@ $PYTHON "$MAIN" \
     --slice_idx "40,60,80" \
     --modality_idx 1 \
     --feature_importance_csv output/metrics/preop_binary_elasticnet_l1ratio_0.3_feature_importance.csv \
+    --latent_rank 1 \
     --log_file "$LOG_DIR/nnunet_deepdream_cp_keras.log" \
     --log_level "$LOG_LEVEL"
 
