@@ -282,31 +282,17 @@ def main():
     assert importance.shape[0] == n_features
 
     # Build DataFrame
-    feature_idx = np.arange(n_features)
     groups = [
         map_feature_group(fn, clinical_list=clinical_list) for fn in feature_names
     ]
 
     df = pd.DataFrame(
         {
-            "feature_idx": feature_idx,  # column index in X
             "feature_name": feature_names,
             "group": groups,
             "importance": importance,
         }
     )
-
-    # For latent features, compute the corresponding bottleneck channel index
-    latent_mask = df["group"] == "latent"
-    if latent_mask.any():
-        first_latent_idx = df.loc[latent_mask, "feature_idx"].min()
-        # Assumes latent features are a contiguous block in X and correspond
-        # to pooled bottleneck channels in order.
-        df.loc[latent_mask, "latent_channel_idx"] = (
-            df.loc[latent_mask, "feature_idx"] - first_latent_idx
-        )
-    else:
-        df["latent_channel_idx"] = np.nan
 
     # Rank globally and within groups
     df["rank_global"] = (

@@ -623,6 +623,187 @@ def plot_feature_importances(
     plt.close(fig)
 
 
+def plot_feature_importances_comparison(
+    df1: pd.DataFrame,
+    df2: pd.DataFrame,
+    title1: str,
+    title2: str,
+    main_title: str = "Feature Importance Comparison",
+    figsize: tuple = (20, 8),
+    feature_col: str = "feature",
+    importance_col: str = "importance",
+    rank_col: str = "rank_within_group",
+    output: Path | None = None,
+    top_n: int | None = 20,  # Show only top N features
+    show_values: bool = True,  # Show importance values on bars
+):
+    """
+    Plot feature importances from two DataFrames side by side for comparison.
+
+    Parameters:
+    -----------
+    df1, df2 : pd.DataFrame
+        DataFrames containing feature importance data
+    title1, title2 : str
+        Titles for the left and right plots respectively
+    main_title : str
+        Overall title for the entire figure
+    """
+
+    def prepare_data(df, top_n):
+        """Helper function to prepare data for plotting"""
+        # Basic validation
+        for col in [feature_col, importance_col, rank_col]:
+            if col not in df.columns:
+                raise ValueError(f"Required column '{col}' not found in DataFrame.")
+
+        # Sort by importance descending and take top N
+        if top_n is not None:
+            df_plot = (
+                df.sort_values(importance_col, ascending=False)
+                .head(top_n)
+                .reset_index(drop=True)
+            )
+        else:
+            df_plot = df.sort_values(importance_col, ascending=False).reset_index(
+                drop=True
+            )
+
+        # Clean feature names
+        features = df_plot[feature_col].astype(str).tolist()
+        features_clean = []
+        for feat in features:
+            # Remove common prefixes
+            clean_feat = feat.replace("Preop_", "").replace("_", " ")
+            # Truncate long names
+            if len(clean_feat) > 25:
+                clean_feat = clean_feat[:22] + "..."
+            features_clean.append(clean_feat)
+
+        importances = df_plot[importance_col].astype(float).tolist()
+        ranks = df_plot[rank_col].tolist()
+
+        return features_clean, importances, ranks
+
+    def plot_single_importance(
+        ax, features_clean, importances, ranks, title, color_pos=0.3
+    ):
+        """Helper function to plot a single importance chart"""
+        # Use consistent color from viridis
+        bar_color = plt.cm.viridis(color_pos)
+
+        x = range(len(features_clean))
+        bars = ax.bar(x, importances, color=bar_color, edgecolor="black", linewidth=0.5)
+
+        # Add rank and importance values on top of bars
+        if show_values:
+            for xi, bar, importance, rank in zip(x, bars, importances, ranks):
+                height = bar.get_height()
+                # Show rank (bold) on top
+                ax.text(
+                    xi,
+                    height + max(importances) * 0.01,
+                    f"{rank}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                    fontweight="bold",
+                )
+
+        # Improve x-axis labels
+        ax.set_xticks(list(x))
+        if top_n is not None:
+            ax.set_xticklabels(
+                features_clean,
+                rotation=45,
+                ha="right",
+                fontsize=10,
+                fontweight="bold",
+            )
+        else:
+            ax.set_xticklabels(
+                features_clean,
+                rotation=45,
+                ha="right",
+                fontsize=6,
+                fontweight="bold",
+            )
+
+        # Styling improvements
+        ax.set_ylabel("Feature Importance", fontsize=12, fontweight="bold")
+        ax.set_xlabel("Features", fontsize=12, fontweight="bold")
+
+        if top_n is not None:
+            ax.set_title(
+                f"{title}\n(Top {top_n} Features)",
+                fontsize=14,
+                fontweight="bold",
+                pad=-30,
+            )
+        else:
+            ax.set_title(
+                f"{title}",
+                fontsize=14,
+                fontweight="bold",
+                pad=-30,
+            )
+
+        # Improve grid
+        ax.grid(axis="y", linestyle="--", alpha=0.7, color="gray")
+        ax.set_axisbelow(True)
+
+        # Set y-axis to start from 0 and add some padding at top for labels
+        ax.set_ylim(0, max(importances) * 1.25)
+
+        # Improve spines
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_linewidth(1.5)
+        ax.spines["bottom"].set_linewidth(1.5)
+
+        # Add summary statistics as text box
+        mean_importance = np.mean(importances)
+        if top_n is not None:
+            stats_text = f"Mean Importance (top {top_n}): {mean_importance:.4f}\nTotal Features Shown: {len(features_clean)}"
+        else:
+            stats_text = f"Mean Importance: {mean_importance:.4f}"
+
+        ax.text(
+            0.02,
+            0.98,
+            stats_text,
+            transform=ax.transAxes,
+            fontsize=9,
+            verticalalignment="top",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+        )
+
+    # Prepare data for both DataFrames
+    features1, importances1, ranks1 = prepare_data(df1, top_n)
+    features2, importances2, ranks2 = prepare_data(df2, top_n)
+
+    # Create figure with two subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
+
+    # Plot both charts with different colors
+    plot_single_importance(ax1, features1, importances1, ranks1, title1, color_pos=0.3)
+    plot_single_importance(ax2, features2, importances2, ranks2, title2, color_pos=0.3)
+
+    # Add main title
+    fig.suptitle(main_title, fontsize=18, fontweight="bold", y=0.95)
+
+    # Adjust layout to prevent overlap
+    plt.tight_layout(rect=[0, 0, 1, 0.92])
+    plt.subplots_adjust(top=0.90)  # Make room for main title
+
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(output, dpi=300, bbox_inches="tight")
+
+    plt.show()
+    plt.close(fig)
+
+
 def plot_feature_importance_accumulation(
     df: pd.DataFrame,
     prefix: str,
