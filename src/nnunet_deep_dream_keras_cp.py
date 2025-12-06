@@ -320,10 +320,11 @@ def _crop_from_pads(x: torch.Tensor, pads: list[int], nd: int):
 class DeepDreamBraTS:
     """Deep Dream implementation for nnU-Net models."""
 
-    def __init__(self, model: nn.Module, meta: Dict[str, Any]):
+    def __init__(self, model: nn.Module, meta: Dict[str, Any], use_bottleneck=False):
         self.model = model
         self.meta = meta
         self.device = next(model.parameters()).device
+        self.use_bottleneck = use_bottleneck
 
     def compute_score(
         self,
@@ -429,10 +430,31 @@ class DeepDreamBraTS:
 
         logger.info("Running deep dream...")
         logger.info(
-            f"target_idx: {target_idx}, filter_index: {filter_index}, "
-            f"num_octaves: {num_octaves}, octave_scale: {octave_scale}"
+            f"target_idx: {target_idx}, filter_index: {filter_index}, num_octaves: {num_octaves}, octave_scale: {octave_scale}"
         )
-        target_layer = pick_target_layer(self.model, layer_regex, target_idx=target_idx)
+
+        # Decide whether to hook bottleneck or use regex
+        use_bottleneck = getattr(self, "use_bottleneck", False)
+        if use_bottleneck:
+            # This matches how you extracted latents: bottleneck_module = network.encoder.stages[-1]
+            try:
+                target_layer = self.model.encoder.stages[-1]
+                logger.info(
+                    "Using encoder bottleneck layer: model.encoder.stages[-1] "
+                    f"(intended for latent_channel_idx={filter_index})"
+                )
+            except AttributeError as e:
+                raise RuntimeError(
+                    "Model does not have encoder.stages[-1]. Check architecture and "
+                    "disable --use_bottleneck if incompatible."
+                ) from e
+        else:
+            target_layer = pick_target_layer(
+                self.model, layer_regex, target_idx=target_idx
+            )
+            logger.info(
+                f"Using layer from regex '{layer_regex}' with target_idx={target_idx}"
+            )
 
         if input_data.dim() == 4:  # [B, C, H, W]
             original_shape = input_data.shape[-2:]
@@ -627,7 +649,12 @@ def parse_args():
             "Used together with --feature_importance_csv to determine filter_index."
         ),
     )
-
+    ap.add_argument(
+        "--use_bottleneck",
+        type=int,
+        default=0,
+        help="If 1, ignore layer_regex/target_idx and hook encoder.stages[-1] (the bottleneck).",
+    )
     ap.add_argument(
         "--log_file",
         type=Path,
@@ -746,7 +773,7 @@ if __name__ == "__main__":
         )
 
     # Initialize and run DeepDream
-    deep_dream = DeepDreamBraTS(model, meta)
+    deep_dream = DeepDreamBraTS(model, meta, use_bottleneck=args.use_bottleneck)
     dreamed_tensor = deep_dream.run_deep_dream(
         input_tensor,
         layer_regex=args.layer_regex,

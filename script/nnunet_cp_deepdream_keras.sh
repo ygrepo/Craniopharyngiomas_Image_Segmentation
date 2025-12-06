@@ -83,6 +83,7 @@ $PYTHON "$MAIN" \
     --target_idx 0 \
     --iterations 80 \
     --step_size 0.02 \
+    --use_bottleneck 1 \
     --num_octaves 3 \
     --octave_scale 1.4 \
     --slice_idx "40,60,80" \
