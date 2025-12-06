@@ -15,6 +15,7 @@ import nibabel as nib
 import json
 from tqdm import tqdm
 import math
+import pandas as pd  # NEW: to read feature importance CSV
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -37,13 +38,12 @@ def load_nnunet_preprocessed_case(
     Load preprocessed nnU-Net data (.pkl files).
 
     Args:
-        preprocessed_dir: Path to nnUNet_preprocessed/DatasetXXX_BraTS2017/nnUNetTrainer__nnUNetPlans__3d_fullres
-        case_id: Case identifier (e.g., 'Brats17_TCIA_001_1')
+        preprocessed_dir: Path to nnUNet_preprocessed/DatasetXXX/...
+        case_id: Case identifier (e.g., 'Brats17_TCIA_001_1' or CP case)
 
     Returns:
-        Tensor of shape [1, 4, D, H, W] and metadata
+        Tensor of shape [1, C, D, H, W] and metadata
     """
-    # 2) Load volume (preprocessed b2nd) → (1,C,D,H,W) torch
     vol_t, props = load_volume(
         preprocessed_dir, case_id
     )  # returns torch tensor normalized like training
@@ -125,19 +125,16 @@ def visualize_results(
     dream_np = dreamed[0, modality_idx].cpu().numpy()
 
     if orig_np.ndim == 2:  # 2D image
-        # For 2D, ignore slice_idx and show single comparison
         _visualize_single_slice(orig_np, dream_np, None, save_path)
         return
 
-    # Handle 3D volume
+    # 3D volume
     if slice_idx is None:
         slice_idx = orig_np.shape[0] // 2
 
     if isinstance(slice_idx, int):
-        # Single slice
         _visualize_single_slice(orig_np, dream_np, slice_idx, save_path)
     else:
-        # Multiple slices
         _visualize_multiple_slices(orig_np, dream_np, slice_idx, save_path, max_cols)
 
 
@@ -147,7 +144,7 @@ def _visualize_single_slice(
     slice_idx: Optional[int],
     save_path: Optional[Path],
 ):
-    """Visualize a single slice (original behavior)."""
+    """Visualize a single slice (original vs deep dream vs difference)."""
 
     if orig_np.ndim == 3 and slice_idx is not None:
         orig_slice = orig_np[slice_idx]
@@ -158,7 +155,6 @@ def _visualize_single_slice(
         dream_slice = dream_np
         title_suffix = ""
 
-    # Create visualization
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     axes[0].imshow(orig_slice, cmap="gray")
@@ -169,7 +165,6 @@ def _visualize_single_slice(
     axes[1].set_title(f"Deep Dream{title_suffix}")
     axes[1].axis("off")
 
-    # Difference
     diff = dream_slice - orig_slice
     im = axes[2].imshow(diff, cmap="RdBu_r")
     axes[2].set_title(f"Difference{title_suffix}")
@@ -190,16 +185,13 @@ def _visualize_multiple_slices(
     slice_indices: list[int],
     save_path: Optional[Path],
     max_cols: int = 4,
-    diff_clip: float = 2.5,  # symmetric limits: ±diff_clip * std
+    diff_clip: float = 2.5,
 ):
     """
-    Grid per slice: Original (top) | Edges (middle, gist_gray) | Difference (bottom, jet).
-    Plots are aligned by sharing axes within each column and using equal aspect.
+    Grid per slice: Original (top) | Edges (middle) | Difference (bottom).
     """
 
-    # -------- helpers --------
     def edge_mag(img2d: np.ndarray) -> np.ndarray:
-        # robust edges with mild smoothing, falling back if SciPy not present
         try:
             from scipy.ndimage import gaussian_filter, sobel
 
@@ -212,7 +204,6 @@ def _visualize_multiple_slices(
             e = np.hypot(gx, gy)
         return e
 
-    # -------- validate --------
     max_slice = orig_np.shape[0] - 1
     valid_slices = [s for s in slice_indices if 0 <= s <= max_slice]
     if not valid_slices:
@@ -225,7 +216,6 @@ def _visualize_multiple_slices(
         print(f"Warning: Invalid slice indices {invalid} ignored. Using {valid_slices}")
     num_slices = len(valid_slices)
 
-    # -------- grid --------
     cols = min(max_cols, num_slices)
     rows = (num_slices + cols - 1) // cols
 
@@ -238,7 +228,6 @@ def _visualize_multiple_slices(
         constrained_layout=True,
     )
 
-    # make axes 2D for uniform indexing
     if rows * 3 == 1 and cols == 1:
         axes = np.array([[axes]])
     elif rows * 3 == 1:
@@ -246,15 +235,12 @@ def _visualize_multiple_slices(
     elif cols == 1:
         axes = axes[:, np.newaxis]
 
-    # precompute edge normalization globally for the shown slices
     edges_all = []
     for sidx in valid_slices:
         edges_all.append(edge_mag(orig_np[sidx]))
-    # robust global max (99.5th percentile over all requested slices)
     p995 = np.percentile(np.concatenate([e.ravel() for e in edges_all]), 99.5)
     edge_vmin, edge_vmax = 0.0, float(p995 if p995 > 0 else np.max(edges_all))
 
-    # plot
     for i, sidx in enumerate(valid_slices):
         r = i // cols
         c = i % cols
@@ -264,33 +250,26 @@ def _visualize_multiple_slices(
         dream = dream_np[sidx]
         diff = dream - orig
 
-        # symmetric, robust limits for diff
         dstd = float(np.std(diff))
         lim = diff_clip * dstd if dstd > 0 else np.max(np.abs(diff)) + 1e-8
         vmin, vmax = -lim, +lim
 
-        # ---- Original (top) ----
         ax = axes[r0, c]
         ax.imshow(orig, cmap="gray", aspect="equal")
         ax.set_title(f"Original (Slice {sidx})")
         ax.axis("off")
 
-        # ---- Edges (middle, grayscale) ----
         ax = axes[r1, c]
         e = edges_all[i]
         ax.imshow(e, cmap="gist_gray", vmin=edge_vmin, vmax=edge_vmax, aspect="equal")
         ax.set_title(f"Edges (Slice {sidx})")
         ax.axis("off")
 
-        # ---- Difference (bottom, jet) ----
         ax = axes[r2, c]
         im = ax.imshow(diff, cmap="jet", vmin=vmin, vmax=vmax, aspect="equal")
         ax.set_title(f"Difference (Slice {sidx})")
         ax.axis("off")
-        # colorbar attached but constrained so columns stay aligned (not working)
-        # plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    # hide any unused subplots
     total_used = num_slices * 3
     total_slots = rows * cols * 3
     for flat_idx in range(total_used, total_slots):
@@ -311,7 +290,7 @@ def _pad_to_multiples(x: torch.Tensor, factors: tuple[int, ...], nd: int):
     spatial = list(x.shape[-nd:])
     target = [_next_multiple(s, f) for s, f in zip(spatial, factors)]
     pads = []
-    for s, t in zip(spatial[::-1], target[::-1]):  # F.pad uses reverse spatial order
+    for s, t in zip(spatial[::-1], target[::-1]):
         diff = t - s
         left = diff // 2
         right = diff - left
@@ -339,7 +318,7 @@ def _crop_from_pads(x: torch.Tensor, pads: list[int], nd: int):
 
 
 class DeepDreamBraTS:
-    """Deep Dream implementation for BraTS2017 using nnU-Net models."""
+    """Deep Dream implementation for nnU-Net models."""
 
     def __init__(self, model: nn.Module, meta: Dict[str, Any]):
         self.model = model
@@ -353,8 +332,6 @@ class DeepDreamBraTS:
         filter_index: Optional[int] = None,
     ) -> torch.Tensor:
         """Compute score for deep dream based on layer activations."""
-
-        # Hook to capture activations
         activations = {}
 
         def hook_fn(module, input, output):
@@ -363,23 +340,21 @@ class DeepDreamBraTS:
         handle = layer.register_forward_hook(hook_fn)
 
         try:
-            # Forward pass
             _ = self.model(input_tensor)
-
             if "target" not in activations:
                 raise RuntimeError("Target layer activation not captured")
 
             activation = activations["target"]
-
             if filter_index is not None:
-                # Focus on specific filter/channel
                 if filter_index >= activation.shape[1]:
+                    logger.warning(
+                        f"filter_index {filter_index} >= number of channels "
+                        f"{activation.shape[1]}; clipping to last channel."
+                    )
                     filter_index = activation.shape[1] - 1
                 score = activation[:, filter_index].mean()
             else:
-                # Use all activations
                 score = activation.norm()
-
         finally:
             handle.remove()
 
@@ -392,17 +367,15 @@ class DeepDreamBraTS:
         filter_index: Optional[int] = None,
         step_size: float = 0.01,
     ) -> torch.Tensor:
-        """Perform one gradient ascent step."""
+        """Perform one gradient ascent step on the chosen feature channel."""
         x = input_tensor.detach().requires_grad_(True)
-        # Compute score
         score = self.compute_score(x, layer, filter_index)
-        (-score).backward()  # descent on (-score) == ascent on score
+        (-score).backward()  # gradient ascent on score
 
-        # Gradient ascent step
         with torch.no_grad():
             g = x.grad
             g = g / (torch.sqrt(torch.mean(g**2)) + 1e-5)
-            x += step_size * g  # ascent on score
+            x += step_size * g
             x.clamp_(-3, 3)
         return x.detach()
 
@@ -435,11 +408,10 @@ class DeepDreamBraTS:
 
             if i % log_every == 0:
                 score_t = self.compute_score(input_tensor, layer, filter_index)
-                score = -float(score_t.detach().item())
-                loss = -score
+                score = float(score_t.detach().item())
                 if show_progress:
                     pbar.set_postfix(score=f"{score:.4f}")
-                logger.info(f"Iter {i}, Score={score:.4f}, Loss={loss:.4f}")
+                logger.info(f"Iter {i}, Score={score:.4f}")
 
         return input_tensor
 
@@ -457,12 +429,11 @@ class DeepDreamBraTS:
 
         logger.info("Running deep dream...")
         logger.info(
-            f"target_idx: {target_idx}, filter_index: {filter_index}, num_octaves: {num_octaves}, octave_scale: {octave_scale}"
+            f"target_idx: {target_idx}, filter_index: {filter_index}, "
+            f"num_octaves: {num_octaves}, octave_scale: {octave_scale}"
         )
-        # 1) pick target layer
         target_layer = pick_target_layer(self.model, layer_regex, target_idx=target_idx)
 
-        # 2) shape/device bookkeeping
         if input_data.dim() == 4:  # [B, C, H, W]
             original_shape = input_data.shape[-2:]
             is_3d = False
@@ -478,21 +449,16 @@ class DeepDreamBraTS:
         pm = self.meta["plans_manager"]
         cfg_name = self.meta["configuration_name"]
 
-        # 1) Get pool kernels (prefer cfg, else pull from plans)
         pool_ks = getattr(cfg, "pool_op_kernel_sizes", None)
         logger.info(f"pool_ks: {pool_ks}")
         if pool_ks is None:
-            # nnU-Net v2 stores this under plans -> configurations -> <cfg>
             pool_ks = pm.plans["configurations"][cfg_name]["pool_op_kernel_sizes"]
 
-        # 2) Number of spatial dims (2 for 2D, 3 for 3D)
-        nd = len(pool_ks[0])  # or: nd = len(getattr(cfg, "patch_size", pool_ks[0]))
+        nd = len(pool_ks[0])
         logger.info(f"nd: {nd}")
-        # 4) Interp mode from nd
         interp_mode = "trilinear" if nd == 3 else "bilinear"
         logger.info(f"interp_mode: {interp_mode}")
 
-        # 3) build octaves: [largest (=original), smaller, smallest]
         octaves = []
         for i in range(num_octaves):
             if i == 0:
@@ -509,11 +475,8 @@ class DeepDreamBraTS:
                 )
                 octaves.append(scaled)
 
-        # 4) process smallest -> largest
-        #    IMPORTANT: init detail to smallest shape to avoid first-iter mismatch
         detail = torch.zeros_like(octaves[-1])
         pool_ks = cfg.pool_op_kernel_sizes
-        # 3) Total down/up factor per axis = product over stages
         factors = tuple(
             int(np.prod([stage[d] for stage in pool_ks])) for d in range(nd)
         )
@@ -523,14 +486,12 @@ class DeepDreamBraTS:
         ):
             logger.info(f"Upsampling and dreaming octave {i}")
 
-            # resize detail to current octave if needed (robust guard)
             cur_spatial = octave_base.shape[-nd:]
             if detail.shape[-nd:] != cur_spatial:
                 detail = F.interpolate(
                     detail, size=cur_spatial, mode=interp_mode, align_corners=False
                 )
 
-            # add detail and dream at this scale
             input_octave = octave_base + detail
             input_padded, pads = _pad_to_multiples(input_octave, factors, nd)
             dreamed = self.deep_dream_loop(
@@ -542,10 +503,8 @@ class DeepDreamBraTS:
             )
             dreamed = _crop_from_pads(dreamed, pads, nd)
 
-            # update detail contributed at this scale
             detail = dreamed - octave_base
 
-        # 5) upsample accumulated detail back to original size and add
         if detail.shape[-nd:] != tuple(original_shape):
             detail = F.interpolate(
                 detail, size=original_shape, mode=interp_mode, align_corners=False
@@ -580,14 +539,15 @@ def parse_args():
         "--preprocessed_dir",
         type=Path,
         required=True,
-        help="Path to nnU-Net preprocessed data (e.g., nnUNet_preprocessed/Dataset001_BraTS2017)",
+        help="Path to nnU-Net preprocessed data (e.g., nnUNet_preprocessed/Dataset503_CP/...)",
     )
     ap.add_argument(
         "--case_id",
         type=str,
         required=True,
-        help="BraTS case ID (e.g., Brats17_TCIA_001_1)",
+        help="Case ID (e.g., Brats17_TCIA_001_1 or CP case_id)",
     )
+
     # Deep dream arguments
     ap.add_argument(
         "--layer_regex",
@@ -611,13 +571,13 @@ def parse_args():
         "--filter_index",
         type=int,
         default=None,
-        help="Specific filter to enhance (None for all)",
+        help="Specific feature channel to enhance (if not using latent_rank).",
     )
     ap.add_argument(
         "--filter_type",
         type=str,
         default="max",
-        help="Filter type (max/balanced)",
+        help="Filter type (placeholder; currently unused).",
     )
     ap.add_argument(
         "--num_octaves",
@@ -638,14 +598,36 @@ def parse_args():
         "--modality_idx",
         type=int,
         default=0,
-        help="Modality index for visualization (0=FLAIR)",
+        help="Modality index for visualization (0=first channel, e.g., FLAIR)",
     )
     ap.add_argument(
         "--only_visualize",
         type=bool,
         default=False,
-        help="Only visualize results",
+        help="Only visualize existing deep-dream result (no optimization).",
     )
+
+    # NEW: latent feature integration
+    ap.add_argument(
+        "--feature_importance_csv",
+        type=Path,
+        default=None,
+        help=(
+            "CSV from compute_feature_importance.py. Must contain columns "
+            "'group', 'latent_channel_idx', and 'rank_global'. "
+            "If provided with --latent_rank, overrides --filter_index."
+        ),
+    )
+    ap.add_argument(
+        "--latent_rank",
+        type=int,
+        default=None,
+        help=(
+            "Global rank of latent feature to visualize (rank_global among latent rows). "
+            "Used together with --feature_importance_csv to determine filter_index."
+        ),
+    )
+
     ap.add_argument(
         "--log_file",
         type=Path,
@@ -700,17 +682,12 @@ if __name__ == "__main__":
     slice_idx = [int(z) for z in str(args.slice_idx).split(",") if z.strip().isdigit()]
 
     if args.only_visualize:
-        logger.info("Only visualizing results. Exiting.")
-        # Load deep-dream if provided
-        dreamed_tensor = None
+        logger.info("Only visualizing results. Exiting after visualization.")
         dream_path = output_dir / f"{args.case_id}_deep_dream.nii.gz"
-        import nibabel as nib
-
         img = nib.load(str(dream_path))
         dd = np.asanyarray(img.dataobj)  # (Z, Y, X, C) or (Z, Y, X)
         if dd.ndim == 3:
             dd = dd[..., None]
-        # back to (1, C, Z, Y, X) torch tensor on CPU
         dreamed_tensor = torch.from_numpy(dd.transpose(3, 0, 1, 2)).unsqueeze(0).float()
 
         viz_path = output_dir / f"{args.case_id}_visualization_2.png"
@@ -723,6 +700,51 @@ if __name__ == "__main__":
         )
         sys.exit(0)
 
+    # Resolve filter_index from latent feature importance if requested
+    resolved_filter_index = args.filter_index
+    selected_latent_row: Optional[Dict[str, Any]] = None
+
+    if args.feature_importance_csv is not None and args.latent_rank is not None:
+        df = pd.read_csv(args.feature_importance_csv)
+
+        required_cols = {"group", "latent_channel_idx", "rank_global"}
+        missing = required_cols - set(df.columns)
+        if missing:
+            raise ValueError(
+                f"feature_importance_csv is missing required columns: {missing}"
+            )
+
+        df_latent = df[df["group"] == "latent"].copy()
+        row = df_latent[df_latent["rank_global"] == args.latent_rank]
+        if row.empty:
+            raise ValueError(
+                f"No latent feature with rank_global == {args.latent_rank} "
+                f"in {args.feature_importance_csv}"
+            )
+        row = row.iloc[0]
+        resolved_filter_index = int(row["latent_channel_idx"])
+        selected_latent_row = {
+            "feature_name": row.get("feature_name", None),
+            "group": row.get("group", None),
+            "importance": float(row.get("importance", np.nan)),
+            "rank_global": int(row.get("rank_global", -1)),
+            "latent_channel_idx": resolved_filter_index,
+        }
+        logger.info(
+            "Using latent feature from CSV: "
+            f"feature_name='{selected_latent_row['feature_name']}', "
+            f"group='{selected_latent_row['group']}', "
+            f"importance={selected_latent_row['importance']:.4f}, "
+            f"rank_global={selected_latent_row['rank_global']}, "
+            f"latent_channel_idx={resolved_filter_index}"
+        )
+
+    if resolved_filter_index is None:
+        logger.warning(
+            "No filter_index provided and no latent_rank/feature_importance_csv set. "
+            "DeepDream will optimize all channels jointly (activation norm)."
+        )
+
     # Initialize and run DeepDream
     deep_dream = DeepDreamBraTS(model, meta)
     dreamed_tensor = deep_dream.run_deep_dream(
@@ -731,17 +753,14 @@ if __name__ == "__main__":
         target_idx=args.target_idx,
         iterations=args.iterations,
         step_size=args.step_size,
-        filter_index=args.filter_index,
+        filter_index=resolved_filter_index,
         octave_scale=args.octave_scale,
         num_octaves=args.num_octaves,
     )
 
     # Save DeepDream as NIfTI, preserving geometry
-    # dreamed_tensor: (1, C, Z, Y, X)
     dreamed_np = dreamed_tensor.detach().cpu().numpy()[0]  # (C, Z, Y, X)
     dd_zyxc = dreamed_np.transpose(1, 2, 3, 0)  # (Z, Y, X, C)
-
-    import nibabel as nib
 
     props = data_meta.get("properties", {})
     affine = props.get("original_affine", np.eye(4))
@@ -760,8 +779,8 @@ if __name__ == "__main__":
         save_path=viz_path,
     )
 
-    # Save parameters
-    params = {
+    # Save parameters and latent feature metadata
+    params: Dict[str, Any] = {
         "case_id": args.case_id,
         "model_dir": str(args.model_dir),
         "fold": args.fold,
@@ -769,11 +788,16 @@ if __name__ == "__main__":
         "target_idx": args.target_idx,
         "iterations": args.iterations,
         "step_size": args.step_size,
-        "filter_index": args.filter_index,
+        "filter_index": resolved_filter_index,
         "num_octaves": args.num_octaves,
         "octave_scale": args.octave_scale,
         "input_shape": list(input_tensor.shape),
         "output_shape": list(dreamed_tensor.shape),
+        "feature_importance_csv": (
+            str(args.feature_importance_csv) if args.feature_importance_csv else None
+        ),
+        "latent_rank": args.latent_rank,
+        "selected_latent_feature": selected_latent_row,
     }
     params_path = output_dir / f"{args.case_id}_params.json"
     with open(params_path, "w") as f:
