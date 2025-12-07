@@ -47,6 +47,7 @@ def load_nnunet_preprocessed_case(
     vol_t, props = load_volume(
         preprocessed_dir, case_id
     )  # returns torch tensor normalized like training
+    logger.info(f"Loaded preprocessed case {case_id}: shape {vol_t.shape}")
     vol_t = vol_t.to(device)
 
     metadata = {
