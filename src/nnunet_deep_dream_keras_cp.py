@@ -259,7 +259,7 @@ def _visualize_multiple_slices(
 
         ax = axes[r0, c]
         ax.imshow(orig, cmap="gray", aspect="equal")
-        ax.set_title(f"Original MRI Slice {sidx})")
+        ax.set_title(f"Original MRI Slice {sidx}")
         ax.axis("off")
 
         ax = axes[r1, c]
