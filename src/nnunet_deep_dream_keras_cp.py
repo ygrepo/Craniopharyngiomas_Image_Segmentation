@@ -206,7 +206,9 @@ def _visualize_multiple_slices(
         return e
 
     max_slice = orig_np.shape[0] - 1
+    logger.info(f"max_slice = {max_slice}")
     valid_slices = [s for s in slice_indices if 0 <= s <= max_slice]
+    logger.info(f"valid_slices = {valid_slices}")
     if not valid_slices:
         print(
             f"No valid slice indices. Volume has {orig_np.shape[0]} slices (0-{max_slice})"
@@ -257,18 +259,18 @@ def _visualize_multiple_slices(
 
         ax = axes[r0, c]
         ax.imshow(orig, cmap="gray", aspect="equal")
-        ax.set_title(f"Original (Slice {sidx})")
+        ax.set_title(f"Original MRI Slice {sidx})")
         ax.axis("off")
 
         ax = axes[r1, c]
         e = edges_all[i]
         ax.imshow(e, cmap="gist_gray", vmin=edge_vmin, vmax=edge_vmax, aspect="equal")
-        ax.set_title(f"Edges (Slice {sidx})")
+        ax.set_title(f"Feature-Activation Map Slice {sidx}")
         ax.axis("off")
 
         ax = axes[r2, c]
         im = ax.imshow(diff, cmap="jet", vmin=vmin, vmax=vmax, aspect="equal")
-        ax.set_title(f"Difference (Slice {sidx})")
+        ax.set_title(f"Difference Map Slice {sidx}")
         ax.axis("off")
 
     total_used = num_slices * 3
