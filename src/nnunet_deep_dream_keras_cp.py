@@ -222,10 +222,10 @@ def _visualize_multiple_slices(
     fig, axes = plt.subplots(
         rows * 3,
         cols,
-        figsize=(cols * 5.2, rows * 11.5),
+        figsize=(cols * 5.2, rows * 16),
         sharex="col",
         sharey="col",
-        constrained_layout=True,
+        # constrained_layout=True,
     )
 
     if rows * 3 == 1 and cols == 1:
@@ -277,6 +277,7 @@ def _visualize_multiple_slices(
         cc = flat_idx % cols
         axes[rr, cc].axis("off")
 
+    plt.tight_layout()
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.show()
