@@ -3,6 +3,7 @@ data/
 doc/literature
 doc/HPC
 doc/Meetings
+doc/large_files
 checkpoints/
 logs/
 output/
